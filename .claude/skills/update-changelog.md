@@ -18,7 +18,7 @@ Use this skill when a feature has shipped, a bug has been fixed, or a feature ha
    - **Minor** (0.x.0 → 0.x+1.0): new features or meaningful enhancements
    - **Major** (x.0.0 → x+1.0.0): breaking changes or significant redesigns (rare)
 
-5. Write a new entry **above** the previous version, using today's date and the bumped version:
+5. Check the `## [Unreleased]` section — if it has content, include those items in the new version entry (move them, don't duplicate). Then write the new entry **above** the previous version, using today's date and the bumped version:
 
    ```markdown
    ## [0.2.0] - YYYY-MM-DD
@@ -38,12 +38,12 @@ Use this skill when a feature has shipped, a bug has been fixed, or a feature ha
 
    Only include sections that apply. Skip empty sections.
 
-6. Update `docs/HANDBOOK.md` if the change affects feature descriptions or known limitations (use the `update-handbook` skill or do it inline).
+6. If the change adds, removes, or meaningfully changes a user-facing feature, also run the `update-handbook` skill after committing the changelog.
 
 7. Commit:
    ```bash
    git add CHANGELOG.md
-   git commit -m "chore: changelog v0.x.y"
+   git commit -m "chore: changelog v0.2.0"  # use the actual new version number
    ```
 
 ## Versioning rules
