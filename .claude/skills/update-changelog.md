@@ -38,7 +38,7 @@ Use this skill when a feature has shipped, a bug has been fixed, or a feature ha
 
    Only include sections that apply. Skip empty sections.
 
-6. If the change adds, removes, or meaningfully changes a user-facing feature, also run the `update-handbook` skill after committing the changelog.
+6. If the change adds, removes, or meaningfully changes a user-facing feature, also run the `update-handbook` skill and the `update-brochure` skill after committing the changelog.
 
 7. Commit:
    ```bash
