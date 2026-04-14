@@ -17,23 +17,11 @@ jobs:
       - name: Install client deps
         run: cd client && npm ci
 
-      - name: Run client tests with coverage
-        run: cd client && npm run test:coverage
-
-      - name: Upload client coverage report
-        uses: actions/upload-artifact@v3
-        with:
-          name: client-coverage
-          path: client/coverage/
+      - name: Run client tests
+        run: cd client && npm test
 
       - name: Install server deps
         run: cd server && npm ci
 
-      - name: Run server tests with coverage
-        run: cd server && npm run test:coverage
-
-      - name: Upload server coverage report
-        uses: actions/upload-artifact@v3
-        with:
-          name: server-coverage
-          path: server/coverage/
+      - name: Run server tests
+        run: cd server && npm test
