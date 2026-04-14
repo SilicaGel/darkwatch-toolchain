@@ -4,9 +4,6 @@ on:
   push:
   pull_request:
 
-permissions:
-  pull-requests: write
-
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -23,10 +20,11 @@ jobs:
       - name: Run client tests with coverage
         run: cd client && npm run test:coverage
 
-      - name: Post client coverage comment
-        uses: davelosert/vitest-coverage-report-action@v2
+      - name: Upload client coverage report
+        uses: actions/upload-artifact@v4
         with:
-          working-directory: client
+          name: client-coverage
+          path: client/coverage/
 
       - name: Install server deps
         run: cd server && npm ci
@@ -34,7 +32,8 @@ jobs:
       - name: Run server tests with coverage
         run: cd server && npm run test:coverage
 
-      - name: Post server coverage comment
-        uses: davelosert/vitest-coverage-report-action@v2
+      - name: Upload server coverage report
+        uses: actions/upload-artifact@v4
         with:
-          working-directory: server
+          name: server-coverage
+          path: server/coverage/
