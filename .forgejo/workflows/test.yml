@@ -1,0 +1,40 @@
+name: Tests
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  pull-requests: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install client deps
+        run: cd client && npm ci
+
+      - name: Run client tests with coverage
+        run: cd client && npm run test:coverage
+
+      - name: Post client coverage comment
+        uses: davelosert/vitest-coverage-report-action@v2
+        with:
+          working-directory: client
+
+      - name: Install server deps
+        run: cd server && npm ci
+
+      - name: Run server tests with coverage
+        run: cd server && npm run test:coverage
+
+      - name: Post server coverage comment
+        uses: davelosert/vitest-coverage-report-action@v2
+        with:
+          working-directory: server
