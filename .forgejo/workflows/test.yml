@@ -21,7 +21,7 @@ jobs:
         run: cd client && npm run test:coverage
 
       - name: Upload client coverage report
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v3
         with:
           name: client-coverage
           path: client/coverage/
@@ -33,7 +33,7 @@ jobs:
         run: cd server && npm run test:coverage
 
       - name: Upload server coverage report
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v3
         with:
           name: server-coverage
           path: server/coverage/
