@@ -6,13 +6,18 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+  pull-requests: write
+
 jobs:
-  test:
+  build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
         with:
           node-version: '20'
 
@@ -34,7 +39,38 @@ jobs:
       - name: Test client
         run: cd client && npm run test:coverage
 
-      - name: Install Docker Compose
+      - name: Report server coverage
+        uses: https://github.com/davelosert/vitest-coverage-report-action@v2
+        if: always()
+        with:
+          name: Server
+          json-summary-path: server/coverage/coverage-summary.json
+          json-final-path: server/coverage/coverage-final.json
+
+      - name: Report client coverage
+        uses: https://github.com/davelosert/vitest-coverage-report-action@v2
+        if: always()
+        with:
+          name: Client
+          json-summary-path: client/coverage/coverage-summary.json
+          json-final-path: client/coverage/coverage-final.json
+
+      - name: Generate coverage badge endpoints
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        run: |
+          node -e "
+            const fs = require('fs');
+            function badge(label, summaryPath, outPath) {
+              const s = JSON.parse(fs.readFileSync(summaryPath));
+              const pct = s.total.lines.pct;
+              const color = pct >= 80 ? 'brightgreen' : pct >= 60 ? 'yellow' : pct >= 40 ? 'orange' : 'red';
+              fs.writeFileSync(outPath, JSON.stringify({ schemaVersion: 1, label, message: pct + '%', color }));
+            }
+            badge('server coverage', './server/coverage/coverage-summary.json', '/var/www/brochure/server-coverage.json');
+            badge('client coverage', './client/coverage/coverage-summary.json', '/var/www/brochure/client-coverage.json');
+          "
+
+      - name: Install Docker CLI
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         run: |
           apt-get update -qq && apt-get install -y -qq docker.io curl
@@ -49,6 +85,17 @@ jobs:
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         run: cp -r client/dist/. /var/www/darkwatch/
 
+      - name: Copy brochure to webroot
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        run: |
+          mkdir -p /var/www/brochure
+          cp site/style.css site/main.js /var/www/brochure/
+          cp -r site/assets /var/www/brochure/
+          # Bust browser cache for screenshot PNGs by appending the commit hash
+          # to every .png reference in the HTML — ensures deploys show fresh images.
+          HASH=$(git rev-parse --short HEAD)
+          sed "s/\.png\"/\.png?v=${HASH}\"/g" site/index.html > /var/www/brochure/index.html
+
       - name: Deploy server container
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         env:
@@ -59,4 +106,5 @@ jobs:
           JWT_SECRET: ${{ secrets.JWT_SECRET }}
           CLIENT_URL: ${{ secrets.CLIENT_URL }}
         run: |
-          docker-compose -f /home/ci/services/darkwatch/docker-compose.yml up -d --force-recreate
+          docker rm -f darkwatch-server 2>/dev/null || true
+          docker-compose -f /home/ci/services/darkwatch/docker-compose.yml up -d --remove-orphans
