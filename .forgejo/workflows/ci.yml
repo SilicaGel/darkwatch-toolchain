@@ -13,6 +13,19 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    services:
+      mariadb:
+        image: mariadb:11
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: darkwatch
+          MYSQL_USER: darkwatch
+          MYSQL_PASSWORD: darkwatch_dev
+        options: >-
+          --health-cmd="mariadb-admin ping -u root -proot --silent"
+          --health-interval=2s
+          --health-timeout=5s
+          --health-retries=30
     steps:
       - uses: actions/checkout@v4
 
@@ -54,6 +67,59 @@ jobs:
           name: Client
           json-summary-path: client/coverage/coverage-summary.json
           json-final-path: client/coverage/coverage-final.json
+
+      - name: Wait for MariaDB
+        run: |
+          for i in $(seq 1 30); do
+            (echo > /dev/tcp/mariadb/3306) 2>/dev/null && echo "MariaDB is ready" && break
+            echo "Waiting for MariaDB... ($i/30)"
+            sleep 2
+            [ "$i" -eq 30 ] && echo "MariaDB never became ready" && exit 1
+          done
+
+      - name: Start E2E app server
+        env:
+          PORT: "3001"
+          DB_HOST: mariadb
+          DB_PORT: "3306"
+          DB_USER: darkwatch
+          DB_PASSWORD: darkwatch_dev
+          DB_NAME: darkwatch
+          NODE_ENV: test
+          ALLOW_TEST_HOOKS: "true"
+          JWT_SECRET: e2e-test-secret
+          CLIENT_URL: http://localhost:5173
+        run: |
+          node server/dist/index.js &
+          # Wait for server on port 3001 — accept 200 or 401, reject 5xx/no-response
+          for i in $(seq 1 30); do
+            status=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:3001/api/auth/me 2>/dev/null || true)
+            echo "$status" | grep -qE '^(200|401)$' && break || true
+            echo "Waiting for app server... ($i/30) [got: $status]"
+            sleep 2
+            [ "$i" -eq 30 ] && echo "App server never became ready" && exit 1
+          done
+
+      - name: Start Vite preview server
+        env:
+          API_PROXY_URL: "http://localhost:3001"
+        run: |
+          cd client && npx vite preview &
+          # Wait for Vite on port 5173
+          for i in $(seq 1 30); do
+            curl -s -o /dev/null http://localhost:5173 && break || true
+            echo "Waiting for Vite... ($i/30)"
+            sleep 2
+            [ "$i" -eq 30 ] && echo "Vite preview server never became ready" && exit 1
+          done
+
+      - name: Install Playwright and browsers
+        run: cd tests && npm ci && npx playwright install chromium --with-deps
+
+      - name: Run Playwright E2E tests
+        env:
+          E2E_SERVER_URL: "http://localhost:3001"
+        run: cd tests && npx playwright test --reporter=line
 
       - name: Generate coverage badge endpoints
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
