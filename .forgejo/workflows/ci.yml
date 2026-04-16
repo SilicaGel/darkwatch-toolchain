@@ -124,12 +124,6 @@ jobs:
             [ "$i" -eq 30 ] && echo "Vite preview server never became ready" && exit 1
           done
 
-      - name: Cache Playwright browsers
-        uses: actions/cache@v3
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ hashFiles('tests/package-lock.json') }}
-
       - name: Install Playwright and browsers
         run: cd tests && npm ci && npx playwright install chromium --with-deps
 
@@ -144,18 +138,27 @@ jobs:
         run: cd tests && npx playwright test e2e/stabilize-ownership.spec.ts --reporter=line
 
       # Restart Vite to clear accumulated memory before the core test suite.
+      # Must wait for port 5173 to go dark before starting the new process —
+      # if the old Vite is still dying when we start the new one, the new
+      # process fails to bind the port silently and the curl readiness check
+      # passes on the still-running old (exhausted) Vite.
       - name: Restart Vite preview (clear memory between E2E batches)
         env:
           API_PROXY_URL: "http://localhost:3001"
           NODE_OPTIONS: "--max-old-space-size=512"
         run: |
-          kill $(cat /tmp/vite.pid) 2>/dev/null || true
-          sleep 2
+          kill $(cat /tmp/vite.pid) 2>/dev/null || pkill -f "vite preview" || true
+          # Wait for port 5173 to stop responding
+          for i in $(seq 1 15); do
+            curl -s -o /dev/null http://localhost:5173 || break
+            echo "Waiting for old Vite to stop... ($i/15)"
+            sleep 1
+          done
           cd client && npx vite preview &
           echo $! > /tmp/vite.pid
           for i in $(seq 1 30); do
             curl -s -o /dev/null http://localhost:5173 && break || true
-            echo "Waiting for Vite... ($i/30)"
+            echo "Waiting for new Vite... ($i/30)"
             sleep 2
             [ "$i" -eq 30 ] && echo "Vite never came back up" && exit 1
           done
