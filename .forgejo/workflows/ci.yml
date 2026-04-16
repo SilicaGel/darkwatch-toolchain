@@ -92,7 +92,7 @@ jobs:
           # Cap Node.js heap on Pi4 CI — Express server has no natural limit
           # and can grow to 1.5 GB under default V8 settings, crowding out
           # Vite and Chromium during the E2E phase.
-          NODE_OPTIONS: "--max-old-space-size=512"
+          NODE_OPTIONS: "--max-old-space-size=256"
         run: |
           node server/dist/index.js &
           # Wait for server on port 3001 — accept 200 or 401, reject 5xx/no-response
@@ -109,7 +109,9 @@ jobs:
           API_PROXY_URL: "http://localhost:3001"
           # Cap Node.js heap on Pi4 CI — Vite accumulates memory across test
           # contexts and gets OOM-killed mid-suite without this guard.
-          NODE_OPTIONS: "--max-old-space-size=1024"
+          # 512 MB is sufficient for static-file preview serving; the previous
+          # 1024 MB ceiling left too little RAM for Chromium on a 4 GB Pi4.
+          NODE_OPTIONS: "--max-old-space-size=512"
         run: |
           cd client && npx vite preview &
           # Wait for Vite on port 5173
