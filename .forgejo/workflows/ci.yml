@@ -163,11 +163,56 @@ jobs:
             [ "$i" -eq 30 ] && echo "Vite never came back up" && exit 1
           done
 
-      - name: Run Playwright E2E tests
+      # Batch 1: 16 core tests. rest-button and spell-exhaustion are intentionally
+      # held back — they run after a second Vite restart. Without the split, Vite
+      # is OOM-killed by the kernel ~test 17 on the Pi4's 4 GB RAM.
+      - name: Run Playwright E2E tests (batch 1)
         env:
           E2E_SERVER_URL: "http://localhost:3001"
           E2E_SKIP_STABILIZE: "true"
-        run: cd tests && npx playwright test --reporter=line
+        run: |
+          cd tests && npx playwright test \
+            e2e/condition-expiry.spec.ts \
+            e2e/creature-gallery.spec.ts \
+            e2e/crit-banner.spec.ts \
+            e2e/dashboard.spec.ts \
+            e2e/death-recovery.spec.ts \
+            e2e/death-timer.spec.ts \
+            e2e/level-up.spec.ts \
+            --reporter=line
+
+      # Second Vite restart: clears heap accumulated across 16 Chromium contexts
+      # before the spell tests, which are the most memory-intensive.
+      - name: Restart Vite preview (batch 2 memory reset)
+        env:
+          API_PROXY_URL: "http://localhost:3001"
+          NODE_OPTIONS: "--max-old-space-size=512"
+        run: |
+          kill $(cat /tmp/vite.pid) 2>/dev/null || pkill -f "vite preview" || true
+          for i in $(seq 1 15); do
+            curl -s -o /dev/null http://localhost:5173 || break
+            echo "Waiting for old Vite to stop... ($i/15)"
+            sleep 1
+          done
+          cd client && npx vite preview &
+          echo $! > /tmp/vite.pid
+          for i in $(seq 1 30); do
+            curl -s -o /dev/null http://localhost:5173 && break || true
+            echo "Waiting for new Vite... ($i/30)"
+            sleep 2
+            [ "$i" -eq 30 ] && echo "Vite never came back up" && exit 1
+          done
+
+      # Batch 2: spell / rest tests that need a fresh Vite instance.
+      - name: Run Playwright E2E tests (batch 2)
+        env:
+          E2E_SERVER_URL: "http://localhost:3001"
+          E2E_SKIP_STABILIZE: "true"
+        run: |
+          cd tests && npx playwright test \
+            e2e/rest-button.spec.ts \
+            e2e/spell-exhaustion.spec.ts \
+            --reporter=line
 
       - name: Generate coverage badge endpoints
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
