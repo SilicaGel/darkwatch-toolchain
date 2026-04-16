@@ -103,6 +103,9 @@ jobs:
       - name: Start Vite preview server
         env:
           API_PROXY_URL: "http://localhost:3001"
+          # Cap Node.js heap on Pi4 CI — Vite accumulates memory across test
+          # contexts and gets OOM-killed mid-suite without this guard.
+          NODE_OPTIONS: "--max-old-space-size=512"
         run: |
           cd client && npx vite preview &
           # Wait for Vite on port 5173
