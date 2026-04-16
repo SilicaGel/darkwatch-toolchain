@@ -113,6 +113,12 @@ jobs:
             [ "$i" -eq 30 ] && echo "Vite preview server never became ready" && exit 1
           done
 
+      - name: Cache Playwright browsers
+        uses: actions/cache@v3
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ hashFiles('tests/package-lock.json') }}
+
       - name: Install Playwright and browsers
         run: cd tests && npm ci && npx playwright install chromium --with-deps
 
