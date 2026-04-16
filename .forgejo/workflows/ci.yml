@@ -89,6 +89,10 @@ jobs:
           ALLOW_TEST_HOOKS: "true"
           JWT_SECRET: e2e-test-secret
           CLIENT_URL: http://localhost:5173
+          # Cap Node.js heap on Pi4 CI — Express server has no natural limit
+          # and can grow to 1.5 GB under default V8 settings, crowding out
+          # Vite and Chromium during the E2E phase.
+          NODE_OPTIONS: "--max-old-space-size=256"
         run: |
           node server/dist/index.js &
           # Wait for server on port 3001 — accept 200 or 401, reject 5xx/no-response
