@@ -5,11 +5,11 @@ description: Use when a feature has shipped, a bug has been fixed, or a feature 
 
 # update-changelog
 
-Use this skill when a feature has shipped, a bug has been fixed, or a feature has been removed. It updates CHANGELOG.md with a new versioned entry.
+Use this skill when a feature has shipped, a bug has been fixed, or a feature has been removed. It updates `docs/CHANGELOG.md` with a new versioned entry.
 
 ## Process
 
-1. Read `CHANGELOG.md` — find the current latest version number (top `## [x.y.z]` entry)
+1. Read `docs/CHANGELOG.md` — find the current latest version number (top `## [x.y.z]` entry)
 
 2. Check recent git history for context on what changed:
    ```bash
@@ -23,7 +23,7 @@ Use this skill when a feature has shipped, a bug has been fixed, or a feature ha
    - **Minor** (0.x.0 → 0.x+1.0): new features or meaningful enhancements
    - **Major** (x.0.0 → x+1.0.0): breaking changes or significant redesigns (rare)
 
-5. Check the `## [Unreleased]` section — if it has content, include those items in the new version entry (move them, don't duplicate). Then write the new entry **above** the previous version, using today's date and the bumped version:
+5. Check the `## [Unreleased]` section — if it has content, include those items in the new version entry (move them, don't duplicate). Write the new entry **above** the previous version, using today's date and the bumped version:
 
    ```markdown
    ## [0.2.0] - YYYY-MM-DD
@@ -43,11 +43,9 @@ Use this skill when a feature has shipped, a bug has been fixed, or a feature ha
 
    Only include sections that apply. Skip empty sections.
 
-6. If the change adds, removes, or meaningfully changes a user-facing feature, also run the `update-handbook` skill and the `update-brochure` skill after committing the changelog.
-
-7. Commit:
+6. Commit (skip this step if being called from the `ship` skill — ship handles the coordinated commit):
    ```bash
-   git add CHANGELOG.md
+   git add docs/CHANGELOG.md
    git commit -m "chore: changelog v0.2.0"  # use the actual new version number
    ```
 

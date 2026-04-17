@@ -11,10 +11,10 @@ Use this skill when a feature has been added, changed, or removed and the handbo
 
 1. Read `docs/HANDBOOK.md` in full.
 
-2. Identify what changed. Ask the user, or review recent git commits and CHANGELOG.md:
+2. Identify what changed. Ask the user, or review recent git commits and changelog:
    ```bash
    git log --oneline -10
-   cat CHANGELOG.md | head -40
+   head -40 docs/CHANGELOG.md
    ```
 
 3. Determine which sections need updating:
@@ -25,11 +25,13 @@ Use this skill when a feature has been added, changed, or removed and the handbo
    - Stack change → update the **Stack** table in Part 2
    - New workflow step → update **Development workflow** in Part 2
 
+   If no section obviously matches, add the content where it fits most naturally or create a new subsection — don't skip documenting it just because the structure isn't perfect.
+
 4. Make only the necessary edits. Don't rewrite sections that aren't affected.
 
 5. Update the `Last updated` date at the top of the file to today's date.
 
-6. Commit:
+6. Commit (skip this step if being called from the `ship` skill — ship handles the coordinated commit):
    ```bash
    git add docs/HANDBOOK.md
    git commit -m "docs: update handbook for [feature name]"

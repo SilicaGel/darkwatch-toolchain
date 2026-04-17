@@ -7,6 +7,16 @@ description: Use when a user-facing feature is added, changed, or removed, or a 
 
 Use this skill when a Darkwatch feature is added, changed, or removed, and the brochure needs updating. It keeps `site/index.html` and `site/screenshots.js` in sync with the app.
 
+## Brochure purpose
+
+This is a **comprehensive internal showcase** — every feature gets its own row with real screenshots. It is intentionally verbose and information-dense. The goal is to show everything the app can do, so Aaron and collaborators can see the full picture and decide what to highlight in a future public version.
+
+This means:
+- Every feature gets a row — don't consolidate or skip
+- Descriptions can be thorough; explain the feature fully, not just tease it
+- Both desktop and mobile screenshots are captured for each feature
+- Multiple themes are used across captures for visual variety
+
 ## Scope
 
 - `site/index.html` — add, update, or remove feature rows
@@ -15,9 +25,11 @@ Use this skill when a Darkwatch feature is added, changed, or removed, and the b
 
 **Not in scope:** Hero copy, publisher section copy, footer links. Those are editorial and manual.
 
+---
+
 ## Step 0: Audit what changed (run first)
 
-Before picking a process, figure out what actually changed in this branch. The goal is to produce a short plan — **what rows to add, refresh, or remove** — and confirm it with the user before running any screenshot captures.
+Before picking a process, figure out what actually changed in this branch. Produce a short plan — **what rows to add, refresh, or remove** — and confirm it with the user before running any screenshot captures.
 
 ### A. Diff the client and the changelog
 
@@ -25,7 +37,7 @@ Before picking a process, figure out what actually changed in this branch. The g
 # Every client path touched in this branch
 git diff main...HEAD --stat -- client/
 
-# What the branch's new changelog entry says (read top `## <date> — v<version>` block)
+# What the branch's new changelog entry says
 git diff main...HEAD -- docs/CHANGELOG.md | sed -n 's/^+//p' | head -40
 ```
 
@@ -52,174 +64,301 @@ The authoritative list of existing captures lives in `site/screenshots.js` (`run
 
 ### C. Use the changelog entry as a second signal
 
-In the branch's new changelog block:
-
-- `### New Features` entries → almost always need a new `.feature-row`
-- `### Changed` / `### UX Polish` → likely need refreshed screenshots and possibly copy updates on existing rows
-- `### Removed` → delete the corresponding row + capture + PNG
-- `### Tech` / `### Performance` / `### Security` → usually **skip** (backend/infra, not user-visible on the brochure)
+- `### Added` / `### New Features` → almost always need a new `.feature-row`
+- `### Changed` / `### UX Polish` → likely need refreshed screenshots and possibly copy updates
+- `### Removed` → delete the corresponding row + capture + PNGs
+- `### Tech` / `### Performance` / `### Security` → usually **skip** (backend-only)
 
 ### D. Write the plan and confirm
 
 Produce a short list like:
 
-> - New row: **creature-gallery** (feature added — no existing capture; add row + capture fn + screenshot)
-> - Refresh: **dm-cards**, **conditions** (CharacterCard layout changed; monster-condition badges added)
+> - New row: **creature-gallery** (feature added — no existing capture)
+> - Refresh: **dm-cards**, **conditions** (CharacterCard layout changed)
 > - Copy update: **spellcasting** headline (changelog mentions new mishap logic)
-> - Skip: performance/schema changes in this PR are backend-only
+> - Skip: performance/schema changes are backend-only
 
-Confirm with the user before running `node screenshots.js`. Then do the pre-flight below and proceed to the process(es) that follow.
+Confirm with the user before running `node screenshots.js`.
 
 ### E. Pre-flight before running captures
 
-Captures can silently fail or — worse — capture the wrong branch if the environment isn't right. Before running the screenshot script, verify:
-
-1. **`site/node_modules/` exists.** A fresh worktree won't have Playwright installed:
+1. **`site/node_modules/` exists:**
    ```bash
    ls site/node_modules/playwright 2>/dev/null || (cd site && npm install)
    ```
 
-2. **A dev server is serving the *current* worktree.** A Vite running on `:5173` from `main` will render without the branch's new features, so any screenshot taken will be wrong. Check:
+2. **Dev server is serving the current worktree:**
    ```bash
-   # Find the PID listening on 5173 (or whichever port you expect)
    PID=$(lsof -ti :5173 -sTCP:LISTEN)
-   # Confirm its cwd matches the current worktree path
    lsof -p "$PID" | awk '$4=="cwd"{print $NF}'
    ```
-
-   If the cwd doesn't match: ask the user to start a worktree Vite on a free port, e.g.
+   If the cwd doesn't match, ask the user to start a worktree Vite on a free port:
    ```bash
    cd client && VITE_PORT=5174 npm run dev
-   ```
-   Then run the capture with `VITE_URL` pointing at it:
-   ```bash
+   # Then run captures with:
    VITE_URL=http://localhost:5174 node screenshots.js --only <name>
    ```
 
-   (`site/screenshots.js` reads `VITE_URL` from env, defaulting to `http://localhost:5173`.)
+3. **Seed data exists.** Captures reference "Tomb of the Serpent King" and the `dm@darkwatch.test` / `player@darkwatch.test` accounts.
 
-3. **Seed data exists.** Captures reference the seeded campaign "Tomb of the Serpent King" and the `dm@darkwatch.test` / `player@darkwatch.test` accounts. If the DB was wiped, re-seed first.
-
-4. **After each capture, verify the PNG** — confirm the file was written and is non-empty:
+4. **After each capture, verify the PNGs:**
    ```bash
-   test -s site/assets/screenshots/<name>.png && echo "ok" || echo "MISSING OR EMPTY"
+   test -s site/assets/screenshots/<name>-desktop.png && echo "desktop ok" || echo "MISSING"
+   test -s site/assets/screenshots/<name>-mobile.png  && echo "mobile ok"  || echo "MISSING"
    ```
 
-Only move on to the process(es) below once all four checks pass.
+---
+
+## Screenshot framing guide
+
+### Capture the destination, not the trigger
+
+Screenshots should show what the user **sees after** an interaction, not the button or state that starts it. A level-up screenshot should show the level-up modal with the HP result visible, not the "Level Up!" button on the card. A character access screenshot should show the open sheet, not the card grid that opens it.
+
+### Desktop and mobile should show their respective behaviors
+
+If a feature behaves differently on desktop vs mobile, use each screenshot to show the behavior for that form factor. A DM character access feature should show the full sheet overlay on desktop and the quick-inspect bottom sheet on mobile — not the same card grid view in two sizes.
+
+### Locating modals: use text content, not hashed class names
+
+CSS Modules generate hashed class names like `_modal_XXXXX`. `[class*="modal"]` will match any component that has a `.modal` CSS class — often the wrong one. Prefer text-based locators that are unique to the specific component:
+
+```javascript
+// Bad: matches any component with a .modal class
+const modal = page.locator('[class*="modal"]').first();
+
+// Good: find LevelUpModal by its unique "reaches Level N" text
+const modal = page.locator('div')
+  .filter({ hasText: /reaches Level \d/ })
+  .filter({ hasText: 'Level Up!' })
+  .last(); // deepest matching div = the modal container, not the backdrop
+```
+
+Every capture function should make a deliberate choice about framing based on what the feature *is*:
+
+### Full viewport
+Use for features that are the whole screen — the campaign view, atmosphere effects, initiative tracker, conditions grid. Don't pass a clip; let the full 1280×800 (desktop) or 390×844 (mobile) speak for itself.
+
+### Modal close-up
+Use for features that appear as a modal/dialog floating over a dimmed background — character sheet, level-up, character creation. The modal should fill roughly 90% of the frame, with enough dimmed background visible to read it as a modal.
+
+Get the bounding box and add a comfortable margin (use text-based locators to find the right element — see "Locating modals" above):
+```javascript
+const modal = page.locator('div').filter({ hasText: 'unique modal text' }).last();
+const box = await modal.boundingBox().catch(() => null);
+const margin = 40;
+return {
+  x: Math.max(0, box.x - margin),
+  y: Math.max(0, box.y - margin),
+  width:  Math.min(viewportWidth,  box.width  + margin * 2),
+  height: Math.min(viewportHeight, box.height + margin * 2),
+};
+```
+
+On mobile the modal may be full-width — in that case the clip is optional; a full viewport shot is fine.
+
+### Panel crop
+Use for features that live in a side panel or a section of the screen — the GM Tools panel, creature gallery, a card grid. Return a clip that excludes unrelated UI (e.g., strip the top nav bar off the card grid).
+
+### Mobile is always full viewport
+**Never return a clip when `viewport === 'mobile'`.** The portrait orientation makes it immediately obvious it's mobile — no cropping needed or wanted. All framing decisions (clip vs full viewport) apply to desktop only. The pattern in every capture function:
+
+```javascript
+if (viewport === 'desktop') {
+  return { x: ..., y: ..., width: ..., height: ... }; // desktop crop
+}
+// mobile: fall through with no return → full viewport
+```
+
+---
+
+## Theme assignment
+
+**Never hardcode theme names in capture functions.** The available themes are discovered at runtime from the source:
+
+```javascript
+// Already in screenshots.js — THEMES is populated by getThemeIds()
+// which reads client/src/components/ThemeToggle.tsx
+```
+
+When writing or refreshing captures, assign themes by index so they distribute evenly across all captures and automatically pick up new themes as they're added:
+
+```javascript
+// In run(), pass the theme index to each capture or apply before calling
+await applyTheme(page, THEMES[0 % THEMES.length]); // first capture
+await applyTheme(page, THEMES[1 % THEMES.length]); // second capture
+// etc.
+```
+
+When doing a full refresh of all captures, redistribute so each theme appears roughly the same number of times.
+
+---
+
+## Dual-viewport captures
+
+Every feature gets **both** a desktop (1280×800) and mobile (390×844) screenshot. Use `shotBoth()` instead of `shot()`:
+
+```javascript
+// In screenshots.js run():
+await shotBoth(page, 'feature-name', captureFeatureName);
+// Produces: feature-name-desktop.png, feature-name-mobile.png
+```
+
+The capture function receives the viewport suffix as a second argument, so it can adjust framing if needed (modals on mobile are often full-width and don't need a clip):
+
+```javascript
+async function captureFeatureName(page, viewport) {
+  // set up state...
+  if (viewport === 'desktop') {
+    // return clip for modal close-up
+    const box = await page.locator('[role="dialog"]').first().boundingBox();
+    return { x: box.x - 40, y: box.y - 40, width: box.width + 80, height: box.height + 80 };
+  }
+  // mobile: full viewport is fine
+}
+```
+
+**Existing captures** use `shot()` with the old single-viewport pattern. Migrate them to `shotBoth()` during the next full audit run.
+
+---
 
 ## Process: Feature added
 
-1. Add a new `.feature-row` block to `site/index.html` after the last existing feature row (before the `.callout-row`). Follow the alternating pattern:
-   - Rows 1, 3, 5, 7 (odd positions): screenshot on the left, text on the right (no `reverse` class)
-   - Rows 2, 4, 6 (even positions): `class="feature-row reverse"` (screenshot right, text left)
-   - Count existing rows to determine whether to add `reverse` or not
+1. Add a new `.feature-row` block to `site/index.html` after the last existing feature row (before the `.callout-row`). Follow the alternating `reverse` pattern (odd rows: image left; even rows: `reverse` class, image right). Each row shows both viewport variants:
 
-   Template for a new row:
    ```html
    <div class="feature-row">
-     <div class="feature-image">
-       <img src="assets/screenshots/FEATURE-NAME.png" alt="Description of screenshot">
+     <div class="feature-images">
+       <div class="feature-image-desktop">
+         <a href="assets/screenshots/FEATURE-NAME-desktop.png" target="_blank">
+           <img src="assets/screenshots/FEATURE-NAME-desktop.png" alt="Desktop: description">
+         </a>
+       </div>
+       <div class="feature-image-mobile">
+         <a href="assets/screenshots/FEATURE-NAME-mobile.png" target="_blank">
+           <img src="assets/screenshots/FEATURE-NAME-mobile.png" alt="Mobile: description">
+         </a>
+       </div>
      </div>
      <div class="feature-text">
        <div class="feature-label">Short Label</div>
        <h2 class="feature-heading">Punchy headline.</h2>
        <p class="feature-desc">
-         Two sentences. Write for players and DMs, not developers.
+         Explain what this feature does for the player or DM. Be thorough — multiple
+         sentences are fine. Cover the main use case, any key details, and why it matters.
        </p>
      </div>
    </div>
    ```
 
-2. Add a capture block to `site/screenshots.js`:
-   - Write a `captureFeatureName(page)` async function that navigates to the right UI state
-   - Add `await shot(page, 'feature-name', captureFeatureName);` to the `run()` function, in the same order as the HTML row
+   CSS layout notes (already in `site/style.css`): `.feature-images` is a flex row with `align-items: stretch`. `.feature-image-desktop` uses `flex: 1` and `img { width: 100%; height: auto; }`. `.feature-image-mobile` uses `flex: 0 0 auto` and `img { height: 100%; width: auto; }` — this makes the mobile image match the desktop image's rendered height, with portrait orientation making it obvious which is which.
 
-3. Run the screenshot script for the new capture:
+2. Add a capture function to `site/screenshots.js` and call it with `shotBoth`:
+
+   ```javascript
+   async function captureFeatureName(page, viewport) {
+     await applyTheme(page, THEMES[N % THEMES.length]); // pick theme by position
+     // navigate to the right UI state...
+     // return clip if this is a modal or panel (see framing guide above)
+   }
+
+   // In run():
+   await shotBoth(page, 'feature-name', captureFeatureName);
+   ```
+
+3. Run the screenshot script:
    ```bash
    cd site && node screenshots.js --only feature-name
    ```
+   (`--only feature-name` matches both `feature-name-desktop` and `feature-name-mobile`.)
 
-4. Commit all three files:
+4. **Review the desktop PNG and auto-adjust if needed (max 2 retries):**
+
+   After the capture, read `site/assets/screenshots/feature-name-desktop.png` with the Read tool and visually assess the framing:
+
+   - **Too much dead space** (>~40% uniform dark background with no content) → tighten the clip
+   - **Content clipped at the edge** (UI element at the frame boundary with no margin) → expand the clip or margin
+   - **Looks good** → proceed
+
+   If adjustment is needed, update the clip in the capture function and re-run `--only feature-name`. Limit to **2 retries total** — if the second attempt still looks off, note it for the user and move on. Screens with multiple overlapping panels can be genuinely ambiguous and shouldn't loop.
+
+   **Never review or adjust the mobile PNG for crop** — mobile is always full viewport by design.
+
+5. Commit (skip if being called from the `ship` skill — ship handles the coordinated commit):
    ```bash
-   git add site/index.html site/screenshots.js site/assets/screenshots/feature-name.png
+   git add site/index.html site/screenshots.js \
+     site/assets/screenshots/feature-name-desktop.png \
+     site/assets/screenshots/feature-name-mobile.png
    git commit -m "docs: add [feature name] to brochure"
    ```
 
-5. **Emit a mapping-table TODO** — if the new feature is driven by a client path pattern that isn't already in the Step 0 mapping table, print a reminder at the end of the run so the skill can be extended manually next time:
-
+5. **Emit a mapping-table TODO** — if the new feature's client path pattern isn't in the Step 0 table, surface the reminder:
    ```
    TODO: add `<client/src/path-pattern>*` → `<feature-name>` to Step 0 mapping table in SKILL.md
    ```
+   Don't self-edit the table — just surface the suggestion.
 
-   Don't self-edit the table — just surface the suggestion as part of the final summary.
+---
 
 ## Process: Feature removed
 
 1. Delete the feature's `.feature-row` block from `site/index.html`
 2. Recheck alternating pattern — renumber remaining rows if needed
-3. Delete the `capture*` function and `shot()` call from `site/screenshots.js`
-4. Delete the PNG from `site/assets/screenshots/`
-5. Commit
+3. Delete the `capture*` function and `shotBoth()`/`shot()` call from `site/screenshots.js`
+4. Delete both PNGs from `site/assets/screenshots/`
+5. Commit (skip if being called from the `ship` skill)
 
-## Process: Feature changed (copy update only)
+---
+
+## Process: Feature changed (copy or screenshot update)
 
 1. Update the heading and description in the relevant `.feature-row` in `site/index.html`
-2. Re-run the screenshot if the UI changed visually:
+2. Re-run the screenshots if the UI changed visually:
    ```bash
    cd site && node screenshots.js --only feature-name
    ```
-3. Commit
+3. Commit (skip if being called from the `ship` skill)
+
+---
 
 ## Process: New RPG system added
 
-1. Update the system support strip in `site/index.html`:
-   ```html
-   <!-- Before (Shadowdark only): -->
-   <p>Currently: Shadowdark RPG &nbsp;·&nbsp; Next: based on demand</p>
-
-   <!-- After (example with Cairn added): -->
-   <p>Currently: Shadowdark RPG &nbsp;·&nbsp; Cairn &nbsp;·&nbsp; More based on demand</p>
-   ```
+1. Update the system support strip in `site/index.html`
 2. Commit
+
+---
 
 ## Process: Audit (override)
 
-Use when the user explicitly invokes an audit (e.g. `/update-brochure --audit`, "do a full brochure audit", "check the whole brochure for drift"). Skips the Step 0 diff narrowing and checks **everything**, regardless of what changed in the branch.
+Use when explicitly invoked (`/update-brochure --audit`, "do a full brochure audit"). Skips the Step 0 diff narrowing and checks everything.
 
 ### 1. Enumerate current state
 
-- **Feature rows:** every `.feature-row` block in `site/index.html` (note the `src` filename and heading)
-- **Captures:** every `await shot(page, 'name', captureFn);` call in the `run()` function of `site/screenshots.js`
+- **Feature rows:** every `.feature-row` in `site/index.html`
+- **Captures:** every `shotBoth()`/`shot()` call in `run()`
 - **Screenshot files:** every PNG in `site/assets/screenshots/`
 
 ### 2. Check for drift
 
-Report each of these as findings:
+- **Orphan capture** — `shot()` / `shotBoth()` call with no matching row
+- **Orphan row** — `.feature-row` with no matching capture call
+- **Missing PNG** — capture exists but `-desktop.png` or `-mobile.png` is absent
+- **Stale PNG** — PNG mtime older than newest git mtime of the corresponding component (best-effort)
+- **Missing feature** — mapping-table path exists in `client/src/` but has no row
+- **Old-style capture** — still using `shot()` instead of `shotBoth()` (migration candidate)
+- **Theme distribution** — re-derive theme count from `THEMES` (dynamic), check if any theme is over/under-represented
 
-- **Orphan capture** — a `shot()` call whose name has no matching `.feature-row` in `index.html`
-- **Orphan row** — a `.feature-row` whose `src` filename has no matching `shot()` call
-- **Missing PNG** — a capture (and/or row) whose `.png` file doesn't exist on disk
-- **Stale PNG** — PNG file mtime older than the newest `git log` mtime of the corresponding client component area (best-effort signal only; false positives OK)
-- **Missing feature** — a mapping-table entry (from Step 0) whose path pattern exists in `client/src/` but has no row and no capture (suggests a feature shipped without brochure coverage)
+### 3. Propose a plan, confirm, execute
 
-### 3. Propose a plan
+After executing, **do not commit**. Show the user what changed (new/refreshed PNGs, HTML edits) and wait for them to confirm it looks right before committing.
 
-Group findings by action. Example:
-
-> - Delete orphan capture: `old-feature-name` (no matching row in index.html)
-> - Add missing row: `creature-gallery` (capture exists, row missing)
-> - Refresh stale: `dm-cards`, `conditions`, `initiative-active` (underlying components changed since last capture)
-> - Missing coverage: `LevelUp*` component has no row — needs a "Feature added" pass
-
-### 4. Confirm and execute
-
-Confirm the plan with the user before running any `node screenshots.js` commands or editing `index.html`. Then execute each finding using the appropriate standard process above.
+---
 
 ## Tone guidelines
 
-Write feature descriptions for players and DMs, not developers.
+Write for players and DMs, not developers.
 
-- ✓ "Everyone rolls. The tracker takes the party's highest result."
+- ✓ "Everyone rolls. The tracker takes the party's highest result and pits it against the enemy."
 - ✗ "The server computes max(party_rolls) and compares to the enemy roll."
 
-Keep headings punchy and short. Keep descriptions to two sentences max.
+**Be thorough.** This is a verbose internal showcase — explain the feature fully. Cover what it does, why it's useful, and any meaningful details. Multiple sentences are encouraged. The goal is that someone reading the brochure understands the feature completely, not just gets a teaser.
