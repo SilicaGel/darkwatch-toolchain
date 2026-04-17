@@ -28,20 +28,28 @@ Note any `#N` references in the commit messages — these become `Closes #N` lin
 
 Run these in order. **Tell each sub-skill to skip its commit step** — ship handles one coordinated commit in Step 3.
 
-1. **Update the changelog** — use the `update-changelog` skill (skip its commit)
-2. **Update the handbook** — use the `update-handbook` skill (skip its commit)
-3. **Update the roadmap** — move completed items to the Completed section in `docs/ROADMAP.md`
-4. **Update the brochure** — use the `update-brochure` skill if any screens or UX changed; skip entirely if the diff is backend-only (skip its commit)
+1. **Update the changelog** — use the `update-changelog` skill (skip its commit). This is the per-ticket record of what shipped.
+2. **Update the handbook** — use the `update-handbook` skill if any user-facing feature / product behaviour changed (skip its commit). Skip entirely if the diff is pure internal refactor / tooling.
+3. **Update the onboarding doc** — use the `update-onboarding` skill if any dev workflow, convention, stack item, npm script, env var, repo structure, new skill, or setup step changed (skip its commit). Skip entirely if the diff doesn't affect how a new contributor gets set up or what conventions they follow.
+4. **Update the brochure** — use the `update-brochure` skill if any screens or UX changed (skip its commit). Skip entirely if the diff is backend-only.
+5. **Roadmap** — do NOT update by default. `ROADMAP.md` is now thematic, not a ticket tracker — it tracks strategic direction only. Only invoke `update-roadmap` if a theme has meaningfully shifted (new milestone starting / closing, longer-term idea promoted to active, strategic pivot). Per-ticket progress lives in Forgejo and the changelog.
 
 ## Step 3: Commit all docs
 
-One coordinated commit covering everything that changed:
+One coordinated commit covering whatever actually changed. Don't blind-add paths that weren't modified:
 
 ```bash
-git add docs/CHANGELOG.md docs/HANDBOOK.md docs/ROADMAP.md
-# also add site/ files if brochure changed:
-# git add site/index.html site/screenshots.js site/assets/screenshots/
-git commit -m "docs: update changelog, handbook, roadmap for vX.Y.Z"
+# See what sub-skills touched
+git status --short docs/ site/
+
+# Stage only the changed files (mix-and-match from this list)
+git add docs/CHANGELOG.md
+git add docs/HANDBOOK.md       # only if changed
+git add docs/ONBOARDING.md     # only if changed
+git add docs/ROADMAP.md        # only if changed (rare — see Step 2.5)
+git add site/                  # only if brochure changed
+
+git commit -m "docs: update <comma-separated list of docs touched> for vX.Y.Z"
 ```
 
 ## Step 4: Push the branch
