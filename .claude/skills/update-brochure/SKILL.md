@@ -47,9 +47,10 @@ The authoritative list of existing captures lives in `site/screenshots.js` (`run
 
 | If you see changes in... | Likely capture to refresh |
 |--------------------------|---------------------------|
-| `InitiativeTracker*` | `initiative-active` |
+| `Dashboard*` / campaign list | `dashboard` |
+| `InitiativeTracker*` | `initiative-rolling` |
 | `CharacterCard*` / DM grid | `dm-cards` |
-| `CharacterSheet*` / stat blocks | `character-sheet` |
+| `CharacterSheet*` / `CharacterDetail*` | `character-sheet`, `quick-inspect` |
 | `CharacterCreation*` | `character-creation` |
 | `DiceTray*` / dice logic | `dice-roll` |
 | `SpellList*` / spell casting | `spellcasting` |
@@ -57,6 +58,8 @@ The authoritative list of existing captures lives in `site/screenshots.js` (`run
 | `DeathTimer*` / dying state | `death-timer` |
 | `Condition*` | `conditions` |
 | `LevelUp*` | `level-up` |
+| `CreatureGallery*` | `creature-gallery` |
+| `QuickInspect*` | `quick-inspect` |
 
 **Global changes** (`index.css`, theme files, shared layout components) affect **every** capture — plan a full refresh.
 
@@ -328,9 +331,9 @@ async function captureFeatureName(page, viewport) {
 
 ---
 
-## Process: Audit (override)
+## Process: Audit (--audit)
 
-Use when explicitly invoked (`/update-brochure --audit`, "do a full brochure audit"). Skips the Step 0 diff narrowing and checks everything.
+Use when explicitly invoked (`/update-brochure --audit`). Skips Step 0 diff narrowing and checks structure/drift — but does **not** refresh screenshots or scan for unmapped features. Fast and non-destructive.
 
 ### 1. Enumerate current state
 
@@ -343,14 +346,170 @@ Use when explicitly invoked (`/update-brochure --audit`, "do a full brochure aud
 - **Orphan capture** — `shot()` / `shotBoth()` call with no matching row
 - **Orphan row** — `.feature-row` with no matching capture call
 - **Missing PNG** — capture exists but `-desktop.png` or `-mobile.png` is absent
-- **Stale PNG** — PNG mtime older than newest git mtime of the corresponding component (best-effort)
 - **Missing feature** — mapping-table path exists in `client/src/` but has no row
 - **Old-style capture** — still using `shot()` instead of `shotBoth()` (migration candidate)
 - **Theme distribution** — re-derive theme count from `THEMES` (dynamic), check if any theme is over/under-represented
 
-### 3. Propose a plan, confirm, execute
+### 3. Report findings, propose plan, confirm before acting
 
-After executing, **do not commit**. Show the user what changed (new/refreshed PNGs, HTML edits) and wait for them to confirm it looks right before committing.
+Surface a summary. Confirm with the user before making any changes. Do not commit.
+
+---
+
+## Process: Full Audit (--full-audit)
+
+Use when explicitly invoked (`/update-brochure --full-audit`). The comprehensive version: scans for unmapped features, refreshes all screenshots, and reviews row copy. Takes longer — plan for it.
+
+### 1. Load the ignore list
+
+Read `site/brochure-ignore.json` (create it with `{"ignored":[]}` if absent). Any entry in `ignored[].name` is excluded from the unmapped-feature scan.
+
+### 2. Scan for unmapped features
+
+Walk `client/src/components/` and `client/src/pages/`. A component is **feature-sized** if it meets both:
+- Has a corresponding `.module.css` file (i.e. `Foo.tsx` + `Foo.module.css`)
+- Name is not obviously a utility/primitive (not prefixed with `use`, not ending in `Context`, `Provider`, `Types`, `Utils`, `Hook`, `Modal` when it's clearly a sub-component of an already-covered feature)
+
+Cross-reference each candidate against:
+1. The mapping table (§ Step 0 B above) — if it maps to an existing capture, it's covered
+2. The existing brochure rows in `site/index.html` — if it's already showcased, it's covered
+3. The ignore list — if it's in `ignored[].name`, skip it
+
+Flag anything not covered by any of those three. Present the list to the user and ask: add a row, or ignore it?
+
+### 3. Run all captures (full refresh)
+
+Redo every capture unconditionally — don't check mtime. This guarantees CSS changes, theme changes, and data changes are all picked up.
+
+```bash
+cd site && node screenshots.js
+```
+
+Review each desktop PNG using the framing guide (§ Screenshot framing guide). Apply the max-2-retries adjustment loop for any that look off.
+
+### 4. Review and improve row copy
+
+For each `.feature-row` in `site/index.html`, read the current heading and description and ask:
+
+- Does it accurately describe what the feature does **today**? (Features change; copy drifts)
+- Is it thorough enough? (See tone guidelines — multiple sentences are encouraged)
+- Does it use player/DM language, not developer language?
+
+If a row's copy is stale or thin, rewrite it. If it's solid, leave it alone. Don't rewrite for the sake of rewriting — only change what would genuinely help a reader understand the feature better.
+
+**Out of scope for copy review:** hero section, publisher section, footer. Those are editorial and manual.
+
+### 5. Run --audit drift checks
+
+After the above, run the standard drift checks from `--audit` (orphans, missing PNGs, theme distribution).
+
+### 6. Present findings, confirm, do not commit
+
+Show the user: new/refreshed PNGs, any HTML copy edits, any new rows added. Wait for confirmation before committing.
+
+---
+
+## Process: Add specific feature (--add 'description')
+
+Use when explicitly invoked (`/update-brochure --add 'description'`). Adds a single row for any UI state the user describes — including sub-features, tooltips, hover states, panel states, etc. that might not have their own top-level component.
+
+### 1. Understand what to capture
+
+Parse the description. Examples:
+- `"tooltip for the poisoned condition emoji"` → need to hover a condition badge to show its tooltip
+- `"the encumbrance warning on the character sheet"` → need to put a character over their carry limit and open their sheet
+- `"the torch darkness fade effect"` → need to let a torch run out
+
+Search the codebase to understand how to trigger the state:
+```bash
+# Find relevant components
+grep -r "poisoned\|Poisoned\|tooltip\|Tooltip" client/src --include="*.tsx" -l
+```
+
+Read the relevant component(s) to understand:
+- What triggers the state (hover, click, data condition)
+- What CSS classes or DOM structure to target for framing
+- Any setup (data API calls) needed before capturing
+
+### 2. Write the capture function
+
+Follow the framing guide. If it's a tooltip or small overlay, use a close-up crop. If it's a full-screen state, full viewport. Never clip mobile.
+
+Give it a descriptive slug (e.g. `condition-tooltip`, `encumbrance-warning`).
+
+### 3. Determine row placement
+
+Add the new row after the last existing feature row (before `.callout-row`). Follow the alternating `reverse` pattern from the current last row. Assign theme by index position (count all existing `sh()` calls, use that as the index).
+
+### 4. Write the row copy
+
+Apply tone guidelines. Describe what the feature does for the player or DM, not how it's implemented. Be thorough — multiple sentences are fine.
+
+### 5. Run, review, adjust (max 2 retries on desktop)
+
+```bash
+cd site && node screenshots.js --only slug-name
+```
+
+Review the desktop PNG. Adjust clip if needed. Never review/adjust mobile.
+
+### 6. Emit mapping-table TODO if applicable
+
+If the component path isn't in the Step 0 mapping table, surface:
+```
+TODO: add `client/src/path*` → `slug-name` to Step 0 mapping table in SKILL.md
+```
+
+### 7. Confirm before committing
+
+---
+
+## Process: Ignore feature (--ignore 'name')
+
+Use when explicitly invoked (`/update-brochure --ignore 'name'`). Removes a row from the brochure and marks it so `--full-audit` won't flag it as missing.
+
+The `name` can be the capture slug (e.g. `condition-tooltip`), the feature label from the row, or a description — match it to the right row.
+
+### 1. Confirm what's being removed
+
+Show the user the matching `.feature-row` heading and the capture slug. Confirm before proceeding.
+
+### 2. Remove from brochure
+
+1. Delete the `.feature-row` block from `site/index.html`
+2. Recheck alternating `reverse` pattern — update subsequent rows if needed
+3. Delete the `capture*` function and `sh()` call from `site/screenshots.js`
+4. Delete both PNGs from `site/assets/screenshots/`
+
+### 3. Add to ignore list
+
+Read `site/brochure-ignore.json` (create with `{"ignored":[]}` if absent). Append:
+
+```json
+{ "name": "slug-or-description", "reason": "user-provided reason or 'manually excluded'", "ignored_at": "YYYY-MM-DD" }
+```
+
+Write the file back.
+
+### 4. Confirm before committing
+
+---
+
+## brochure-ignore.json format
+
+```json
+{
+  "ignored": [
+    {
+      "name": "condition-tooltip",
+      "reason": "Too granular for the brochure; covered by the Conditions row",
+      "ignored_at": "2026-04-17"
+    }
+  ]
+}
+```
+
+`--full-audit` checks `ignored[].name` against every candidate before flagging it. `name` can be a capture slug or a loose description — match by substring if needed.
 
 ---
 
