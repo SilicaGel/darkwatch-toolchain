@@ -182,7 +182,7 @@ jobs:
             --reporter=line
 
       # Second Vite restart: clears heap accumulated across 16 Chromium contexts
-      # before the spell tests, which are the most memory-intensive.
+      # before the rest-button tests.
       - name: Restart Vite preview (batch 2 memory reset)
         env:
           API_PROXY_URL: "http://localhost:3001"
@@ -203,16 +203,43 @@ jobs:
             [ "$i" -eq 30 ] && echo "Vite never came back up" && exit 1
           done
 
-      # Batch 2: spell / rest tests that need a fresh Vite instance.
+      # Batch 2: rest-button tests on a fresh Vite instance.
       - name: Run Playwright E2E tests (batch 2)
         env:
           E2E_SERVER_URL: "http://localhost:3001"
           E2E_SKIP_STABILIZE: "true"
+        run: cd tests && npx playwright test e2e/rest-button.spec.ts --reporter=line
+
+      # Third Vite restart: Chromium accumulates heap across each spec file's tests.
+      # Restarting Vite before spell-exhaustion ensures it runs with a clean process.
+      # The Pi4's 4 GB is split between Node app (256 MB), Vite (512 MB), and Chromium;
+      # Chromium heap grows with each test context and does not release between specs.
+      - name: Restart Vite preview (batch 3 memory reset)
+        env:
+          API_PROXY_URL: "http://localhost:3001"
+          NODE_OPTIONS: "--max-old-space-size=512"
         run: |
-          cd tests && npx playwright test \
-            e2e/rest-button.spec.ts \
-            e2e/spell-exhaustion.spec.ts \
-            --reporter=line
+          kill $(cat /tmp/vite.pid) 2>/dev/null || pkill -f "vite preview" || true
+          for i in $(seq 1 15); do
+            curl -s -o /dev/null http://localhost:5173 || break
+            echo "Waiting for old Vite to stop... ($i/15)"
+            sleep 1
+          done
+          cd client && npx vite preview &
+          echo $! > /tmp/vite.pid
+          for i in $(seq 1 30); do
+            curl -s -o /dev/null http://localhost:5173 && break || true
+            echo "Waiting for new Vite... ($i/30)"
+            sleep 2
+            [ "$i" -eq 30 ] && echo "Vite never came back up" && exit 1
+          done
+
+      # Batch 3: spell-exhaustion on its own fresh Vite instance.
+      - name: Run Playwright E2E tests (batch 3)
+        env:
+          E2E_SERVER_URL: "http://localhost:3001"
+          E2E_SKIP_STABILIZE: "true"
+        run: cd tests && npx playwright test e2e/spell-exhaustion.spec.ts --reporter=line
 
       - name: Generate coverage badge endpoints
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
