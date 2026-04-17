@@ -477,11 +477,27 @@ Show the user the matching `.feature-row` heading and the capture slug. Confirm 
 ### 2. Remove from brochure
 
 1. Delete the `.feature-row` block from `site/index.html`
-2. Recheck alternating `reverse` pattern — update subsequent rows if needed
-3. Delete the `capture*` function and `sh()` call from `site/screenshots.js`
-4. Delete both PNGs from `site/assets/screenshots/`
+2. Delete the `capture*` function and `sh()` call from `site/screenshots.js`
+3. Delete both PNGs from `site/assets/screenshots/`
 
-### 3. Add to ignore list
+### 3. Fix alternating pattern on subsequent rows
+
+Removing a row shifts the position of every row that follows it, breaking two things:
+
+**`reverse` classes in `site/index.html`** — the image-left/right layout is hardcoded. Walk every `.feature-row` after the removed one and toggle its `reverse` class so the alternating pattern stays intact (odd positions: no `reverse`; even positions: `reverse`).
+
+**Theme assignments in `site/screenshots.js`** — the `i++` counter means every subsequent `sh()` call now gets a different theme. Re-run all captures that come after the removed row's position:
+
+```bash
+# Re-run every capture that was after the removed row to correct theme assignments.
+# It's easiest to just run the full script — only the affected rows get new themes,
+# and you'll review the results anyway.
+cd site && node screenshots.js
+```
+
+If the removed row was the last one, skip this step — nothing shifts.
+
+### 4. Add to ignore list
 
 Read `site/brochure-ignore.json` (create with `{"ignored":[]}` if absent). Append:
 
@@ -491,7 +507,9 @@ Read `site/brochure-ignore.json` (create with `{"ignored":[]}` if absent). Appen
 
 Write the file back.
 
-### 4. Confirm before committing
+### 5. Confirm before committing
+
+Show the user the updated rows and refreshed PNGs. Wait for confirmation.
 
 ---
 
