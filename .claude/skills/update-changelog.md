@@ -1,3 +1,8 @@
+---
+name: update-changelog
+description: Use when a feature has shipped, a bug has been fixed, or a feature has been removed — writes a new versioned entry in docs/CHANGELOG.md using semver rules and commits it.
+---
+
 # update-changelog
 
 Use this skill when a feature has shipped, a bug has been fixed, or a feature has been removed. It updates CHANGELOG.md with a new versioned entry.

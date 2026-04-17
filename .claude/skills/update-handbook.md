@@ -1,3 +1,8 @@
+---
+name: update-handbook
+description: Use when a feature has been added, changed, or removed, or when dev patterns/stack change — keeps docs/HANDBOOK.md accurate and updates the Last-updated date.
+---
+
 # update-handbook
 
 Use this skill when a feature has been added, changed, or removed and the handbook needs updating. It keeps `docs/HANDBOOK.md` accurate.

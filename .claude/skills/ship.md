@@ -1,3 +1,8 @@
+---
+name: ship
+description: Use when a development branch is ready to merge — updates changelog, handbook, roadmap, and brochure (if UI changed), commits the docs, then opens a PR with `Closes #N` for every resolved issue.
+---
+
 # ship
 
 Use this skill when a development branch is ready to merge. It handles all the housekeeping and opens a PR.
