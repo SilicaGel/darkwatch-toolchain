@@ -99,6 +99,20 @@ When all agents return:
 3. Surface any skipped / deferred ticket with a suggested follow-up
 4. Hand off to user — remind them to run `/ship` per branch, or review before merge
 
+**Always tell the user to ship sequentially**, not in parallel:
+
+> Ship one branch at a time: `/ship` → wait for the PR to merge → `/ship` next.
+> Each `/ship` adds a CHANGELOG entry at the same anchor (`# Darkwatch Changelog\n\n---\n\n`),
+> so concurrent PRs *will* conflict on `docs/CHANGELOG.md`. Serial shipping keeps each
+> conflict-free; the merge after one ship is what unblocks the next.
+
+Same applies if the orchestrator (you) is asked to run `/ship` on multiple branches —
+do them one at a time, waiting for the user to confirm each merge before moving on.
+
+If a queue produced a lot of branches (e.g. a 3×5 night) and serial `/ship` feels
+heavy, mention the towncrier-style fragment-changelog option as a future fix
+(see `docs/superpowers/specs/` for any existing ticket).
+
 ## Status log format (contract)
 
 Agents append one line per state change to `/tmp/queue-status/<batch-name>.log`:
