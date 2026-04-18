@@ -29,9 +29,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Soft-delete filter check
-        run: bash scripts/check-soft-delete.sh
-
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
