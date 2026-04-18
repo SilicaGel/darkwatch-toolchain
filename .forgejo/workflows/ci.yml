@@ -69,6 +69,15 @@ jobs:
           DATABASE_URL: mysql://darkwatch:darkwatch_dev@mariadb:3306/darkwatch
         run: cd server && npm run db:verify
 
+      - name: Integration tests (repositories against real DB)
+        env:
+          DB_HOST: mariadb
+          DB_PORT: "3306"
+          DB_USER: darkwatch
+          DB_PASSWORD: darkwatch_dev
+          DB_NAME: darkwatch
+        run: cd server && npm run test:int
+
       - name: Install client dependencies
         run: cd client && npm ci
 
