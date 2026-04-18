@@ -39,37 +39,68 @@ This is the key step that lets you turn a 3-word input into a useful, specific i
 
 ---
 
-## Step 3: Fetch open issues
+## Steps 3–4: Fetch open issues + duplicate check (Haiku subagent)
 
-```bash
-curl -s -H "Authorization: token $FORGEJO_TOKEN" \
-  "https://forge.example.com/api/v1/repos/aaron/darkwatch/issues?type=issues&state=open&limit=50&page=1"
+Dispatch a Haiku subagent to fetch the open issue list and do the duplicate/related comparison **inside the subagent's context**. This keeps 20–50KB of raw issue JSON out of the main conversation — only the small structured summary returns.
+
+Use the `Agent` tool with `model: "haiku"`:
+
+```
+Agent({
+  model: "haiku",
+  description: "Forgejo duplicate/related check",
+  prompt: `You are checking whether a proposed Darkwatch issue duplicates or relates to an existing open issue.
+
+Proposed title:
+<paste the working title here>
+
+Proposed description:
+<paste the enriched description from Step 2 here>
+
+Steps:
+1. Fetch open issues from Forgejo:
+   curl -s -H "Authorization: token $FORGEJO_TOKEN" \\
+     "https://forge.example.com/api/v1/repos/aaron/darkwatch/issues?type=issues&state=open&limit=50&page=1"
+   If the response contains exactly 50 results, also fetch page 2.
+
+2. Compare the proposed title + description against every open issue's title and body.
+
+3. Return ONLY a JSON object — no prose, no code fences, no commentary:
+
+   {
+     "status": "new" | "duplicate" | "related",
+     "matches": [
+       { "id": <number>, "title": "<title>", "reason": "<one sentence on the overlap>" }
+     ]
+   }
+
+   Status meanings:
+   - "new":       no meaningful overlap with any open issue → matches: []
+   - "duplicate": same problem and same ask as an existing issue
+   - "related":   overlaps with one or more existing issues but different enough
+                  to warrant a separate issue or a stale-update
+
+   Include up to 3 most-relevant matches (in descending relevance). For "new", matches must be the empty array.`
+})
 ```
 
-If the response contains exactly 50 results, fetch page 2 as well.
+Use the returned JSON to choose the next action:
 
----
-
-## Step 4: Duplicate / related check
-
-Compare the user's input (enriched by context from Step 2) against existing issue titles and bodies:
-
-### Clear duplicate
-Same problem, same ask. Tell the user: *"#N already covers this: [title]. Want me to add a comment there, or create a separate issue anyway?"*
-
-### Related but different
-Show it: *"This overlaps with #N — [title]. Add a comment there, or open a separate issue?"*
+| `status`    | Action |
+|-------------|--------|
+| `new`       | Proceed to Step 5 (clarifying questions) and Step 6 (write the issue). |
+| `duplicate` | Tell the user: *"#N already covers this: [title]. Want me to add a comment there, or create a separate issue anyway?"* |
+| `related`   | Show the user the overlap: *"This overlaps with #N — [title]. Add a comment there, or open a separate issue?"* If multiple matches were returned, list them. |
 
 ### Title/direction has changed (update case)
-If an existing issue's title is now wrong — e.g., the issue says "Change border to red" but the new direction is blue — plan to:
-1. Update the title to the corrected version (or a neutral one if still uncertain)
-2. If the body is also stale, rewrite it with the old content shown in `~~strikethrough~~`, new content below
-3. Add a comment explaining what changed and why
+
+If during the conversation it's clear an existing issue's title or body is now stale (e.g., it says "Change border to red" but the new direction is blue), plan to:
+
+1. Update the title to the corrected version (or a neutral one if still uncertain).
+2. If the body is also stale, rewrite it with the old content shown in `~~strikethrough~~`, new content below.
+3. Add a comment explaining what changed and why.
 
 **Confirm this plan with the user before executing** — modifying existing issues is harder to undo than creating.
-
-### Nothing related
-Proceed to create.
 
 ---
 

@@ -17,12 +17,15 @@ jobs:
       mariadb:
         image: mariadb:11
         env:
-          MYSQL_ROOT_PASSWORD: root
-          MYSQL_DATABASE: darkwatch
-          MYSQL_USER: darkwatch
-          MYSQL_PASSWORD: darkwatch_dev
+          # CI DB credentials come from Forgejo repo secrets (Settings → Secrets).
+          # Required: CI_DB_ROOT_PASSWORD, CI_DB_NAME, CI_DB_USER, CI_DB_PASSWORD.
+          # See .forgejo/workflows/README.md for details.
+          MYSQL_ROOT_PASSWORD: ${{ secrets.CI_DB_ROOT_PASSWORD }}
+          MYSQL_DATABASE: ${{ secrets.CI_DB_NAME }}
+          MYSQL_USER: ${{ secrets.CI_DB_USER }}
+          MYSQL_PASSWORD: ${{ secrets.CI_DB_PASSWORD }}
         options: >-
-          --health-cmd="mariadb-admin ping -u root -proot --silent"
+          --health-cmd="mariadb-admin ping -u root -p${{ secrets.CI_DB_ROOT_PASSWORD }} --silent"
           --health-interval=2s
           --health-timeout=5s
           --health-retries=30
@@ -56,23 +59,23 @@ jobs:
         env:
           DB_HOST: mariadb
           DB_PORT: "3306"
-          DB_USER: darkwatch
-          DB_PASSWORD: darkwatch_dev
-          DB_NAME: darkwatch
+          DB_USER: ${{ secrets.CI_DB_USER }}
+          DB_PASSWORD: ${{ secrets.CI_DB_PASSWORD }}
+          DB_NAME: ${{ secrets.CI_DB_NAME }}
         run: cd server && npm run db:migrate
 
       - name: Verify Kysely schema types are up-to-date
         env:
-          DATABASE_URL: mysql://darkwatch:darkwatch_dev@mariadb:3306/darkwatch
+          DATABASE_URL: mysql://${{ secrets.CI_DB_USER }}:${{ secrets.CI_DB_PASSWORD }}@mariadb:3306/${{ secrets.CI_DB_NAME }}
         run: cd server && npm run db:verify
 
       - name: Integration tests (repositories against real DB)
         env:
           DB_HOST: mariadb
           DB_PORT: "3306"
-          DB_USER: darkwatch
-          DB_PASSWORD: darkwatch_dev
-          DB_NAME: darkwatch
+          DB_USER: ${{ secrets.CI_DB_USER }}
+          DB_PASSWORD: ${{ secrets.CI_DB_PASSWORD }}
+          DB_NAME: ${{ secrets.CI_DB_NAME }}
         run: cd server && npm run test:int
 
       - name: Install client dependencies
@@ -122,9 +125,9 @@ jobs:
           PORT: "3001"
           DB_HOST: mariadb
           DB_PORT: "3306"
-          DB_USER: darkwatch
-          DB_PASSWORD: darkwatch_dev
-          DB_NAME: darkwatch
+          DB_USER: ${{ secrets.CI_DB_USER }}
+          DB_PASSWORD: ${{ secrets.CI_DB_PASSWORD }}
+          DB_NAME: ${{ secrets.CI_DB_NAME }}
           NODE_ENV: test
           ALLOW_TEST_HOOKS: "true"
           JWT_SECRET: e2e-test-secret
