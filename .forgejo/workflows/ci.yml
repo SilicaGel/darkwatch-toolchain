@@ -40,6 +40,22 @@ jobs:
       - name: Install server dependencies
         run: cd server && npm install
 
+      - name: Enforce soft-delete filters on core tables
+        run: |
+          # The three core repository files for soft-deleted tables must each
+          # contain a deleted_at filter. Fails fast if any file omits it.
+          fail=0
+          for f in \
+            server/src/repositories/campaignRepository.ts \
+            server/src/repositories/characterRepository.ts \
+            server/src/repositories/campaignMembershipRepository.ts; do
+            if ! grep -q "deleted_at" "$f"; then
+              echo "FAIL: $f has no deleted_at filter"
+              fail=1
+            fi
+          done
+          [ "$fail" -eq 0 ] && echo "Soft-delete filter check passed." || exit 1
+
       - name: Type check server
         run: cd server && npm run build
 
