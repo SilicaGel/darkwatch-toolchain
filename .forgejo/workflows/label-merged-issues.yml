@@ -1,0 +1,31 @@
+name: Label merged issues for review
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [main]
+
+jobs:
+  label-issues:
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    steps:
+      - name: Add 'review' label to closed issues
+        env:
+          FORGEJO_TOKEN: ${{ secrets.FORGEJO_TOKEN }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+          REPO: ${{ github.repository }}
+          API_URL: ${{ github.api_url }}
+        run: |
+          echo "$PR_BODY" \
+            | grep -oE 'Closes #[0-9]+' \
+            | grep -oE '[0-9]+' \
+            | while read issue; do
+                curl -s -X POST \
+                  -H "Authorization: token $FORGEJO_TOKEN" \
+                  -H "Content-Type: application/json" \
+                  --data-raw '{"labels":[33]}' \
+                  "$API_URL/repos/$REPO/issues/$issue/labels" \
+                  > /dev/null
+                echo "Labelled #$issue with review"
+              done

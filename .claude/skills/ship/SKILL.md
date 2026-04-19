@@ -7,6 +7,21 @@ description: Use when a development branch is ready to merge — updates changel
 
 Use this skill when a development branch is ready to merge. It handles all the housekeeping and opens a PR.
 
+## Step 0: Confirm the branch
+
+Before doing anything, check the current branch and confirm it's the right one:
+
+```bash
+git branch --show-current
+git worktree list
+```
+
+If the current branch is `main`, or doesn't look like the branch the user intends to ship, **stop and ask**:
+
+> "I'm currently on `<branch>` — is that the branch you want to ship? Other active branches: `<list>`"
+
+Never assume. If it's ambiguous (e.g. multiple feat/ branches in flight), name them and wait for confirmation.
+
 ## Step 1: Gather context
 
 Run this once upfront so all subsequent steps share the same picture:
@@ -91,6 +106,17 @@ curl -s -X POST \
 Capture the PR number from the response — you need it for Step 6.
 
 Report the PR number and URL to the user.
+
+After opening the PR, add the `review` label (id: 33) to every issue referenced in `Closes #N`:
+
+```bash
+# For each issue number N found in the commit log:
+curl -s -X POST \
+  -H "Authorization: token $FORGEJO_TOKEN" \
+  -H "Content-Type: application/json" \
+  --data-raw '{"labels":[33]}' \
+  "https://forge.example.com/api/v1/repos/aaron/darkwatch/issues/N/labels"
+```
 
 ## Step 6: Watch CI
 
