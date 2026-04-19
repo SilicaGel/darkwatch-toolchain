@@ -3,26 +3,23 @@
 #
 # Line 1 (always): model · cwd basename · git branch [dirty] · context%
 # Line 2 (only when today's batches are active):
-#   queue: auth-routes ✓✓ · server-core ✓◐ · client-ux ◐○
+#   queue: auth-routes ✓✓ ↗ pr #169 ✓  ·  server-core ✓◐ ⇥ ready
 #
-# Glyphs per ticket (latest status wins):
-#   ✓ complete   ◐ starting/working   ? blocked   ✗ failed   · unknown
+# Ticket glyphs (latest status wins):
+#   ✓ complete   ◐ starting/working   ? blocked   ✗ failed   ○ queued   · unknown
 #
-# Hides the queue line once every today-log has a final `status=done`
-# summary AND the log's mtime is >5 minutes old — so completed runs
-# persist on the bar long enough to notice, then auto-clear.
+# CI glyphs (appended after merge-state marker when branch is pushed):
+#   | / - \  running (animates at 5s refresh)   ✓ passed   ✗ failed
 set -u
 
-# ── Line 1: mirrors ~/.claude/statusline-command.sh (colored, DIM 2-space separator,
-# used-% with threshold colors). Keep this in sync if the user-level script changes.
 input=$(cat)
 
-dir=$(printf '%s' "$input" | jq -r '.workspace.current_dir // .cwd // empty' 2>/dev/null)
+dir=$(printf '%s' "$input"   | jq -r '.workspace.current_dir // .cwd // empty' 2>/dev/null)
 model=$(printf '%s' "$input" | jq -r '.model.display_name // empty' 2>/dev/null)
 branch=$(git -C "$dir" rev-parse --abbrev-ref HEAD 2>/dev/null)
 
 used_pct=$(printf '%s' "$input" | jq -r '.context_window.used_percentage // empty' 2>/dev/null)
-five_hr=$(printf '%s' "$input" | jq -r '.rate_limits.five_hour.used_percentage // empty' 2>/dev/null)
+five_hr=$(printf '%s' "$input"  | jq -r '.rate_limits.five_hour.used_percentage // empty' 2>/dev/null)
 
 CYAN=$'\033[36m'
 YELLOW=$'\033[33m'
@@ -71,13 +68,12 @@ if [[ ${#LOGS[@]} -gt 0 ]]; then
     batch=$(basename "$log" .log)
     short="${batch%-"${TODAY}"}"
 
-    # Hide this batch if its feat/<batch> branch is gone locally — the sole
-    # "shipped and cleaned up" signal. Delete the local branch after merge to clear.
+    # Hide once the local feat/<batch> branch is gone (post-merge cleanup signal).
     if [[ -n "$dir" ]] && ! git -C "$dir" show-ref --verify --quiet "refs/heads/feat/${batch}" 2>/dev/null; then
       continue
     fi
 
-    # Hard cap: anything older than 24h gets cleared regardless (catches forgotten runs).
+    # Hard cap: anything older than 24h gets cleared regardless.
     mt=$(stat -f %m "$log" 2>/dev/null || stat -c %Y "$log" 2>/dev/null || echo 0)
     age=$(( now - mt ))
     if [[ $age -gt 86400 ]]; then
@@ -124,29 +120,62 @@ if [[ ${#LOGS[@]} -gt 0 ]]; then
     )
     [[ -z "$glyphs" ]] && continue
 
-    # Merge-state marker: agent wrote `ticket=all status=…`? Then all work is done.
-    # Distinguish "ready to ship" (not pushed) from "shipped, PR open" (pushed)
-    # by comparing local and remote HEAD SHAs — same SHA = this version is on
-    # origin. Different SHAs mean the remote has a stale branch with the same
-    # name (common when Forgejo doesn't auto-delete after merge) — we treat
-    # that as "not pushed (yet)" which is what you care about.
+    # Merge-state marker + CI glyph
     marker=""
+    ci_glyph=""
+
     if grep -q 'ticket=all status=' "$log" 2>/dev/null; then
       local_sha=$(git -C "$dir" rev-parse "refs/heads/feat/${batch}" 2>/dev/null)
       remote_sha=$(git -C "$dir" rev-parse "refs/remotes/origin/feat/${batch}" 2>/dev/null)
+
       if [[ -n "$local_sha" && "$local_sha" == "$remote_sha" ]]; then
-        marker=" ${ORANGE}↗ pr${RESET}"
+        # Branch is pushed — check CI status file for PR number + CI state
+        ci_file="/tmp/queue-ci-status/${batch}.json"
+        pr_num=""
+        ci_status=""
+        ci_sha=""
+        if [[ -f "$ci_file" ]]; then
+          pr_num=$(jq -r '.pr // empty'     "$ci_file" 2>/dev/null)
+          ci_status=$(jq -r '.status // empty' "$ci_file" 2>/dev/null)
+          ci_sha=$(jq -r '.sha // empty'    "$ci_file" 2>/dev/null)
+        fi
+
+        local_short=$(git -C "$dir" rev-parse --short "refs/heads/feat/${batch}" 2>/dev/null)
+
+        if [[ -n "$pr_num" && "$pr_num" != "0" ]]; then
+          marker=" ${ORANGE}↗ pr #${pr_num}${RESET}"
+        else
+          marker=" ${ORANGE}↗ pr${RESET}"
+        fi
+
+        # CI glyph — only if status file SHA matches current local HEAD
+        if [[ -n "$ci_status" && "$local_short" == "$ci_sha" ]]; then
+          tick=$(( $(date +%s) % 4 ))
+          case "$ci_status" in
+            running|waiting)
+              case $tick in
+                0) spin="|" ;; 1) spin="/" ;; 2) spin="-" ;; *) spin="\\" ;;
+              esac
+              ci_glyph=" ${DIM}${spin}${RESET}"
+              ;;
+            success)
+              ci_glyph=" ${GREEN}✓${RESET}"
+              ;;
+            failure|cancelled)
+              ci_glyph=" ${RED}✗${RESET}"
+              ;;
+          esac
+        fi
       else
         marker=" ${RED}⇥ ready${RESET}"
       fi
     fi
 
-    out+="${short} ${glyphs}${marker} · "
+    out+="${short} ${glyphs}${marker}${ci_glyph} · "
   done
   [[ -n "$out" ]] && line2="${RED}queue:${RESET} ${out% · }"
 fi
 
-# Emit. Two lines when queue is active; one line otherwise.
 printf '%s' "$line1"
 [[ -n "$line2" ]] && printf '\n%s' "$line2"
 exit 0

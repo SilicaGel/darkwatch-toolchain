@@ -38,6 +38,38 @@ Default: `3x5` if no argument is passed. Format: `<batchCount>x<ticketsPerBatch>
 
 ## Flow
 
+### 0. Preflight — "I'm workin' here!" check
+
+Before anything else, check whether a previous queue run is still in flight or awaiting cleanup. If any of the following is true, **stop and push back**:
+
+```bash
+# Active or pending-ship batches — any feat/<batch>-<date> branch still exists locally?
+git branch --format='%(refname:short)' | grep -E '^feat/(auth-routes|server-core|client-ux)-[0-9]{8}$'
+```
+
+For each matching branch, inspect the corresponding `/tmp/queue-status/<batch>.log` to classify:
+
+| Log state | Branch state | Meaning |
+|---|---|---|
+| No `ticket=all status=done` line | local branch exists | **Agent still working.** Block. |
+| Has `ticket=all status=done`, no `origin/feat/<batch>` at same SHA | local branch exists | **Done but not shipped.** Block (awaiting `/ship`). |
+| Has `ticket=all status=done`, matching `origin/feat/<batch>` SHA | local branch exists | **Shipped, PR open.** Block (awaiting merge + local-branch cleanup). |
+| — | local branch gone | Fully shipped + cleaned up. OK. |
+
+When blocking, render the current batch state (glyphs + markers, same as the statusline's second line) and say something like:
+
+> 🛑 **Ey — I'm workin' here!** There's still a queue in flight:
+>
+> `auth-routes ◐○○` · `server-core ✓✓✓ ↗ pr #163` · `client-ux ✓✓✓ ⇥ ready`
+>
+> Let me finish these first. Once PRs merge and local branches are cleaned up, I'll be ready for the next run. Options:
+>
+> 1. Wait (I'll carry on with current ships)
+> 2. `force` — proceed anyway (will share zones with the in-flight run; not recommended)
+> 3. `cancel` — abort the new queue request
+
+Only skip this check when the user explicitly overrides with `force` (or the equivalent in-plain-English: "yes I know, dispatch anyway").
+
 ### 1. Fetch + triage
 
 - Fetch open issues: `curl -sS -H "Authorization: token $FORGEJO_TOKEN" "https://forge.example.com/api/v1/repos/aaron/darkwatch/issues?state=open&limit=50&type=issues"` (paginate if 50 returned; always fresh — no cache)
@@ -68,8 +100,19 @@ Before dispatching, for each batch:
 - `git -C /path/to/darkwatch fetch origin main`
 - `git -C /path/to/darkwatch worktree add .worktrees/<batch-name> -b feat/<batch-name> origin/main`
 - Ensure `/tmp/queue-status/` exists; create empty `<batch-name>.log`
+- Pre-seed the log with a `ticket=#N status=queued` line for each ticket in the batch (smallest-first order). The statusline's second line reads this to render all tickets as `○` before agents start.
 - Render the prompt from `templates/agent-prompt.md` with placeholders filled
 - Launch the agent with `Agent` tool, `run_in_background: true`, `model: sonnet` (or user override)
+
+**Create a task per ticket** via `TaskCreate` so the Claude Code UI task panel mirrors the statusline. Use this format so they group by batch visually:
+
+```
+subject:     "[<batch>] #<N> — <short title from ticket>"
+description: "<zone> · <labels>"
+activeForm:  "Running <batch> #<N>"
+```
+
+Tasks start `pending`; the dispatch flow doesn't need to set them `in_progress` up front — the agent's `status=starting` event does that.
 
 Then for each batch, launch a `Bash` command with `run_in_background: true`:
 ```bash
@@ -77,9 +120,25 @@ tail -f /tmp/queue-status/<batch-name>.log
 ```
 Attach `Monitor` to each so every new log line becomes a notification.
 
+Finally, also create **batch-level ship tasks** so the user can see the full lifecycle:
+
+```
+subject: "Ship <batch-name> (open PR, merge, cleanup)"
+```
+Start `pending`; flip to `in_progress` when you run `/ship`, `completed` when the PR merges.
+
 ### 5. Monitor + render status
 
-On every Monitor notification, parse the log line (format defined below) and re-render the stacked status table (see Display format section).
+On every Monitor notification, parse the log line (format defined below), re-render the stacked status table (see Display format section), **and call `TaskUpdate` on the corresponding ticket task**:
+
+| Log status | Task status |
+|---|---|
+| `starting`, `working` | `in_progress` |
+| `complete` | `completed` |
+| `blocked`, `failed` | Keep `in_progress` + append `note` to task `description` (don't mark completed until unblocked) |
+| final `ticket=all status=done` | The ship-batch task's children should already all be `completed` by this point; nothing extra |
+
+Match tasks to ticket numbers via the `[<batch>] #<N>` prefix in the subject.
 
 On question / `status=blocked` → surface to user with the batch name as a tag:
 

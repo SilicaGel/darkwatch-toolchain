@@ -88,4 +88,55 @@ curl -s -X POST \
   | jq '{number: .number, url: .html_url}'
 ```
 
+Capture the PR number from the response — you need it for Step 6.
+
 Report the PR number and URL to the user.
+
+## Step 6: Watch CI
+
+After the PR is open, start CI monitoring so the statusline shows live CI state and failures are caught automatically.
+
+```bash
+BRANCH=$(git branch --show-current)
+BATCH="${BRANCH#feat/}"          # e.g. auth-routes-20260418
+SHA=$(git rev-parse --short HEAD)
+PR=<number from step 5>
+
+mkdir -p /tmp/queue-ci-status
+# Write initial status so statusline shows spinner immediately
+echo "{\"sha\":\"$SHA\",\"pr\":$PR,\"batch\":\"$BATCH\",\"status\":\"running\"}" \
+  > /tmp/queue-ci-status/$BATCH.json
+
+# Start watcher in background (Monitor will notify you when it emits)
+./scripts/ci-watch.sh "$SHA" \
+  --status-file /tmp/queue-ci-status/$BATCH.json \
+  --pr "$PR" \
+  --batch "$BATCH"
+```
+
+Run the ci-watch command with `run_in_background: true` and attach a `Monitor` so every emitted line is a notification.
+
+### On CI failure (Monitor fires `status=failure`)
+
+1. Fetch the log and diagnose:
+   ```bash
+   ./scripts/ci-log.sh --failed $BRANCH
+   ```
+2. Fix the issue in the worktree (edit files, commit with `fix: …`)
+3. Push the fix: `git push origin $BRANCH`
+4. Update the status file back to running and restart the watcher:
+   ```bash
+   SHA=$(git rev-parse --short HEAD)
+   echo "{\"sha\":\"$SHA\",\"pr\":$PR,\"batch\":\"$BATCH\",\"status\":\"running\"}" \
+     > /tmp/queue-ci-status/$BATCH.json
+   ./scripts/ci-watch.sh "$SHA" --status-file /tmp/queue-ci-status/$BATCH.json --pr "$PR" --batch "$BATCH"
+   ```
+   (again with `run_in_background: true` + Monitor)
+
+Do NOT ask the user before attempting the fix — diagnose, fix, and re-push autonomously. Only surface to the user if:
+- The failure recurs after a second fix attempt, or
+- The fix requires a judgment call (API shape change, test expectations unclear)
+
+### On CI success (Monitor fires `status=success`)
+
+Tell the user: **"CI passed for #N — ready to merge."** Nothing else to do until they merge.
