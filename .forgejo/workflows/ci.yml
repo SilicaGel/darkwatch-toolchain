@@ -103,6 +103,34 @@ jobs:
       - name: Test client
         run: cd client && npm run test:coverage
 
+      - name: Forbid numeric ID patterns
+        run: |
+          set -e
+          if grep -rnE "Number\s*\(\s*req\.params" server/src client/src 2>/dev/null; then
+            echo "ERROR: Number() coercion on req.params is no longer valid — IDs are UUIDs."
+            exit 1
+          fi
+          # Entity ID fields typed as number in production source (tests may legitimately
+          # use numeric IDs for unrelated counters, so exclude test files). Catches both
+          # snake_case (user_id) and camelCase (characterId, campaignId) forms.
+          # Excludes RAF/timer handles (rafId, timeoutId, intervalId, frameId, animationId, timerId)
+          # which are legitimately numeric browser handles, not entity IDs.
+          if grep -rnE "(^|[[:space:](,{])(id|[a-zA-Z_]*_id|[a-zA-Z]+Id):[[:space:]]*number" server/src client/src \
+               --include="*.ts" --include="*.tsx" \
+               | grep -v -E "\.(test|spec)\.(ts|tsx)" \
+               | grep -v -E "\b(rafId|timeoutId|intervalId|frameId|animationId|timerId|pollId|handlerId):" ; then
+            echo "ERROR: entity ID field typed as number. IDs must be string."
+            exit 1
+          fi
+          # typeof guards that still check "number" for ID params
+          if grep -rnE "typeof[[:space:]]+[a-zA-Z_]*([Ii]d|_id)[[:space:]]*!==?[[:space:]]*\"number\"" \
+               server/src client/src --include="*.ts" --include="*.tsx" \
+               | grep -v -E "\.(test|spec)\.(ts|tsx)" ; then
+            echo "ERROR: typeof X !== \"number\" guard on an ID param. IDs must be string."
+            exit 1
+          fi
+          echo "OK — no numeric ID patterns found"
+
       - name: Report server coverage
         uses: https://github.com/davelosert/vitest-coverage-report-action@v2
         if: always()
