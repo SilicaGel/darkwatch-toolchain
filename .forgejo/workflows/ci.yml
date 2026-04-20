@@ -284,7 +284,7 @@ jobs:
         run: cd tests && npx playwright test e2e/spell-exhaustion.spec.ts --reporter=line
 
       - name: Generate coverage badge endpoints
-        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        if: false  # autodeploy paused — UUID migration in progress; re-enable by removing `if: false` lines
         run: |
           node -e "
             const fs = require('fs');
@@ -299,22 +299,22 @@ jobs:
           "
 
       - name: Install Docker CLI
-        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        if: false  # autodeploy paused — UUID migration in progress; re-enable by removing `if: false` lines
         run: |
           apt-get update -qq && apt-get install -y -qq docker.io curl
           curl -fsSL "https://github.com/docker/compose/releases/download/v2.27.0/docker-compose-linux-$(uname -m)" -o /usr/local/bin/docker-compose
           chmod +x /usr/local/bin/docker-compose
 
       - name: Build server Docker image
-        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        if: false  # autodeploy paused — UUID migration in progress; re-enable by removing `if: false` lines
         run: docker build -t darkwatch-server:latest ./server
 
       - name: Copy client build to webroot
-        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        if: false  # autodeploy paused — UUID migration in progress; re-enable by removing `if: false` lines
         run: cp -r client/dist/. /var/www/darkwatch/
 
       - name: Copy brochure to webroot
-        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        if: false  # autodeploy paused — UUID migration in progress; re-enable by removing `if: false` lines
         run: |
           mkdir -p /var/www/brochure
           cp site/style.css site/main.js /var/www/brochure/
@@ -325,7 +325,7 @@ jobs:
           sed "s/\.png\"/\.png?v=${HASH}\"/g" site/index.html > /var/www/brochure/index.html
 
       - name: Deploy server container
-        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        if: false  # autodeploy paused — UUID migration in progress; re-enable by removing `if: false` lines
         env:
           DB_ROOT_PASSWORD: ${{ secrets.DB_ROOT_PASSWORD }}
           DB_NAME: ${{ secrets.DB_NAME }}
