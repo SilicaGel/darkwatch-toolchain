@@ -141,8 +141,9 @@ jobs:
             [ "$i" -eq 30 ] && echo "Vite never came back up" && exit 1
           done
           # Confirm Vite is actually on 5173, not some higher port
-          if ! grep -q "localhost:5173" /tmp/vite.log; then
-            echo "!!! Vite did not bind to 5173 — log:"
+          # Check actual bind via curl. grep on vite.log breaks on ANSI color codes.
+          if ! curl -s -o /dev/null -m 2 http://localhost:5173; then
+            echo "!!! Vite is not responding on 5173 — vite log:"
             tail -n 20 /tmp/vite.log
             echo "=== MARKER: vite-restart FAILED (bind) ===" >> /tmp/playwright.log
             exit 1
@@ -187,8 +188,9 @@ jobs:
             sleep 2
             [ "$i" -eq 30 ] && echo "Vite never came back up" && exit 1
           done
-          if ! grep -q "localhost:5173" /tmp/vite.log; then
-            echo "!!! Vite did not bind to 5173 — log:"
+          # Check actual bind via curl. grep on vite.log breaks on ANSI color codes.
+          if ! curl -s -o /dev/null -m 2 http://localhost:5173; then
+            echo "!!! Vite is not responding on 5173 — vite log:"
             tail -n 20 /tmp/vite.log
             echo "=== MARKER: vite-restart FAILED (bind) ===" >> /tmp/playwright.log
             exit 1
