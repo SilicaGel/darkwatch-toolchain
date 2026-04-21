@@ -194,19 +194,20 @@ jobs:
         env:
           CI_LOG_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          python3 - <<'PY'
-          import json, os, urllib.request
-          server = open('/tmp/server.log').read()[-12000:] if os.path.exists('/tmp/server.log') else '(no server log)'
-          vite = open('/tmp/vite.log').read()[-4000:] if os.path.exists('/tmp/vite.log') else '(no vite log)'
+          tail -c 12000 /tmp/server.log > /tmp/srv.tail 2>/dev/null || echo "(no server log)" > /tmp/srv.tail
+          tail -c 4000 /tmp/vite.log > /tmp/vite.tail 2>/dev/null || echo "(no vite log)" > /tmp/vite.tail
+          python3 -c "
+          import json, os
+          srv = open('/tmp/srv.tail').read()
+          vite = open('/tmp/vite.tail').read()
           run_id = os.environ.get('GITHUB_RUN_ID', 'unknown')
-          sha = os.environ.get('GITHUB_SHA', 'unknown')[:12]
-          body = f"# Run {run_id} @ {sha}\n\n## server.log (tail 12k)\n```\n{server}\n```\n\n## vite.log (tail 4k)\n```\n{vite}\n```"
-          req = urllib.request.Request(
-              'https://forge.example.com/api/v1/repos/aaron/darkwatch/issues/219/comments',
-              data=json.dumps({'body': body}).encode(),
-              headers={'Authorization': f"token {os.environ['CI_LOG_TOKEN']}", 'Content-Type': 'application/json'},
-              method='POST',
-          )
-          with urllib.request.urlopen(req) as r:
-              print('posted comment, status', r.status)
-          PY
+          sha = (os.environ.get('GITHUB_SHA') or '')[:12]
+          body = '# Run ' + run_id + ' @ ' + sha + '\n\n## server.log\n\`\`\`\n' + srv + '\n\`\`\`\n\n## vite.log\n\`\`\`\n' + vite + '\n\`\`\`'
+          open('/tmp/payload.json', 'w').write(json.dumps({'body': body}))
+          "
+          curl -sS -X POST \
+            -H "Authorization: token $CI_LOG_TOKEN" \
+            -H "Content-Type: application/json" \
+            --data-binary @/tmp/payload.json \
+            https://forge.example.com/api/v1/repos/aaron/darkwatch/issues/219/comments \
+            && echo "\nposted" || echo "post failed"
