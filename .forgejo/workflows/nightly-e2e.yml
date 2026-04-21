@@ -188,3 +188,25 @@ jobs:
             PID=$(cat /tmp/vite.pid)
             kill -0 "$PID" 2>/dev/null && echo "vite $PID running" || echo "vite $PID NOT running"
           fi
+
+      - name: Post logs to issue #219 on failure (for autonomous triage)
+        if: failure()
+        env:
+          CI_LOG_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python3 - <<'PY'
+          import json, os, urllib.request
+          server = open('/tmp/server.log').read()[-12000:] if os.path.exists('/tmp/server.log') else '(no server log)'
+          vite = open('/tmp/vite.log').read()[-4000:] if os.path.exists('/tmp/vite.log') else '(no vite log)'
+          run_id = os.environ.get('GITHUB_RUN_ID', 'unknown')
+          sha = os.environ.get('GITHUB_SHA', 'unknown')[:12]
+          body = f"# Run {run_id} @ {sha}\n\n## server.log (tail 12k)\n```\n{server}\n```\n\n## vite.log (tail 4k)\n```\n{vite}\n```"
+          req = urllib.request.Request(
+              'https://forge.example.com/api/v1/repos/aaron/darkwatch/issues/219/comments',
+              data=json.dumps({'body': body}).encode(),
+              headers={'Authorization': f"token {os.environ['CI_LOG_TOKEN']}", 'Content-Type': 'application/json'},
+              method='POST',
+          )
+          with urllib.request.urlopen(req) as r:
+              print('posted comment, status', r.status)
+          PY
