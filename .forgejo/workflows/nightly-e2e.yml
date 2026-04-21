@@ -84,7 +84,7 @@ jobs:
           API_PROXY_URL: "http://localhost:3001"
           NODE_OPTIONS: "--max-old-space-size=512"
         run: |
-          cd client && npx vite preview &
+          cd client && npx vite preview >/tmp/vite.log 2>&1 &
           VITE_PID=$!
           echo $VITE_PID > /tmp/vite.pid
           # Wait for Vite on port 5173
@@ -100,12 +100,39 @@ jobs:
           PLAYWRIGHT_BROWSERS_PATH: /home/ci/playwright-cache
         run: cd tests && npm ci && npx playwright install chromium --with-deps
 
-      - name: Run Playwright E2E tests (stabilize-ownership)
+      - name: Run Playwright E2E tests (stabilize-ownership — Death-save)
         env:
           E2E_SERVER_URL: "http://localhost:3001"
           TEST_HOOK_SECRET: e2e-test-hook-secret
           PLAYWRIGHT_BROWSERS_PATH: /home/ci/playwright-cache
-        run: cd tests && npx playwright test e2e/stabilize-ownership.spec.ts --reporter=line
+        run: cd tests && npx playwright test e2e/stabilize-ownership.spec.ts --grep "Death-save button" --reporter=line
+
+      - name: Restart Vite preview (mid-stabilize)
+        env:
+          API_PROXY_URL: "http://localhost:3001"
+          NODE_OPTIONS: "--max-old-space-size=512"
+        run: |
+          kill $(cat /tmp/vite.pid) 2>/dev/null || pkill -f "vite preview" || true
+          for i in $(seq 1 15); do
+            curl -s -o /dev/null http://localhost:5173 || break
+            echo "Waiting for old Vite to stop... ($i/15)"
+            sleep 1
+          done
+          cd client && npx vite preview >/tmp/vite.log 2>&1 &
+          echo $! > /tmp/vite.pid
+          for i in $(seq 1 30); do
+            curl -s -o /dev/null http://localhost:5173 && break || true
+            echo "Waiting for new Vite... ($i/30)"
+            sleep 2
+            [ "$i" -eq 30 ] && echo "Vite never came back up" && exit 1
+          done
+
+      - name: Run Playwright E2E tests (stabilize-ownership — Stabilize + DM transfer)
+        env:
+          E2E_SERVER_URL: "http://localhost:3001"
+          TEST_HOOK_SECRET: e2e-test-hook-secret
+          PLAYWRIGHT_BROWSERS_PATH: /home/ci/playwright-cache
+        run: cd tests && npx playwright test e2e/stabilize-ownership.spec.ts --grep "Stabilize button|DM control transfer" --reporter=line
 
       - name: Restart Vite preview (clear memory between E2E batches)
         env:
@@ -118,7 +145,7 @@ jobs:
             echo "Waiting for old Vite to stop... ($i/15)"
             sleep 1
           done
-          cd client && npx vite preview &
+          cd client && npx vite preview >/tmp/vite.log 2>&1 &
           echo $! > /tmp/vite.pid
           for i in $(seq 1 30); do
             curl -s -o /dev/null http://localhost:5173 && break || true
@@ -145,17 +172,19 @@ jobs:
             e2e/spell-exhaustion.spec.ts \
             --reporter=line
 
-      - name: Dump server log on failure
+      - name: Dump server and vite logs on failure
         if: failure()
         run: |
           echo "=== server log (last 200 lines) ==="
           tail -n 200 /tmp/server.log || echo "no server log"
-          echo "=== server process status ==="
+          echo "=== vite log (last 200 lines) ==="
+          tail -n 200 /tmp/vite.log || echo "no vite log"
+          echo "=== process status ==="
           if [ -f /tmp/server.pid ]; then
             PID=$(cat /tmp/server.pid)
-            if kill -0 "$PID" 2>/dev/null; then
-              echo "server process $PID is still running"
-            else
-              echo "server process $PID is NOT running (crashed)"
-            fi
+            kill -0 "$PID" 2>/dev/null && echo "server $PID running" || echo "server $PID NOT running"
+          fi
+          if [ -f /tmp/vite.pid ]; then
+            PID=$(cat /tmp/vite.pid)
+            kill -0 "$PID" 2>/dev/null && echo "vite $PID running" || echo "vite $PID NOT running"
           fi
