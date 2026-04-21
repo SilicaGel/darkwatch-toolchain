@@ -105,7 +105,7 @@ jobs:
           E2E_SERVER_URL: "http://localhost:3001"
           TEST_HOOK_SECRET: e2e-test-hook-secret
           PLAYWRIGHT_BROWSERS_PATH: /home/ci/playwright-cache
-        run: cd tests && npx playwright test e2e/stabilize-ownership.spec.ts --grep "Death-save button" --reporter=line
+        run: cd tests && npx playwright test e2e/stabilize-ownership.spec.ts --grep "Death-save button" --reporter=line 2>&1 | tee -a /tmp/playwright.log; exit ${PIPESTATUS[0]}
 
       - name: Restart Vite preview (mid-stabilize)
         env:
@@ -143,7 +143,7 @@ jobs:
           E2E_SERVER_URL: "http://localhost:3001"
           TEST_HOOK_SECRET: e2e-test-hook-secret
           PLAYWRIGHT_BROWSERS_PATH: /home/ci/playwright-cache
-        run: cd tests && npx playwright test e2e/stabilize-ownership.spec.ts --grep "Stabilize button|DM control transfer" --reporter=line
+        run: cd tests && npx playwright test e2e/stabilize-ownership.spec.ts --grep "Stabilize button|DM control transfer" --reporter=line 2>&1 | tee -a /tmp/playwright.log; exit ${PIPESTATUS[0]}
 
       - name: Restart Vite preview (clear memory between E2E batches)
         env:
@@ -179,6 +179,7 @@ jobs:
           TEST_HOOK_SECRET: e2e-test-hook-secret
           PLAYWRIGHT_BROWSERS_PATH: /home/ci/playwright-cache
         run: |
+          set -o pipefail
           cd tests && npx playwright test \
             e2e/condition-expiry.spec.ts \
             e2e/creature-gallery.spec.ts \
@@ -189,7 +190,7 @@ jobs:
             e2e/level-up.spec.ts \
             e2e/rest-button.spec.ts \
             e2e/spell-exhaustion.spec.ts \
-            --reporter=line
+            --reporter=line 2>&1 | tee -a /tmp/playwright.log
 
       - name: Dump server and vite logs on failure
         if: failure()
@@ -214,14 +215,16 @@ jobs:
           CI_LOG_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           tail -c 12000 /tmp/server.log > /tmp/srv.tail 2>/dev/null || echo "(no server log)" > /tmp/srv.tail
-          tail -c 4000 /tmp/vite.log > /tmp/vite.tail 2>/dev/null || echo "(no vite log)" > /tmp/vite.tail
+          tail -c 3000 /tmp/vite.log > /tmp/vite.tail 2>/dev/null || echo "(no vite log)" > /tmp/vite.tail
+          tail -c 20000 /tmp/playwright.log > /tmp/pw.tail 2>/dev/null || echo "(no playwright log)" > /tmp/pw.tail
           python3 -c "
           import json, os
           srv = open('/tmp/srv.tail').read()
           vite = open('/tmp/vite.tail').read()
+          pw = open('/tmp/pw.tail').read()
           run_id = os.environ.get('GITHUB_RUN_ID', 'unknown')
           sha = (os.environ.get('GITHUB_SHA') or '')[:12]
-          body = '# Run ' + run_id + ' @ ' + sha + '\n\n## server.log\n\`\`\`\n' + srv + '\n\`\`\`\n\n## vite.log\n\`\`\`\n' + vite + '\n\`\`\`'
+          body = '# Run ' + run_id + ' @ ' + sha + '\n\n## playwright.log\n\`\`\`\n' + pw + '\n\`\`\`\n\n## server.log\n\`\`\`\n' + srv + '\n\`\`\`\n\n## vite.log\n\`\`\`\n' + vite + '\n\`\`\`'
           open('/tmp/payload.json', 'w').write(json.dumps({'body': body}))
           "
           curl -sS -X POST \
