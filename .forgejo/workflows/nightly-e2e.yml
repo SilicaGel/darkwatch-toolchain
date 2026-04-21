@@ -112,12 +112,17 @@ jobs:
           API_PROXY_URL: "http://localhost:3001"
           NODE_OPTIONS: "--max-old-space-size=512"
         run: |
-          kill $(cat /tmp/vite.pid) 2>/dev/null || pkill -f "vite preview" || true
+          # Aggressive kill: npx wrapper AND the actual vite node child
+          pkill -9 -f "vite preview" 2>/dev/null || true
+          pkill -9 -f "node.*vite" 2>/dev/null || true
+          fuser -k 5173/tcp 2>/dev/null || true
+          # Wait for port 5173 to actually be free
           for i in $(seq 1 15); do
-            curl -s -o /dev/null http://localhost:5173 || break
-            echo "Waiting for old Vite to stop... ($i/15)"
+            if ! curl -s -o /dev/null -m 1 http://localhost:5173; then break; fi
+            echo "Waiting for port 5173 to free... ($i/15)"
             sleep 1
           done
+          sleep 2  # grace so the port is fully released
           cd client && npx vite preview >/tmp/vite.log 2>&1 &
           echo $! > /tmp/vite.pid
           for i in $(seq 1 30); do
@@ -126,6 +131,12 @@ jobs:
             sleep 2
             [ "$i" -eq 30 ] && echo "Vite never came back up" && exit 1
           done
+          # Confirm Vite is actually on 5173, not some higher port
+          if ! grep -q "localhost:5173" /tmp/vite.log; then
+            echo "!!! Vite did not bind to 5173 — log:"
+            tail -n 20 /tmp/vite.log
+            exit 1
+          fi
 
       - name: Run Playwright E2E tests (stabilize-ownership — Stabilize + DM transfer)
         env:
@@ -139,12 +150,15 @@ jobs:
           API_PROXY_URL: "http://localhost:3001"
           NODE_OPTIONS: "--max-old-space-size=512"
         run: |
-          kill $(cat /tmp/vite.pid) 2>/dev/null || pkill -f "vite preview" || true
+          pkill -9 -f "vite preview" 2>/dev/null || true
+          pkill -9 -f "node.*vite" 2>/dev/null || true
+          fuser -k 5173/tcp 2>/dev/null || true
           for i in $(seq 1 15); do
-            curl -s -o /dev/null http://localhost:5173 || break
-            echo "Waiting for old Vite to stop... ($i/15)"
+            if ! curl -s -o /dev/null -m 1 http://localhost:5173; then break; fi
+            echo "Waiting for port 5173 to free... ($i/15)"
             sleep 1
           done
+          sleep 2
           cd client && npx vite preview >/tmp/vite.log 2>&1 &
           echo $! > /tmp/vite.pid
           for i in $(seq 1 30); do
@@ -153,6 +167,11 @@ jobs:
             sleep 2
             [ "$i" -eq 30 ] && echo "Vite never came back up" && exit 1
           done
+          if ! grep -q "localhost:5173" /tmp/vite.log; then
+            echo "!!! Vite did not bind to 5173 — log:"
+            tail -n 20 /tmp/vite.log
+            exit 1
+          fi
 
       - name: Run Playwright E2E tests (batch 1 - remaining 9 specs)
         env:
