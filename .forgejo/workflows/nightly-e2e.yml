@@ -63,6 +63,7 @@ jobs:
           DB_NAME: ${{ secrets.CI_DB_NAME }}
           NODE_ENV: test
           ALLOW_TEST_HOOKS: "true"
+          TEST_HOOK_SECRET: e2e-test-hook-secret
           JWT_SECRET: e2e-test-secret
           CLIENT_URL: http://localhost:5173
           NODE_OPTIONS: "--max-old-space-size=256"
@@ -101,6 +102,7 @@ jobs:
       - name: Run Playwright E2E tests (stabilize-ownership)
         env:
           E2E_SERVER_URL: "http://localhost:3001"
+          TEST_HOOK_SECRET: e2e-test-hook-secret
           PLAYWRIGHT_BROWSERS_PATH: /home/ci/playwright-cache
         run: cd tests && npx playwright test e2e/stabilize-ownership.spec.ts --reporter=line
 
@@ -127,6 +129,7 @@ jobs:
       - name: Run Playwright E2E tests (batch 1 - remaining 9 specs)
         env:
           E2E_SERVER_URL: "http://localhost:3001"
+          TEST_HOOK_SECRET: e2e-test-hook-secret
           PLAYWRIGHT_BROWSERS_PATH: /home/ci/playwright-cache
         run: |
           cd tests && npx playwright test \
