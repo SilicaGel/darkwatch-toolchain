@@ -105,13 +105,7 @@ jobs:
           E2E_SERVER_URL: "http://localhost:3001"
           TEST_HOOK_SECRET: e2e-test-hook-secret
           PLAYWRIGHT_BROWSERS_PATH: /home/ci/playwright-cache
-        shell: bash
-        run: |
-          echo "=== MARKER: pw-deathsave begin $(date +%H:%M:%S) ===" >> /tmp/playwright.log
-          cd tests && npx playwright test e2e/stabilize-ownership.spec.ts --grep "Death-save button" --reporter=line 2>&1 | tee -a /tmp/playwright.log
-          RC=${PIPESTATUS[0]}
-          echo "=== MARKER: pw-deathsave end rc=$RC $(date +%H:%M:%S) ===" >> /tmp/playwright.log
-          exit $RC
+        run: cd tests && npx playwright test e2e/stabilize-ownership.spec.ts --grep "Death-save button" --reporter=line
 
       - name: Restart Vite preview (mid-stabilize)
         env:
@@ -119,59 +113,8 @@ jobs:
           NODE_OPTIONS: "--max-old-space-size=512"
         run: |
           # Aggressive kill: npx wrapper AND the actual vite node child
-          echo "=== MARKER: vite-restart begin $(date +%H:%M:%S) ===" >> /tmp/playwright.log
           pkill -9 -f "vite preview" 2>/dev/null || true
           fuser -k 5173/tcp 2>/dev/null || true
-          # Fall back to lsof if fuser isn't present
-          PIDS=$(lsof -t -i :5173 2>/dev/null || true)
-          [ -n "$PIDS" ] && kill -9 $PIDS 2>/dev/null || true
-          # Wait for port 5173 to actually be free
-          for i in $(seq 1 15); do
-            if ! curl -s -o /dev/null -m 1 http://localhost:5173; then break; fi
-            echo "Waiting for port 5173 to free... ($i/15)"
-            sleep 1
-          done
-          sleep 2  # grace so the port is fully released
-          cd client && npx vite preview >/tmp/vite.log 2>&1 &
-          echo $! > /tmp/vite.pid
-          for i in $(seq 1 30); do
-            curl -s -o /dev/null http://localhost:5173 && break || true
-            echo "Waiting for new Vite... ($i/30)"
-            sleep 2
-            [ "$i" -eq 30 ] && echo "Vite never came back up" && exit 1
-          done
-          # Confirm Vite is actually on 5173, not some higher port
-          # Check actual bind via curl. grep on vite.log breaks on ANSI color codes.
-          if ! curl -s -o /dev/null -m 2 http://localhost:5173; then
-            echo "!!! Vite is not responding on 5173 — vite log:"
-            tail -n 20 /tmp/vite.log
-            echo "=== MARKER: vite-restart FAILED (bind) ===" >> /tmp/playwright.log
-            exit 1
-          fi
-          echo "=== MARKER: vite-restart ok $(date +%H:%M:%S) ===" >> /tmp/playwright.log
-
-      - name: Run Playwright E2E tests (stabilize-ownership — Stabilize + DM transfer)
-        env:
-          E2E_SERVER_URL: "http://localhost:3001"
-          TEST_HOOK_SECRET: e2e-test-hook-secret
-          PLAYWRIGHT_BROWSERS_PATH: /home/ci/playwright-cache
-        shell: bash
-        run: |
-          echo "=== MARKER: pw-stabilize begin $(date +%H:%M:%S) ===" >> /tmp/playwright.log
-          cd tests && npx playwright test e2e/stabilize-ownership.spec.ts --grep "Stabilize button|DM control transfer" --reporter=line 2>&1 | tee -a /tmp/playwright.log
-          RC=${PIPESTATUS[0]}
-          echo "=== MARKER: pw-stabilize end rc=$RC $(date +%H:%M:%S) ===" >> /tmp/playwright.log
-          exit $RC
-
-      - name: Restart Vite preview (clear memory between E2E batches)
-        env:
-          API_PROXY_URL: "http://localhost:3001"
-          NODE_OPTIONS: "--max-old-space-size=512"
-        run: |
-          echo "=== MARKER: vite-restart begin $(date +%H:%M:%S) ===" >> /tmp/playwright.log
-          pkill -9 -f "vite preview" 2>/dev/null || true
-          fuser -k 5173/tcp 2>/dev/null || true
-          # Fall back to lsof if fuser isn't present
           PIDS=$(lsof -t -i :5173 2>/dev/null || true)
           [ -n "$PIDS" ] && kill -9 $PIDS 2>/dev/null || true
           for i in $(seq 1 15); do
@@ -188,14 +131,37 @@ jobs:
             sleep 2
             [ "$i" -eq 30 ] && echo "Vite never came back up" && exit 1
           done
-          # Check actual bind via curl. grep on vite.log breaks on ANSI color codes.
-          if ! curl -s -o /dev/null -m 2 http://localhost:5173; then
-            echo "!!! Vite is not responding on 5173 — vite log:"
-            tail -n 20 /tmp/vite.log
-            echo "=== MARKER: vite-restart FAILED (bind) ===" >> /tmp/playwright.log
-            exit 1
-          fi
-          echo "=== MARKER: vite-restart ok $(date +%H:%M:%S) ===" >> /tmp/playwright.log
+
+      - name: Run Playwright E2E tests (stabilize-ownership — Stabilize + DM transfer)
+        env:
+          E2E_SERVER_URL: "http://localhost:3001"
+          TEST_HOOK_SECRET: e2e-test-hook-secret
+          PLAYWRIGHT_BROWSERS_PATH: /home/ci/playwright-cache
+        run: cd tests && npx playwright test e2e/stabilize-ownership.spec.ts --grep "Stabilize button|DM control transfer" --reporter=line
+
+      - name: Restart Vite preview (clear memory between E2E batches)
+        env:
+          API_PROXY_URL: "http://localhost:3001"
+          NODE_OPTIONS: "--max-old-space-size=512"
+        run: |
+          pkill -9 -f "vite preview" 2>/dev/null || true
+          fuser -k 5173/tcp 2>/dev/null || true
+          PIDS=$(lsof -t -i :5173 2>/dev/null || true)
+          [ -n "$PIDS" ] && kill -9 $PIDS 2>/dev/null || true
+          for i in $(seq 1 15); do
+            if ! curl -s -o /dev/null -m 1 http://localhost:5173; then break; fi
+            echo "Waiting for port 5173 to free... ($i/15)"
+            sleep 1
+          done
+          sleep 2
+          cd client && npx vite preview >/tmp/vite.log 2>&1 &
+          echo $! > /tmp/vite.pid
+          for i in $(seq 1 30); do
+            curl -s -o /dev/null http://localhost:5173 && break || true
+            echo "Waiting for new Vite... ($i/30)"
+            sleep 2
+            [ "$i" -eq 30 ] && echo "Vite never came back up" && exit 1
+          done
 
       - name: Run Playwright E2E tests (batch 1 - remaining 9 specs)
         env:
@@ -203,7 +169,6 @@ jobs:
           TEST_HOOK_SECRET: e2e-test-hook-secret
           PLAYWRIGHT_BROWSERS_PATH: /home/ci/playwright-cache
         run: |
-          set -o pipefail
           cd tests && npx playwright test \
             e2e/condition-expiry.spec.ts \
             e2e/creature-gallery.spec.ts \
@@ -214,7 +179,7 @@ jobs:
             e2e/level-up.spec.ts \
             e2e/rest-button.spec.ts \
             e2e/spell-exhaustion.spec.ts \
-            --reporter=line 2>&1 | tee -a /tmp/playwright.log
+            --reporter=line
 
       - name: Dump server and vite logs on failure
         if: failure()
@@ -223,37 +188,3 @@ jobs:
           tail -n 200 /tmp/server.log || echo "no server log"
           echo "=== vite log (last 200 lines) ==="
           tail -n 200 /tmp/vite.log || echo "no vite log"
-          echo "=== process status ==="
-          if [ -f /tmp/server.pid ]; then
-            PID=$(cat /tmp/server.pid)
-            kill -0 "$PID" 2>/dev/null && echo "server $PID running" || echo "server $PID NOT running"
-          fi
-          if [ -f /tmp/vite.pid ]; then
-            PID=$(cat /tmp/vite.pid)
-            kill -0 "$PID" 2>/dev/null && echo "vite $PID running" || echo "vite $PID NOT running"
-          fi
-
-      - name: Post logs to issue #219 on failure (for autonomous triage)
-        if: failure()
-        env:
-          CI_LOG_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          tail -c 12000 /tmp/server.log > /tmp/srv.tail 2>/dev/null || echo "(no server log)" > /tmp/srv.tail
-          tail -c 3000 /tmp/vite.log > /tmp/vite.tail 2>/dev/null || echo "(no vite log)" > /tmp/vite.tail
-          tail -c 20000 /tmp/playwright.log > /tmp/pw.tail 2>/dev/null || echo "(no playwright log)" > /tmp/pw.tail
-          python3 -c "
-          import json, os
-          srv = open('/tmp/srv.tail').read()
-          vite = open('/tmp/vite.tail').read()
-          pw = open('/tmp/pw.tail').read()
-          run_id = os.environ.get('GITHUB_RUN_ID', 'unknown')
-          sha = (os.environ.get('GITHUB_SHA') or '')[:12]
-          body = '# Run ' + run_id + ' @ ' + sha + '\n\n## playwright.log\n\`\`\`\n' + pw + '\n\`\`\`\n\n## server.log\n\`\`\`\n' + srv + '\n\`\`\`\n\n## vite.log\n\`\`\`\n' + vite + '\n\`\`\`'
-          open('/tmp/payload.json', 'w').write(json.dumps({'body': body}))
-          "
-          curl -sS -X POST \
-            -H "Authorization: token $CI_LOG_TOKEN" \
-            -H "Content-Type: application/json" \
-            --data-binary @/tmp/payload.json \
-            https://forge.example.com/api/v1/repos/aaron/darkwatch/issues/219/comments \
-            && echo "\nposted" || echo "post failed"
