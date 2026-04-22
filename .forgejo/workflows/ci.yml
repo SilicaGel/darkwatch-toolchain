@@ -25,7 +25,7 @@ jobs:
           MYSQL_USER: ${{ secrets.CI_DB_USER }}
           MYSQL_PASSWORD: ${{ secrets.CI_DB_PASSWORD }}
         options: >-
-          --health-cmd="mariadb-admin ping -u root -p${{ secrets.CI_DB_ROOT_PASSWORD }} --silent"
+          --health-cmd="healthcheck.sh --connect --innodb_initialized"
           --health-interval=2s
           --health-timeout=5s
           --health-retries=30
