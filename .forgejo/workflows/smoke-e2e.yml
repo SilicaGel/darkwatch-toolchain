@@ -1,17 +1,15 @@
 name: Smoke E2E
 
-# Runs a tiny critical-path subset after CI succeeds on main.
-# Chained (not parallel) so the Pi runner only has one heavy job at a time.
+# Runs a tiny critical-path subset on push to main only.
+# Forgejo runs each workflow's jobs sequentially on a single-runner Pi, so
+# this will queue behind CI naturally — they won't fight for resources.
 # Full suite lives in nightly-e2e.yml.
 on:
-  workflow_run:
-    workflows: ["CI"]
-    types: [completed]
+  push:
     branches: [main]
 
 jobs:
   smoke:
-    if: ${{ github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     services:
       mariadb:
