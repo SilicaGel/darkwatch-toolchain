@@ -31,6 +31,8 @@ jobs:
           --health-retries=30
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -131,21 +133,19 @@ jobs:
           fi
           echo "OK — no numeric ID patterns found"
 
-      - name: Report server coverage
-        uses: https://github.com/davelosert/vitest-coverage-report-action@v2
-        if: always()
-        with:
-          name: Server
-          json-summary-path: server/coverage/coverage-summary.json
-          json-final-path: server/coverage/coverage-final.json
-
-      - name: Report client coverage
-        uses: https://github.com/davelosert/vitest-coverage-report-action@v2
-        if: always()
-        with:
-          name: Client
-          json-summary-path: client/coverage/coverage-summary.json
-          json-final-path: client/coverage/coverage-final.json
+      - name: Post diff coverage comment
+        if: always() && github.event_name == 'pull_request'
+        env:
+          FORGEJO_URL: ${{ github.server_url }}
+          FORGEJO_TOKEN: ${{ github.token }}
+          REPO_OWNER: ${{ github.repository_owner }}
+          REPO_NAME: ${{ github.event.repository.name }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          BASE_REF: origin/${{ github.base_ref }}
+        run: |
+          git fetch origin ${{ github.base_ref }} --depth=50
+          node scripts/coverage-comment/build-comment.mjs \
+            | node scripts/coverage-comment/post-comment.mjs
 
       # ---------------------------------------------------------------------------
       # Smoke E2E — runs only on push/merge to main, BEFORE deploy.
