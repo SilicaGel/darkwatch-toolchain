@@ -12,6 +12,18 @@ Creates and manages issues on the Darkwatch Forgejo repo.
 
 ---
 
+## Workable-issues filter
+
+When listing issues for the user to pick work from (e.g. "what should I work on", "quick wins", "what's next"), **exclude** any issue carrying these labels:
+
+- `status/qa` — already built, awaiting verification
+- `status/blocked` — can't be started
+- `status/doing` — already in flight
+
+This does NOT apply to duplicate-checks or general triage — only to "what can I work on" style listings.
+
+---
+
 ## Step 1: Load labels (4-hour cache)
 
 Check `/tmp/darkwatch_labels_cache.json`. If it exists and `fetched_at` is less than 4 hours ago, use it. Otherwise fetch fresh and overwrite:

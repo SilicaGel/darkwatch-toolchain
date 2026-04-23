@@ -1,4 +1,4 @@
-name: Label merged issues for review
+name: Label merged issues for QA
 
 on:
   pull_request:
@@ -10,22 +10,25 @@ jobs:
     if: github.event.pull_request.merged == true
     runs-on: ubuntu-latest
     steps:
-      - name: Add 'review' label to closed issues
+      - name: Add 'status/qa' label to referenced issues
         env:
           FORGEJO_TOKEN: ${{ secrets.FORGEJO_TOKEN }}
           PR_BODY: ${{ github.event.pull_request.body }}
           REPO: ${{ github.repository }}
           API_URL: ${{ github.api_url }}
         run: |
+          # Match both `Refs #N` (new convention — avoids Forgejo auto-close)
+          # and `Closes #N` (legacy, in case older PRs still use it).
           echo "$PR_BODY" \
-            | grep -oE 'Closes #[0-9]+' \
+            | grep -oiE '(Refs|Closes) #[0-9]+' \
             | grep -oE '[0-9]+' \
+            | sort -u \
             | while read issue; do
                 curl -s -X POST \
                   -H "Authorization: token $FORGEJO_TOKEN" \
                   -H "Content-Type: application/json" \
-                  --data-raw '{"labels":[33]}' \
+                  --data-raw '{"labels":[38]}' \
                   "$API_URL/repos/$REPO/issues/$issue/labels" \
                   > /dev/null
-                echo "Labelled #$issue with review"
+                echo "Labelled #$issue with status/qa"
               done

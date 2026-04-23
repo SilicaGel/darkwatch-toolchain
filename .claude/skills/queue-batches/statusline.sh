@@ -31,8 +31,15 @@ RESET=$'\033[0m'
 DIM=$'\033[2m'
 SEP="${DIM}  ${RESET}"
 
-line1=""
-[[ -n "$dir" ]]    && line1="${CYAN}$(basename "$dir")${RESET}"
+# Account badge derived from CLAUDE_CONFIG_DIR
+if [[ "${CLAUDE_CONFIG_DIR:-}" == "$HOME/.claude-personal" ]]; then
+  account="personal"; acct_color="$MAGENTA"
+else
+  account="work";     acct_color="$GREEN"
+fi
+
+line1="${acct_color}[${account}]${RESET}"
+[[ -n "$dir" ]]    && line1="${line1}${SEP}${CYAN}$(basename "$dir")${RESET}"
 [[ -n "$branch" ]] && line1="${line1}${SEP}${YELLOW}${branch}${RESET}"
 [[ -n "$model" ]]  && line1="${line1}${SEP}${MAGENTA}${model}${RESET}"
 
