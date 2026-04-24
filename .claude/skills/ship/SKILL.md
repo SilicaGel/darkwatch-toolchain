@@ -1,6 +1,6 @@
 ---
 name: ship
-description: Use when a development branch is ready to merge — updates changelog, handbook, roadmap, and brochure (if UI changed), commits all docs in one coordinated commit, then opens a PR via the Forgejo API with `Refs #N` for every resolved issue (NOT `Closes` — issues stay open and get moved to `status/qa` on merge by the label-merged-issues workflow).
+description: Use when a development branch is ready to merge — updates changelog, handbook, roadmap, and brochure (if UI changed), commits all docs in one coordinated commit, then opens a PR via the Forgejo API with `Ready #N` for every resolved issue (NOT `Closes` — issues stay open and get moved to `status/qa` on merge by the label-merged-issues workflow).
 ---
 
 # ship
@@ -37,7 +37,7 @@ git log main...HEAD --oneline
 git branch --show-current
 ```
 
-Note any `#N` references in the commit messages — these become `Refs #N` lines in the PR body. (We intentionally do NOT use `Closes`: Forgejo auto-closes on that keyword, and we want issues to move to `status/qa` for real-world verification before closing.)
+Note any `#N` references in the commit messages — **only those that are actually resolved by this branch** become `Ready #N` lines in the PR body. Use judgment: a commit that mentions an issue for context but doesn't fix it should NOT get a `Ready` line. (We intentionally do NOT use `Closes`: Forgejo auto-closes on that keyword, and we want issues to move to `status/qa` for real-world verification before closing.)
 
 ## Step 2: Update the docs
 
@@ -85,7 +85,7 @@ If already pushed, this is a no-op.
 
 ## Step 5: Open the PR via Forgejo API
 
-Use the `#N` references collected in Step 1 to build the `Refs` list. If no issue references were found in commits, leave a placeholder and note it to the user.
+Use the resolved `#N` issues identified in Step 1 to build the `Ready` list. If no issues are being resolved by this branch, omit the `Ready` lines entirely — do not add a placeholder.
 
 ```bash
 BRANCH=$(git branch --show-current)
@@ -95,7 +95,7 @@ curl -s -X POST \
   -H "Content-Type: application/json" \
   -d "{
     \"title\": \"short title under 70 chars\",
-    \"body\": \"## Summary\n- bullet 1\n- bullet 2\n\n## Test plan\n- [ ] item\n\nRefs #N\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\",
+    \"body\": \"## Summary\n- bullet 1\n- bullet 2\n\n## Test plan\n- [ ] item\n\nReady #N\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\",
     \"head\": \"$BRANCH\",
     \"base\": \"main\"
   }" \
@@ -107,7 +107,7 @@ Capture the PR number from the response — you need it for Step 6.
 
 Report the PR number and URL to the user.
 
-After opening the PR, add the `status/review` label (id: 37) to every issue referenced in `Refs #N`. On merge, the `label-merged-issues` workflow will flip it to `status/qa` (id: 38):
+After opening the PR, add the `status/review` label (id: 37) to every issue listed in `Ready #N`. On merge, the `label-merged-issues` workflow will flip it to `status/qa` (id: 38):
 
 ```bash
 # For each issue number N found in the commit log:

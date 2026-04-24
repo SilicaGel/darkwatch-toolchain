@@ -17,18 +17,15 @@ jobs:
           REPO: ${{ github.repository }}
           API_URL: ${{ github.api_url }}
         run: |
-          # Match both `Refs #N` (new convention — avoids Forgejo auto-close)
+          # Match both `Ready #N` (new convention — avoids Forgejo auto-close)
           # and `Closes #N` (legacy, in case older PRs still use it).
-          echo "$PR_BODY" \
-            | grep -oiE '(Refs|Closes) #[0-9]+' \
-            | grep -oE '[0-9]+' \
-            | sort -u \
-            | while read issue; do
-                curl -s -X POST \
-                  -H "Authorization: token $FORGEJO_TOKEN" \
-                  -H "Content-Type: application/json" \
-                  --data-raw '{"labels":[38]}' \
-                  "$API_URL/repos/$REPO/issues/$issue/labels" \
-                  > /dev/null
-                echo "Labelled #$issue with status/qa"
-              done
+          ISSUES=$(echo "$PR_BODY" | grep -oiE '(Ready|Closes) #[0-9]+' | grep -oE '[0-9]+' | sort -u || true)
+          echo "$ISSUES" | grep -v '^$' | while read issue; do
+            curl -s -X POST \
+              -H "Authorization: token $FORGEJO_TOKEN" \
+              -H "Content-Type: application/json" \
+              --data-raw '{"labels":[38]}' \
+              "$API_URL/repos/$REPO/issues/$issue/labels" \
+              > /dev/null
+            echo "Labelled #$issue with status/qa"
+          done
