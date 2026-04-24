@@ -1,0 +1,53 @@
+name: Deploy
+
+on:
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install client dependencies
+        run: cd client && npm ci
+
+      - name: Build client
+        run: cd client && npm run build
+
+      - name: Install Docker CLI
+        run: |
+          apt-get update -qq && apt-get install -y -qq docker.io curl
+          curl -fsSL "https://github.com/docker/compose/releases/download/v2.27.0/docker-compose-linux-$(uname -m)" -o /usr/local/bin/docker-compose
+          chmod +x /usr/local/bin/docker-compose
+
+      - name: Build server Docker image
+        run: docker build -t darkwatch-server:latest ./server
+
+      - name: Copy client build to webroot
+        run: cp -r client/dist/. /var/www/darkwatch/
+
+      - name: Copy brochure to webroot
+        run: |
+          mkdir -p /var/www/brochure
+          cp site/style.css site/main.js /var/www/brochure/
+          cp -r site/assets /var/www/brochure/
+          HASH=$(git rev-parse --short HEAD)
+          sed "s/\.png\"/\.png?v=${HASH}\"/g" site/index.html > /var/www/brochure/index.html
+
+      - name: Deploy server container
+        env:
+          DB_ROOT_PASSWORD: ${{ secrets.DB_ROOT_PASSWORD }}
+          DB_NAME: ${{ secrets.DB_NAME }}
+          DB_USER: ${{ secrets.DB_USER }}
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          CLIENT_URL: ${{ secrets.CLIENT_URL }}
+        run: |
+          docker rm -f darkwatch-server 2>/dev/null || true
+          docker-compose -f /home/ci/services/darkwatch/docker-compose.yml up -d --remove-orphans
