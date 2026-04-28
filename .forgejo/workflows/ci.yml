@@ -4,7 +4,6 @@ on:
   push:
     branches: [main]
   pull_request:
-    branches: [main]
 
 permissions:
   contents: read
@@ -90,6 +89,15 @@ jobs:
           DATABASE_URL: mysql://${{ secrets.CI_DB_USER }}:${{ secrets.CI_DB_PASSWORD }}@mariadb:3306/${{ secrets.CI_DB_NAME }}
         run: cd server && npm run db:verify
 
+      - name: Seed core + shadowdark content (int tests assume seeded DB)
+        env:
+          DB_HOST: mariadb
+          DB_PORT: "3306"
+          DB_USER: ${{ secrets.CI_DB_USER }}
+          DB_PASSWORD: ${{ secrets.CI_DB_PASSWORD }}
+          DB_NAME: ${{ secrets.CI_DB_NAME }}
+        run: cd server && npm run seed:core && npm run seed:shadowdark
+
       - name: Integration tests (repositories against real DB)
         env:
           DB_HOST: mariadb
@@ -97,6 +105,7 @@ jobs:
           DB_USER: ${{ secrets.CI_DB_USER }}
           DB_PASSWORD: ${{ secrets.CI_DB_PASSWORD }}
           DB_NAME: ${{ secrets.CI_DB_NAME }}
+          DATABASE_URL: mysql://${{ secrets.CI_DB_USER }}:${{ secrets.CI_DB_PASSWORD }}@mariadb:3306/${{ secrets.CI_DB_NAME }}
         run: cd server && npm run test:int
 
       - name: Install client dependencies
@@ -156,12 +165,11 @@ jobs:
             | node scripts/coverage-comment/post-comment.mjs
 
       # ---------------------------------------------------------------------------
-      # Smoke E2E — runs only on push/merge to main, BEFORE deploy.
-      # Full E2E suite lives in .forgejo/workflows/nightly-e2e.yml.
+      # Smoke E2E — runs on every PR push and on push/merge to main.
+      # Full E2E suite (every spec) lives in .forgejo/workflows/nightly-e2e.yml.
       # ---------------------------------------------------------------------------
 
       - name: Smoke — start E2E app server
-        if: github.event_name == 'push'
         env:
           PORT: "3001"
           DB_HOST: mariadb
@@ -186,7 +194,6 @@ jobs:
           done
 
       - name: Smoke — start Vite preview server
-        if: github.event_name == 'push'
         env:
           API_PROXY_URL: "http://localhost:3001"
           NODE_OPTIONS: "--max-old-space-size=512"
@@ -200,13 +207,14 @@ jobs:
           done
 
       - name: Smoke — install Playwright and browsers
-        if: github.event_name == 'push'
         env:
           PLAYWRIGHT_BROWSERS_PATH: /home/ci/playwright-cache
         run: cd tests && npm ci && npx playwright install chromium --with-deps
 
+      - name: Typecheck tests/ (specs + helpers + smoke-walk)
+        run: cd tests && npm run typecheck
+
       - name: Smoke — run critical specs
-        if: github.event_name == 'push'
         env:
           E2E_SERVER_URL: "http://localhost:3001"
           TEST_HOOK_SECRET: e2e-test-hook-secret
@@ -216,6 +224,11 @@ jobs:
             e2e/dashboard.spec.ts \
             e2e/death-timer.spec.ts \
             e2e/crit-banner.spec.ts \
+            e2e/character-creation.spec.ts \
+            e2e/campaign-creation.spec.ts \
+            e2e/level-up.spec.ts \
+            e2e/condition-expiry.spec.ts \
+            e2e/dm-player-visibility.spec.ts \
             --reporter=line
 
       - name: Generate coverage badge endpoints
