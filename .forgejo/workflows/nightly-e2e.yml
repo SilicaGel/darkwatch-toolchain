@@ -58,6 +58,24 @@ jobs:
             [ "$i" -eq 30 ] && echo "MariaDB never became ready" && exit 1
           done
 
+      - name: Apply migrations to CI DB
+        env:
+          DB_HOST: mariadb
+          DB_PORT: "3306"
+          DB_USER: ${{ secrets.CI_DB_USER }}
+          DB_PASSWORD: ${{ secrets.CI_DB_PASSWORD }}
+          DB_NAME: ${{ secrets.CI_DB_NAME }}
+        run: cd server && npm run db:migrate
+
+      - name: Seed core + shadowdark content (e2e tests assume seeded DB)
+        env:
+          DB_HOST: mariadb
+          DB_PORT: "3306"
+          DB_USER: ${{ secrets.CI_DB_USER }}
+          DB_PASSWORD: ${{ secrets.CI_DB_PASSWORD }}
+          DB_NAME: ${{ secrets.CI_DB_NAME }}
+        run: cd server && npm run seed:core && npm run seed:shadowdark && npm run seed:shadowdark:demo
+
       - name: Start E2E app server
         env:
           PORT: "3001"
