@@ -194,7 +194,7 @@ jobs:
             [ "$i" -eq 30 ] && echo "Vite never came back up" && exit 1
           done
 
-      - name: Run Playwright E2E tests (batch 1 - remaining 9 specs)
+      - name: Run Playwright E2E tests (batch 2 — core specs)
         env:
           E2E_SERVER_URL: "http://localhost:3001"
           TEST_HOOK_SECRET: e2e-test-hook-secret
@@ -212,7 +212,70 @@ jobs:
             e2e/spell-exhaustion.spec.ts \
             --reporter=line
 
-      - name: Dump server and vite logs on failure
+      - name: Restart Vite preview (before batch 3)
+        env:
+          API_PROXY_URL: "http://localhost:3001"
+          NODE_OPTIONS: "--max-old-space-size=512"
+        run: |
+          pkill -9 -f "vite preview" 2>/dev/null || true
+          fuser -k 5173/tcp 2>/dev/null || true
+          PIDS=$(lsof -t -i :5173 2>/dev/null || true)
+          [ -n "$PIDS" ] && kill -9 $PIDS 2>/dev/null || true
+          for i in $(seq 1 15); do
+            if ! curl -s -o /dev/null -m 1 http://localhost:5173; then break; fi
+            echo "Waiting for port 5173 to free... ($i/15)"
+            sleep 1
+          done
+          sleep 2
+          cd client && npx vite preview >/tmp/vite.log 2>&1 &
+          echo $! > /tmp/vite.pid
+          for i in $(seq 1 30); do
+            curl -s -o /dev/null http://localhost:5173 && break || true
+            echo "Waiting for new Vite... ($i/30)"
+            sleep 2
+            [ "$i" -eq 30 ] && echo "Vite never came back up" && exit 1
+          done
+
+      - name: Run Playwright E2E tests (batch 3 — campaign, character-creation, combat, visibility)
+        env:
+          E2E_SERVER_URL: "http://localhost:3001"
+          TEST_HOOK_SECRET: e2e-test-hook-secret
+          PLAYWRIGHT_BROWSERS_PATH: /home/ci/playwright-cache
+        run: |
+          cd tests && npx playwright test \
+            e2e/campaign-creation.spec.ts \
+            e2e/character-creation.spec.ts \
+            e2e/combat-damage.spec.ts \
+            e2e/dm-player-visibility.spec.ts \
+            --reporter=line
+
+      - name: Collect logs for artifact
+        if: always()
+        run: |
+          mkdir -p /tmp/e2e-logs
+          # Server and Vite process logs
+          cp /tmp/server.log /tmp/e2e-logs/server.log 2>/dev/null || echo "(no server log)" > /tmp/e2e-logs/server.log
+          cp /tmp/vite.log /tmp/e2e-logs/vite.log 2>/dev/null || echo "(no vite log)" > /tmp/e2e-logs/vite.log
+          # Playwright HTML report (if present)
+          if [ -d tests/playwright-report ]; then
+            cp -r tests/playwright-report /tmp/e2e-logs/playwright-report
+          fi
+          # Playwright test results (JUnit XML etc.)
+          if [ -d tests/test-results ]; then
+            cp -r tests/test-results /tmp/e2e-logs/test-results
+          fi
+          echo "Log collection complete. Contents:"
+          find /tmp/e2e-logs -type f | head -40
+
+      - name: Upload E2E logs artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-e2e-logs-${{ github.run_id }}
+          path: /tmp/e2e-logs/
+          retention-days: 14
+
+      - name: Dump server and vite logs on failure (inline)
         if: failure()
         run: |
           echo "=== server log (last 200 lines) ==="

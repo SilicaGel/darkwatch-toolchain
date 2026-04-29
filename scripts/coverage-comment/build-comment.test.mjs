@@ -7,6 +7,8 @@ import assert from "node:assert/strict";
 import {
   parseDiff,
   classifyFile,
+  classifyFileDual,
+  renderSplitTable,
   toRanges,
   fmtRange,
   renderSnippet,
@@ -160,16 +162,115 @@ describe("parseThresholdOverride", () => {
 });
 
 // ── renderSnippet ──────────────────────────────────────────────────────────
+// ── classifyFileDual ───────────────────────────────────────────────────────
+describe("classifyFileDual", () => {
+  it("marks UI when covered by both unit and integration", () => {
+    const e = entry([[stmt(1, 0, 1, 10), 1]]);
+    const r = classifyFileDual(e, e, [1]);
+    assert.deepEqual(r.covered, [1]);
+    assert.equal(r.gutter.get(1), "UI");
+  });
+
+  it("marks U when covered only by unit", () => {
+    const unitEntry = entry([[stmt(1, 0, 1, 10), 1]]);
+    const intEntry = entry([[stmt(1, 0, 1, 10), 0]]);
+    const r = classifyFileDual(unitEntry, intEntry, [1]);
+    assert.deepEqual(r.covered, [1]);
+    assert.equal(r.gutter.get(1), "U");
+  });
+
+  it("marks I when covered only by integration", () => {
+    const unitEntry = entry([[stmt(1, 0, 1, 10), 0]]);
+    const intEntry = entry([[stmt(1, 0, 1, 10), 2]]);
+    const r = classifyFileDual(unitEntry, intEntry, [1]);
+    assert.deepEqual(r.covered, [1]);
+    assert.equal(r.gutter.get(1), "I");
+  });
+
+  it("puts uncovered lines in uncovered when both miss", () => {
+    const e = entry([[stmt(1, 0, 1, 10), 0]]);
+    const r = classifyFileDual(e, e, [1]);
+    assert.deepEqual(r.uncovered, [1]);
+    assert.equal(r.gutter.has(1), false);
+  });
+
+  it("handles null entries gracefully — hasCoverageData false when both null", () => {
+    const r = classifyFileDual(null, null, [1, 2]);
+    assert.equal(r.hasCoverageData, false);
+    assert.deepEqual(r.irrelevant, [1, 2]);
+  });
+
+  it("hasCoverageData true when at least one entry present", () => {
+    const e = entry([[stmt(1, 0, 1, 10), 1]]);
+    const r = classifyFileDual(e, null, [1]);
+    assert.equal(r.hasCoverageData, true);
+  });
+
+  it("populates coveredUnit / totalUnit / coveredInt / totalInt", () => {
+    const unitEntry = entry([[stmt(1, 0, 1, 10), 1], [stmt(2, 0, 2, 10), 0]]);
+    const intEntry = entry([[stmt(1, 0, 1, 10), 0], [stmt(2, 0, 2, 10), 1]]);
+    const r = classifyFileDual(unitEntry, intEntry, [1, 2]);
+    assert.equal(r.coveredUnit, 1);
+    assert.equal(r.totalUnit, 2);
+    assert.equal(r.coveredInt, 1);
+    assert.equal(r.totalInt, 2);
+  });
+});
+
+// ── renderSplitTable ──────────────────────────────────────────────────────
+describe("renderSplitTable", () => {
+  it("renders unit / integration / combined rows", () => {
+    const files = [{
+      covered: [1, 2],
+      uncovered: [],
+      coveredUnit: 1,
+      totalUnit: 2,
+      coveredInt: 2,
+      totalInt: 2,
+    }];
+    const t = renderSplitTable(files);
+    assert.match(t, /Unit/);
+    assert.match(t, /Integration/);
+    assert.match(t, /Combined/);
+    assert.match(t, /50%/); // unit: 1/2
+    assert.match(t, /100%/); // integration: 2/2
+  });
+
+  it("shows — for zero-total rows", () => {
+    const files = [{ covered: [], uncovered: [], coveredUnit: 0, totalUnit: 0, coveredInt: 0, totalInt: 0 }];
+    const t = renderSplitTable(files);
+    assert.match(t, /—/);
+  });
+});
+
+// ── renderSnippet ──────────────────────────────────────────────────────────
 describe("renderSnippet", () => {
-  it("renders uncovered lines with `-` marker and covered with `+`", () => {
+  it("renders covered lines with green bar and uncovered with red bar", () => {
     const src = ["a", "b", "c", "d", "e"];
     const out = renderSnippet(src, [2], [4]);
-    assert.match(out, /\+ {4}2 {2}b/);
-    assert.match(out, /- {4}4 {2}d/);
+    assert.match(out, /<pre>/);
+    // Covered line 2: green bar color
+    assert.match(out, /background-color:#1a7f37[^>]*>\|<\/span>.*b/s);
+    // Uncovered line 4: red bar color
+    assert.match(out, /background-color:#cf222e[^>]*>\|<\/span>.*d/s);
+    // Both changed lines have green row background
+    assert.match(out, /background-color:#e6ffec/);
   });
 
   it("returns null when nothing changed", () => {
     assert.equal(renderSnippet(["x"], [], []), null);
+  });
+
+  it("shows muted bar on covered context lines when coverageEntry provided", () => {
+    const src = ["ctx", "changed", "ctx2"];
+    const e = entry([[stmt(1, 0, 1, 10), 3], [stmt(3, 0, 3, 10), 0]]);
+    const out = renderSnippet(src, [2], [], null, e);
+    // Line 1 (context, covered) — muted green bar
+    assert.match(out, /aceebb/);
+    // Line 3 (context, uncovered) — muted red bar
+    assert.match(out, /ffcdd0/);
+    // Line 2 (changed, covered) — bright green bar
+    assert.match(out, /background-color:#1a7f37/);
   });
 });
 
@@ -211,7 +312,10 @@ describe("buildComment", () => {
       ...baseOpts,
     });
     assert.match(md, /Diff coverage: 66\.7%/);
-    assert.match(md, /Missing: \*\*L2\*\*/);
+    // The "Missing: L..." list was removed (diff snippet shows uncovered lines visually).
+    assert.doesNotMatch(md, /Missing: \*\*L/);
+    // The snippet should show line2 with a red (uncovered) bar.
+    assert.match(md, /cf222e/);
     assert.match(md, /below 80% diff coverage/);
   });
 
@@ -292,5 +396,62 @@ describe("buildComment", () => {
       ...baseOpts,
     });
     assert.match(md, /No code files changed/);
+  });
+
+  it("renders split table and gutter markers in dual mode", () => {
+    const diff = ["+++ b/src/a.ts", "@@ -0,0 +1,3 @@"].join("\n");
+    // Unit covers line 1, integration covers line 2, both cover line 3.
+    const unitCoverage = new Map([
+      ["src/a.ts", entry([
+        [stmt(1, 0, 1, 10), 1],
+        [stmt(2, 0, 2, 10), 0],
+        [stmt(3, 0, 3, 10), 1],
+      ])],
+    ]);
+    const intCoverage = new Map([
+      ["src/a.ts", entry([
+        [stmt(1, 0, 1, 10), 0],
+        [stmt(2, 0, 2, 10), 1],
+        [stmt(3, 0, 3, 10), 1],
+      ])],
+    ]);
+    const md = buildComment({
+      diffText: diff,
+      coverageByPath: new Map([...unitCoverage, ...intCoverage]),
+      coverageByPathUnit: unitCoverage,
+      coverageByPathInt: intCoverage,
+      readSource: () => "lineA\nlineB\nlineC\n",
+      ...baseOpts,
+    });
+    assert.match(md, /Unit/);
+    assert.match(md, /Integration/);
+    assert.match(md, /Combined/);
+    // All 3 lines covered combined → 100%
+    assert.match(md, /Diff coverage: 100\.0%/);
+  });
+
+  it("does not include Missing line list in uncovered file sections", () => {
+    const diff = ["+++ b/src/a.ts", "@@ -0,0 +1,3 @@"].join("\n");
+    const coverage = new Map([
+      [
+        "src/a.ts",
+        entry([
+          [stmt(1, 0, 1, 10), 1],
+          [stmt(2, 0, 2, 10), 0],
+          [stmt(3, 0, 3, 10), 0],
+        ]),
+      ],
+    ]);
+    const md = buildComment({
+      diffText: diff,
+      coverageByPath: coverage,
+      readSource: () => "line1\nline2\nline3\n",
+      ...baseOpts,
+      threshold: 80,
+    });
+    // Should NOT have a "Missing: **L..." line
+    assert.doesNotMatch(md, /Missing: \*\*L/);
+    // But should still show uncovered lines in the diff snippet
+    assert.match(md, /line2/);
   });
 });

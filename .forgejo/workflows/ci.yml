@@ -112,7 +112,7 @@ jobs:
           DB_PASSWORD: ${{ secrets.CI_DB_PASSWORD }}
           DB_NAME: ${{ secrets.CI_DB_NAME }}
           DATABASE_URL: mysql://${{ secrets.CI_DB_USER }}:${{ secrets.CI_DB_PASSWORD }}@mariadb:3306/${{ secrets.CI_DB_NAME }}
-        run: cd server && npm run test:int
+        run: cd server && npm run test:int:coverage
 
       - name: Install client dependencies
         run: cd client && npm ci
@@ -163,7 +163,10 @@ jobs:
           REPO_NAME: ${{ github.event.repository.name }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           BASE_REF: origin/${{ github.base_ref }}
-          COVERAGE_FILES: server/coverage/coverage-final.json,client/coverage/coverage-final.json,scripts/coverage/coverage-final.json
+          # Dual-mode coverage: unit and integration datasets shown separately
+          # with per-line gutter markers (U/I/UI) in code snippets.
+          COVERAGE_FILES_UNIT: server/coverage/coverage-final.json,client/coverage/coverage-final.json,scripts/coverage/coverage-final.json
+          COVERAGE_FILES_INT: server/coverage-int/coverage-final.json
           PR_TITLE: ${{ github.event.pull_request.title }}
         run: |
           git fetch origin ${{ github.base_ref }} --depth=50
@@ -246,7 +249,7 @@ jobs:
             --reporter=line
 
       - name: Generate coverage badge endpoints
-        if: false  # autodeploy paused — multi-ruleset refactor (#206) in progress; re-enable by removing `if: false` lines
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         run: |
           node -e "
             const fs = require('fs');
@@ -261,22 +264,22 @@ jobs:
           "
 
       - name: Install Docker CLI
-        if: false  # autodeploy paused — multi-ruleset refactor (#206) in progress; re-enable by removing `if: false` lines
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         run: |
           apt-get update -qq && apt-get install -y -qq docker.io curl
           curl -fsSL "https://github.com/docker/compose/releases/download/v2.27.0/docker-compose-linux-$(uname -m)" -o /usr/local/bin/docker-compose
           chmod +x /usr/local/bin/docker-compose
 
       - name: Build server Docker image
-        if: false  # autodeploy paused — multi-ruleset refactor (#206) in progress; re-enable by removing `if: false` lines
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         run: docker build -t darkwatch-server:latest ./server
 
       - name: Copy client build to webroot
-        if: false  # autodeploy paused — multi-ruleset refactor (#206) in progress; re-enable by removing `if: false` lines
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         run: cp -r client/dist/. /var/www/darkwatch/
 
       - name: Copy brochure to webroot
-        if: false  # autodeploy paused — multi-ruleset refactor (#206) in progress; re-enable by removing `if: false` lines
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         run: |
           mkdir -p /var/www/brochure
           cp site/style.css site/main.js /var/www/brochure/
@@ -287,7 +290,7 @@ jobs:
           sed "s/\.png\"/\.png?v=${HASH}\"/g" site/index.html > /var/www/brochure/index.html
 
       - name: Deploy server container
-        if: false  # autodeploy paused — multi-ruleset refactor (#206) in progress; re-enable by removing `if: false` lines
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         env:
           DB_ROOT_PASSWORD: ${{ secrets.DB_ROOT_PASSWORD }}
           DB_NAME: ${{ secrets.DB_NAME }}
