@@ -37,12 +37,18 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: |
+            package-lock.json
+            server/package-lock.json
+            client/package-lock.json
+            tests/package-lock.json
 
       - name: Install root devDependencies (c8, concurrently)
         run: npm ci --no-audit --no-fund
 
       - name: Install server dependencies
-        run: cd server && npm install
+        run: cd server && npm ci --no-audit --no-fund
 
       - name: Enforce soft-delete filters on core tables
         run: |
@@ -205,6 +211,14 @@ jobs:
             sleep 2
             [ "$i" -eq 30 ] && echo "Vite preview server never became ready" && exit 1
           done
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: /home/ci/playwright-cache
+          key: playwright-${{ runner.os }}-${{ hashFiles('tests/package-lock.json') }}
+          restore-keys: |
+            playwright-${{ runner.os }}-
 
       - name: Smoke — install Playwright and browsers
         env:
