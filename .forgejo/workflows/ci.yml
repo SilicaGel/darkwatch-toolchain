@@ -279,6 +279,24 @@ jobs:
             e2e/dm-player-visibility.spec.ts \
             --reporter=line
 
+      # Badge endpoints — disabled until badges are surfaced somewhere on the brochure.
+      # To re-enable: change if: false back to the main-push condition and switch
+      # test:coverage back on main so the coverage-summary.json files exist.
+      - name: Generate coverage badge endpoints
+        if: false
+        run: |
+          node -e "
+            const fs = require('fs');
+            function badge(label, summaryPath, outPath) {
+              const s = JSON.parse(fs.readFileSync(summaryPath));
+              const pct = s.total.lines.pct;
+              const color = pct >= 80 ? 'brightgreen' : pct >= 60 ? 'yellow' : pct >= 40 ? 'orange' : 'red';
+              fs.writeFileSync(outPath, JSON.stringify({ schemaVersion: 1, label, message: pct + '%', color }));
+            }
+            badge('server coverage', './server/coverage/coverage-summary.json', '/var/www/brochure/server-coverage.json');
+            badge('client coverage', './client/coverage/coverage-summary.json', '/var/www/brochure/client-coverage.json');
+          "
+
       - name: Install Docker CLI
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         run: |
