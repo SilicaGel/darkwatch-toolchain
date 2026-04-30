@@ -36,7 +36,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
           cache: 'npm'
           cache-dependency-path: |
             package-lock.json
@@ -48,7 +48,16 @@ jobs:
         run: npm ci --no-audit --no-fund
 
       - name: Install server dependencies
-        run: cd server && npm ci --no-audit --no-fund
+        run: |
+          cd server && npm ci --no-audit --no-fund
+          # npm bug #4828: platform-specific optional bindings can be skipped when
+          # the runner's Node doesn't satisfy the package's engines field.
+          # Force-install the linux-arm64 rolldown binding if npm ci missed it.
+          if [ ! -d "node_modules/@rolldown/binding-linux-arm64-gnu" ]; then
+            VER=$(node -e "const l=JSON.parse(require('fs').readFileSync('package-lock.json','utf8')); console.log(l.packages['node_modules/@rolldown/binding-linux-arm64-gnu'].version)")
+            echo "Patching missing rolldown linux-arm64 binding @ $VER"
+            npm install --no-save --ignore-engines "@rolldown/binding-linux-arm64-gnu@$VER"
+          fi
 
       - name: Enforce soft-delete filters on core tables
         run: |
