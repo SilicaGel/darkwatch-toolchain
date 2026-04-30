@@ -289,16 +289,6 @@ jobs:
           HASH=$(git rev-parse --short HEAD)
           sed "s/\.png\"/\.png?v=${HASH}\"/g" site/index.html > /var/www/brochure/index.html
 
-      - name: Run production migrations
-        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-        env:
-          DB_HOST: 127.0.0.1
-          DB_PORT: 3397
-          DB_NAME: ${{ secrets.DB_NAME }}
-          DB_USER: ${{ secrets.DB_USER }}
-          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
-        run: cd server && npm run db:migrate
-
       - name: Deploy server container
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         env:
