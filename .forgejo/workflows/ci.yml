@@ -298,6 +298,7 @@ jobs:
           DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
           JWT_SECRET: ${{ secrets.JWT_SECRET }}
           CLIENT_URL: ${{ secrets.CLIENT_URL }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
           docker rm -f darkwatch-server 2>/dev/null || true
           docker-compose -f /home/ci/services/darkwatch/docker-compose.yml up -d --remove-orphans
