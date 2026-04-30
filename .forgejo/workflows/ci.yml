@@ -70,7 +70,12 @@ jobs:
         run: cd server && npm run build
 
       - name: Test server
-        run: cd server && npm run test:coverage
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            cd server && npm run test:coverage
+          else
+            cd server && npm run test
+          fi
 
       - name: Wait for MariaDB (for Kysely schema check)
         run: |
@@ -112,7 +117,12 @@ jobs:
           DB_PASSWORD: ${{ secrets.CI_DB_PASSWORD }}
           DB_NAME: ${{ secrets.CI_DB_NAME }}
           DATABASE_URL: mysql://${{ secrets.CI_DB_USER }}:${{ secrets.CI_DB_PASSWORD }}@mariadb:3306/${{ secrets.CI_DB_NAME }}
-        run: cd server && npm run test:int:coverage
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            cd server && npm run test:int:coverage
+          else
+            cd server && npm run test:int
+          fi
 
       - name: Install client dependencies
         run: cd client && npm ci
@@ -121,10 +131,20 @@ jobs:
         run: cd client && npm run build
 
       - name: Test client
-        run: cd client && npm run test:coverage
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            cd client && npm run test:coverage
+          else
+            cd client && npm run test
+          fi
 
-      - name: Test coverage-bot scripts (with self-coverage)
-        run: npm run test:scripts:coverage
+      - name: Test coverage-bot scripts
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            npm run test:scripts:coverage
+          else
+            npm run test:scripts
+          fi
 
       - name: Forbid numeric ID patterns
         run: |
@@ -178,7 +198,13 @@ jobs:
       # Full E2E suite (every spec) lives in .forgejo/workflows/nightly-e2e.yml.
       # ---------------------------------------------------------------------------
 
+      # ---------------------------------------------------------------------------
+      # Smoke E2E skipped on PRs — unit + integration tests are the PR gate.
+      # Smoke runs on push to main so regressions are caught before deploy.
+      # ---------------------------------------------------------------------------
+
       - name: Smoke — start E2E app server
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         env:
           PORT: "3001"
           DB_HOST: mariadb
@@ -203,6 +229,7 @@ jobs:
           done
 
       - name: Smoke — start Vite preview server
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         env:
           API_PROXY_URL: "http://localhost:3001"
           NODE_OPTIONS: "--max-old-space-size=512"
@@ -216,6 +243,7 @@ jobs:
           done
 
       - name: Cache Playwright browsers
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: actions/cache@v4
         with:
           path: /home/ci/playwright-cache
@@ -224,14 +252,17 @@ jobs:
             playwright-${{ runner.os }}-
 
       - name: Smoke — install Playwright and browsers
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         env:
           PLAYWRIGHT_BROWSERS_PATH: /home/ci/playwright-cache
         run: cd tests && npm ci && npx playwright install chromium --with-deps
 
       - name: Typecheck tests/ (specs + helpers + smoke-walk)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: cd tests && npm run typecheck
 
       - name: Smoke — run critical specs
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         env:
           E2E_SERVER_URL: "http://localhost:3001"
           TEST_HOOK_SECRET: e2e-test-hook-secret
@@ -247,21 +278,6 @@ jobs:
             e2e/condition-expiry.spec.ts \
             e2e/dm-player-visibility.spec.ts \
             --reporter=line
-
-      - name: Generate coverage badge endpoints
-        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-        run: |
-          node -e "
-            const fs = require('fs');
-            function badge(label, summaryPath, outPath) {
-              const s = JSON.parse(fs.readFileSync(summaryPath));
-              const pct = s.total.lines.pct;
-              const color = pct >= 80 ? 'brightgreen' : pct >= 60 ? 'yellow' : pct >= 40 ? 'orange' : 'red';
-              fs.writeFileSync(outPath, JSON.stringify({ schemaVersion: 1, label, message: pct + '%', color }));
-            }
-            badge('server coverage', './server/coverage/coverage-summary.json', '/var/www/brochure/server-coverage.json');
-            badge('client coverage', './client/coverage/coverage-summary.json', '/var/www/brochure/client-coverage.json');
-          "
 
       - name: Install Docker CLI
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
