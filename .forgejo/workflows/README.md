@@ -42,8 +42,14 @@ production MariaDB and are **separate** from the CI secrets above.
 
 - **`ci.yml`** — runs on every push and PR to `main`. Type-checks, runs
   server + client unit tests, integration tests against MariaDB, builds the
-  client, generates coverage badges, and (on `main` push) deploys the server
-  container + client + brochure.
+  client, generates coverage badges, and (on `main` push) runs the Smoke
+  Playwright specs, then deploys the server container + client + brochure.
 - **`nightly-e2e.yml`** — runs nightly at 03:00 UTC. Brings up the full
-  app stack and runs the Playwright E2E suite. Heavier than CI; isolated to
-  off-hours so the Pi4 runner isn't competing with daytime PR work.
+  app stack and runs the complete Playwright E2E suite. Heavier than CI;
+  isolated to off-hours so the Pi4 runner isn't competing with daytime PR work.
+- **`smoke-walk.yml`** — runs on every push to `main` (non-blocking,
+  `continue-on-error: true`). Starts the app in Vite dev mode and runs
+  `npm run smoke-walk` — an exploratory SPA walker that catches console errors,
+  4xx/5xx network responses, and React rendering drift that deterministic specs
+  don't cover. Failures upload `report.md` + screenshots as artifacts but do
+  NOT block deploys. See `tests/README.md` for details.

@@ -286,6 +286,7 @@ jobs:
             e2e/level-up.spec.ts \
             e2e/condition-expiry.spec.ts \
             e2e/dm-player-visibility.spec.ts \
+            e2e/picker-commits.spec.ts \
             --reporter=line
 
       # Badge endpoints — disabled until badges are surfaced somewhere on the brochure.

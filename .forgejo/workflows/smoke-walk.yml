@@ -1,0 +1,163 @@
+name: Smoke Walk
+
+# Runs after every push to main — catches post-merge SPA drift that PR-CI's
+# deterministic Playwright specs might not surface.  Failures do NOT block PRs;
+# they notify (via commit status / workflow failure) so the operator can triage
+# before the next deploy.
+#
+# Differences from the PR-CI Smoke job:
+#   - Runs in Vite dev mode (not production preview) so StrictMode + HMR are
+#     active, matching the smoke-walk script's design assumptions.
+#   - Uses the demo seed so all character/campaign fixtures are available.
+#   - Uploads report.md + screenshots as workflow artifacts on every run.
+#
+# See tests/README.md for the full two-tier testing strategy.
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  smoke-walk:
+    runs-on: self-hosted
+    # A smoke-walk failure is informational, not a merge gate.
+    # The job is marked continue-on-error so a failure doesn't mark the
+    # overall commit status as failed (which would block deploys).
+    continue-on-error: true
+    services:
+      mariadb:
+        image: mariadb:11
+        env:
+          MYSQL_ROOT_PASSWORD: ${{ secrets.CI_DB_ROOT_PASSWORD }}
+          MYSQL_DATABASE: ${{ secrets.CI_DB_NAME }}
+          MYSQL_USER: ${{ secrets.CI_DB_USER }}
+          MYSQL_PASSWORD: ${{ secrets.CI_DB_PASSWORD }}
+        options: >-
+          --health-cmd="healthcheck.sh --connect --innodb_initialized"
+          --health-interval=2s
+          --health-timeout=5s
+          --health-retries=30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: |
+            server/package-lock.json
+            client/package-lock.json
+            tests/package-lock.json
+
+      - name: Install server dependencies
+        run: cd server && npm ci --no-audit --no-fund
+
+      - name: Build server
+        run: cd server && npm run build
+
+      - name: Install client dependencies
+        run: cd client && npm ci --no-audit --no-fund
+
+      - name: Wait for MariaDB
+        run: |
+          for i in $(seq 1 30); do
+            (echo > /dev/tcp/mariadb/3306) 2>/dev/null && echo "MariaDB is ready" && break
+            echo "Waiting for MariaDB... ($i/30)"
+            sleep 2
+            [ "$i" -eq 30 ] && echo "MariaDB never became ready" && exit 1
+          done
+
+      - name: Apply migrations
+        env:
+          DB_HOST: mariadb
+          DB_PORT: "3306"
+          DB_USER: ${{ secrets.CI_DB_USER }}
+          DB_PASSWORD: ${{ secrets.CI_DB_PASSWORD }}
+          DB_NAME: ${{ secrets.CI_DB_NAME }}
+        run: cd server && npm run db:migrate
+
+      - name: Seed core + shadowdark + demo content
+        env:
+          DB_HOST: mariadb
+          DB_PORT: "3306"
+          DB_USER: ${{ secrets.CI_DB_USER }}
+          DB_PASSWORD: ${{ secrets.CI_DB_PASSWORD }}
+          DB_NAME: ${{ secrets.CI_DB_NAME }}
+        run: cd server && npm run seed:core && npm run seed:shadowdark && npm run seed:shadowdark:demo
+
+      - name: Start app server (production build, same as CI smoke)
+        env:
+          PORT: "3001"
+          DB_HOST: mariadb
+          DB_PORT: "3306"
+          DB_USER: ${{ secrets.CI_DB_USER }}
+          DB_PASSWORD: ${{ secrets.CI_DB_PASSWORD }}
+          DB_NAME: ${{ secrets.CI_DB_NAME }}
+          NODE_ENV: test
+          ALLOW_TEST_HOOKS: "true"
+          TEST_HOOK_SECRET: e2e-test-hook-secret
+          JWT_SECRET: e2e-test-secret
+          CLIENT_URL: http://localhost:5173
+          NODE_OPTIONS: "--max-old-space-size=256"
+        run: |
+          node server/dist/index.js >/tmp/server.log 2>&1 &
+          for i in $(seq 1 30); do
+            status=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:3001/api/auth/me 2>/dev/null || true)
+            echo "$status" | grep -qE '^(200|401)$' && break || true
+            echo "Waiting for app server... ($i/30) [got: $status]"
+            sleep 2
+            [ "$i" -eq 30 ] && echo "App server never became ready" && exit 1
+          done
+
+      - name: Start Vite dev server (smoke-walk uses dev mode)
+        env:
+          API_PROXY_URL: "http://localhost:3001"
+          NODE_OPTIONS: "--max-old-space-size=512"
+        run: |
+          cd client && npm run dev >/tmp/vite.log 2>&1 &
+          for i in $(seq 1 30); do
+            curl -s -o /dev/null http://localhost:5173 && break || true
+            echo "Waiting for Vite dev server... ($i/30)"
+            sleep 2
+            [ "$i" -eq 30 ] && echo "Vite dev server never became ready" && exit 1
+          done
+
+      - name: Install tests dependencies + Playwright browsers
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: /home/ci/playwright-cache
+        run: cd tests && npm ci --no-audit --no-fund && npx playwright install chromium --with-deps
+
+      - name: Run smoke-walk
+        env:
+          E2E_SERVER_URL: "http://localhost:3001"
+          TEST_HOOK_SECRET: e2e-test-hook-secret
+          PLAYWRIGHT_BROWSERS_PATH: /home/ci/playwright-cache
+        # continue-on-error at the job level means this step's exit code doesn't
+        # affect the overall job success, but we still capture artifacts below.
+        run: cd tests && npm run smoke-walk
+
+      - name: Collect artifacts
+        if: always()
+        run: |
+          mkdir -p /tmp/smoke-walk-artifacts
+          cp /tmp/server.log /tmp/smoke-walk-artifacts/server.log 2>/dev/null || echo "(no server log)" > /tmp/smoke-walk-artifacts/server.log
+          cp /tmp/vite.log /tmp/smoke-walk-artifacts/vite.log 2>/dev/null || echo "(no vite log)" > /tmp/smoke-walk-artifacts/vite.log
+          # Smoke-walk writes report.md and screenshots into tests/smoke-walk-report/
+          if [ -d tests/smoke-walk-report ]; then
+            cp -r tests/smoke-walk-report /tmp/smoke-walk-artifacts/
+          fi
+          # Also capture any Playwright screenshots from the smoke-walk Playwright usage
+          if [ -d tests/test-results ]; then
+            cp -r tests/test-results /tmp/smoke-walk-artifacts/test-results
+          fi
+          echo "Artifact collection complete:"
+          find /tmp/smoke-walk-artifacts -type f | head -40
+
+      - name: Upload smoke-walk artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-walk-${{ github.sha }}
+          path: /tmp/smoke-walk-artifacts/
+          retention-days: 14
