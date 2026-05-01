@@ -33,6 +33,19 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Assert workflow Node.js versions are consistent
+        run: |
+          set -e
+          VERSIONS=$(grep -hE "^[[:space:]]+node-version:[[:space:]]+" .forgejo/workflows/*.yml \
+            | sed "s/.*node-version:[[:space:]]*//" | tr -d "' " | sort -u)
+          COUNT=$(echo "$VERSIONS" | grep -c .)
+          if [ "$COUNT" -ne "1" ]; then
+            echo "FAIL: mismatched node-version across workflows:"
+            grep -rn "node-version:" .forgejo/workflows/*.yml
+            exit 1
+          fi
+          echo "OK — all workflows use Node.js $VERSIONS"
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
@@ -306,43 +319,3 @@ jobs:
             badge('server coverage', './server/coverage/coverage-summary.json', '/var/www/brochure/server-coverage.json');
             badge('client coverage', './client/coverage/coverage-summary.json', '/var/www/brochure/client-coverage.json');
           "
-
-      - name: Install Docker CLI
-        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-        run: |
-          apt-get update -qq && apt-get install -y -qq docker.io curl
-          curl -fsSL "https://github.com/docker/compose/releases/download/v2.27.0/docker-compose-linux-$(uname -m)" -o /usr/local/bin/docker-compose
-          chmod +x /usr/local/bin/docker-compose
-
-      - name: Build server Docker image
-        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-        run: docker build -t darkwatch-server:latest ./server
-
-      - name: Copy client build to webroot
-        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-        run: cp -r client/dist/. /var/www/darkwatch/
-
-      - name: Copy brochure to webroot
-        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-        run: |
-          mkdir -p /var/www/brochure
-          cp site/style.css site/main.js /var/www/brochure/
-          cp -r site/assets /var/www/brochure/
-          # Bust browser cache for screenshot PNGs by appending the commit hash
-          # to every .png reference in the HTML — ensures deploys show fresh images.
-          HASH=$(git rev-parse --short HEAD)
-          sed "s/\.png\"/\.png?v=${HASH}\"/g" site/index.html > /var/www/brochure/index.html
-
-      - name: Deploy server container
-        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-        env:
-          DB_ROOT_PASSWORD: ${{ secrets.DB_ROOT_PASSWORD }}
-          DB_NAME: ${{ secrets.DB_NAME }}
-          DB_USER: ${{ secrets.DB_USER }}
-          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
-          JWT_SECRET: ${{ secrets.JWT_SECRET }}
-          CLIENT_URL: ${{ secrets.CLIENT_URL }}
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-        run: |
-          docker rm -f darkwatch-server 2>/dev/null || true
-          docker-compose -f /home/ci/services/darkwatch/docker-compose.yml up -d --remove-orphans

@@ -1,29 +1,24 @@
 name: Smoke Walk
 
-# Runs after every push to main — catches post-merge SPA drift that PR-CI's
-# deterministic Playwright specs might not surface.  Failures do NOT block PRs;
-# they notify (via commit status / workflow failure) so the operator can triage
-# before the next deploy.
+# Exploratory crawler that runs in Vite dev mode with the full demo seed.
+# Surfaces SPA drift that deterministic Playwright specs might miss.
 #
-# Differences from the PR-CI Smoke job:
-#   - Runs in Vite dev mode (not production preview) so StrictMode + HMR are
-#     active, matching the smoke-walk script's design assumptions.
-#   - Uses the demo seed so all character/campaign fixtures are available.
-#   - Uploads report.md + screenshots as workflow artifacts on every run.
+# Triggers:
+#   - workflow_call: called by nightly-deploy.yml (hard gate — failure blocks deploy)
+#   - workflow_dispatch: manual run
+#   - push to main: post-merge sanity check (informational)
 #
 # See tests/README.md for the full two-tier testing strategy.
 
 on:
+  workflow_call:    # called by nightly-deploy.yml
+  workflow_dispatch:
   push:
     branches: [main]
 
 jobs:
   smoke-walk:
     runs-on: ubuntu-latest
-    # A smoke-walk failure is informational, not a merge gate.
-    # The job is marked continue-on-error so a failure doesn't mark the
-    # overall commit status as failed (which would block deploys).
-    continue-on-error: true
     services:
       mariadb:
         image: mariadb:11
@@ -133,8 +128,6 @@ jobs:
           E2E_SERVER_URL: "http://localhost:3001"
           TEST_HOOK_SECRET: e2e-test-hook-secret
           PLAYWRIGHT_BROWSERS_PATH: /home/ci/playwright-cache
-        # continue-on-error at the job level means this step's exit code doesn't
-        # affect the overall job success, but we still capture artifacts below.
         run: cd tests && npm run smoke-walk
 
       - name: Collect artifacts

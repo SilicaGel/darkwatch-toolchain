@@ -1,8 +1,10 @@
-name: Nightly E2E
+name: E2E
+
+# Full Playwright E2E suite. Runs nightly and can be triggered manually.
+# Does NOT deploy — use nightly-deploy.yml or deploy.yml for that.
 
 on:
-  schedule:
-    - cron: '0 3 * * *'
+  workflow_call:    # called by nightly-deploy.yml
   workflow_dispatch:
 
 jobs:
@@ -30,7 +32,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
           cache: 'npm'
           cache-dependency-path: |
             server/package-lock.json
@@ -44,7 +46,7 @@ jobs:
         run: cd server && npm run build
 
       - name: Install client dependencies
-        run: cd client && npm ci
+        run: cd client && npm ci --no-audit --no-fund
 
       - name: Build client
         run: cd client && npm run build
@@ -129,7 +131,7 @@ jobs:
       - name: Install Playwright and browsers
         env:
           PLAYWRIGHT_BROWSERS_PATH: /home/ci/playwright-cache
-        run: cd tests && npm ci && npx playwright install chromium --with-deps
+        run: cd tests && npm ci --no-audit --no-fund && npx playwright install chromium --with-deps
 
       - name: Run Playwright E2E tests (stabilize-ownership — Death-save)
         env:

@@ -1,0 +1,27 @@
+name: Nightly Deploy
+
+# Orchestrates the full overnight gate: E2E → smoke walk → deploy.
+# All three jobs must pass; a failure in any blocks the deploy.
+#
+# Logic lives in the called workflows — this file is intentionally just
+# an orchestrator. Add/remove specs in e2e.yml, not here.
+
+on:
+  schedule:
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+
+jobs:
+  e2e:
+    uses: ./.forgejo/workflows/e2e.yml
+    secrets: inherit
+
+  smoke-walk:
+    needs: e2e
+    uses: ./.forgejo/workflows/smoke-walk.yml
+    secrets: inherit
+
+  deploy:
+    needs: [e2e, smoke-walk]
+    uses: ./.forgejo/workflows/deploy.yml
+    secrets: inherit
