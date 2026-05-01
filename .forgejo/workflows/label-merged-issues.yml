@@ -17,10 +17,14 @@ jobs:
           REPO: ${{ github.repository }}
           API_URL: ${{ github.api_url }}
         run: |
-          # Match both `Ready #N` (new convention — avoids Forgejo auto-close)
-          # and `Closes #N` (legacy, in case older PRs still use it).
-          ISSUES=$(echo "$PR_BODY" | grep -oiE '(Ready|Closes) #[0-9]+' | grep -oE '[0-9]+' | sort -u || true)
-          echo "$ISSUES" | grep -v '^$' | while read issue; do
+          # Match `Ready #N` (preferred — avoids Forgejo auto-close),
+          # `Refs #N` (also common), and `Closes #N` (legacy).
+          ISSUES=$(echo "$PR_BODY" | grep -oiE '(Ready|Refs|Closes) #[0-9]+' | grep -oE '[0-9]+' | sort -u || true)
+          if [ -z "$ISSUES" ]; then
+            echo "No Ready/Refs/Closes references found in PR body — nothing to label."
+            exit 0
+          fi
+          echo "$ISSUES" | while read issue; do
             curl -s -X POST \
               -H "Authorization: token $FORGEJO_TOKEN" \
               -H "Content-Type: application/json" \
