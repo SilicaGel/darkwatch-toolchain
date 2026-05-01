@@ -6,15 +6,12 @@ name: Smoke Walk
 # Triggers:
 #   - workflow_call: called by nightly-deploy.yml (hard gate — failure blocks deploy)
 #   - workflow_dispatch: manual run
-#   - push to main: post-merge sanity check (informational)
 #
 # See tests/README.md for the full two-tier testing strategy.
 
 on:
   workflow_call:    # called by nightly-deploy.yml
   workflow_dispatch:
-  push:
-    branches: [main]
 
 jobs:
   smoke-walk:
