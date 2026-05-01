@@ -19,7 +19,7 @@ on:
 
 jobs:
   smoke-walk:
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     # A smoke-walk failure is informational, not a merge gate.
     # The job is marked continue-on-error so a failure doesn't mark the
     # overall commit status as failed (which would block deploys).
