@@ -280,16 +280,6 @@ jobs:
           path: tests/node_modules
           key: tests-node-modules-${{ runner.os }}-${{ hashFiles('tests/package-lock.json') }}
 
-      - name: Free runner disk before browser install
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        run: |
-          echo "Disk before cleanup:"
-          df -h / || true
-          sudo apt-get clean || true
-          sudo rm -rf /var/lib/apt/lists/* /tmp/playwright-* /tmp/*.deb || true
-          echo "Disk after cleanup:"
-          df -h / || true
-
       - name: Smoke — install Playwright and browsers
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         env:
