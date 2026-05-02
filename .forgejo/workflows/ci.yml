@@ -268,16 +268,30 @@ jobs:
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: actions/cache@v4
         with:
-          path: /home/ci/playwright-cache
+          path: ${{ github.workspace }}/.playwright-cache
           key: playwright-${{ runner.os }}-${{ hashFiles('tests/package-lock.json') }}
           restore-keys: |
             playwright-${{ runner.os }}-
 
+      - name: Cache tests/ node_modules
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/cache@v4
+        with:
+          path: tests/node_modules
+          key: tests-node-modules-${{ runner.os }}-${{ hashFiles('tests/package-lock.json') }}
+
       - name: Smoke — install Playwright and browsers
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         env:
-          PLAYWRIGHT_BROWSERS_PATH: /home/ci/playwright-cache
-        run: cd tests && npm ci && npx playwright install chromium --with-deps
+          PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.playwright-cache
+        run: |
+          cd tests
+          if [ ! -d node_modules ]; then
+            npm ci
+          else
+            echo "tests/node_modules restored from cache"
+          fi
+          npx playwright install chromium --with-deps
 
       - name: Typecheck tests/ (specs + helpers + smoke-walk)
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -288,7 +302,7 @@ jobs:
         env:
           E2E_SERVER_URL: "http://localhost:3001"
           TEST_HOOK_SECRET: e2e-test-hook-secret
-          PLAYWRIGHT_BROWSERS_PATH: /home/ci/playwright-cache
+          PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.playwright-cache
         run: |
           cd tests && npx playwright test \
             e2e/dashboard.spec.ts \
