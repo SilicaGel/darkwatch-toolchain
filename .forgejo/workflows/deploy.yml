@@ -159,5 +159,5 @@ jobs:
           docker build -t darkwatch-server:latest .
           docker rm -f darkwatch-server 2>/dev/null || true
           cd ~/services/darkwatch
-          docker-compose --env-file .env.deploy up -d --remove-orphans
+          docker compose --env-file .env.deploy up -d --remove-orphans
           EOSSH
