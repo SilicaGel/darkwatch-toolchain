@@ -73,6 +73,12 @@ jobs:
             npm install --no-save --ignore-engines "@rolldown/binding-linux-arm64-gnu@$VER"
           fi
 
+      # #413 — Fail PRs that introduce high/critical vulnerabilities.
+      # Moderate findings are tracked but not gating (uuid<14 via svix/resend
+      # is a known moderate; --audit-level=high skips moderates).
+      - name: Security audit (server)
+        run: cd server && npm audit --audit-level=high
+
       - name: Enforce soft-delete filters on core tables
         run: |
           # The three core repository files for soft-deleted tables must each
@@ -149,6 +155,11 @@ jobs:
 
       - name: Install client dependencies
         run: cd client && npm ci
+
+      # #413 — Audit client after install. postcss moderate is known and
+      # does not gate (--audit-level=high skips moderates).
+      - name: Security audit (client)
+        run: cd client && npm audit --audit-level=high
 
       - name: Build client
         run: cd client && npm run build
