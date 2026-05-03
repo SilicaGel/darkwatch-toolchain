@@ -28,6 +28,7 @@ jobs:
           --health-interval=2s
           --health-timeout=5s
           --health-retries=30
+          --tmpfs /var/lib/mysql:rw,noexec,nosuid,size=512m
     steps:
       - uses: actions/checkout@v4
         with:
