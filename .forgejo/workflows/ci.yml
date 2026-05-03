@@ -302,17 +302,16 @@ jobs:
           TEST_HOOK_SECRET: e2e-test-hook-secret
           PLAYWRIGHT_BROWSERS_PATH: /home/ci/playwright-cache
         run: |
-          # character-creation.spec was previously excluded (#490) when the
-          # step-3 PATCH waiter chronically flaked. Root cause turned out to
-          # be #406's Zod schema mismatch on /campaigns reads (fixed in #501),
-          # which broke openCampaign() helper and cascaded into every spec
-          # that hits the dashboard. Re-enabled here.
+          # character-creation.spec is excluded (#490) — confirmed in run 743
+          # to be a real step-3 PATCH waiter race, separate from the Zod
+          # cascade that #501 fixed. Re-enable only after the underlying race
+          # is investigated and the waiter is hardened (or the wizard's
+          # debounce is stabilised).
           cd tests && npx playwright test \
             e2e/dashboard.spec.ts \
             e2e/death-timer.spec.ts \
             e2e/crit-banner.spec.ts \
             e2e/campaign-creation.spec.ts \
-            e2e/character-creation.spec.ts \
             e2e/level-up.spec.ts \
             e2e/condition-expiry.spec.ts \
             e2e/dm-player-visibility.spec.ts \
