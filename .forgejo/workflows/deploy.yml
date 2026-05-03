@@ -3,6 +3,25 @@ name: Deploy
 # Manual deploy or reusable deploy job (called by nightly-deploy.yml).
 # When called directly via workflow_dispatch, accepts an optional branch input.
 # When called via workflow_call, always deploys main.
+#
+# Architecture (post-runner-split): the runner machine (Mac, for speed)
+# does NOT run production containers — the Pi does. This workflow:
+#   1. Builds the client on the runner (vite output → static files).
+#   2. Rsyncs the server source + client dist + brochure to the Pi.
+#   3. SSHes into the Pi and runs `docker build` + `docker-compose up -d`
+#      against the host's docker daemon, where production runs.
+#
+# This avoids the runner-vs-deploy-target split that broke deploy after
+# the May 2026 runner migration: the runner is sandboxed and has no
+# direct path to the Pi's docker daemon, so we go through SSH.
+#
+# Required Forgejo Actions secrets:
+#   DEPLOY_SSH_KEY       — private key (ed25519) authorised on the Pi
+#   DEPLOY_HOST          — Pi's reachable hostname/IP (e.g. "pi4")
+#   DEPLOY_USER          — SSH user on the Pi (e.g. "aaron")
+#   DEPLOY_KNOWN_HOSTS   — `ssh-keyscan <host>` output for the Pi
+#   plus the runtime secrets the docker-compose.yml expects (forwarded
+#   via a temp .env file used with --env-file at compose-up time).
 
 on:
   workflow_call:    # called by nightly-deploy.yml
@@ -16,13 +35,6 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    # Note: no `services:` block by design. Forgejo Actions runs jobs that
-    # declare services inside a docker container, which prevents the deploy
-    # step's `apt-get install docker.io && docker build ...` from reaching
-    # the host docker daemon — the symptom is "Cannot connect to the Docker
-    # daemon at unix:///var/run/docker.sock" right after Docker installs.
-    # Migration validation already happens in ci.yml's smoke run; deploy
-    # builds and ships only.
     steps:
       - uses: actions/checkout@v4
         with:
@@ -34,14 +46,7 @@ jobs:
           node-version: '22'
           cache: 'npm'
           cache-dependency-path: |
-            server/package-lock.json
             client/package-lock.json
-
-      - name: Install server dependencies
-        run: cd server && npm ci --no-audit --no-fund
-
-      - name: Build server
-        run: cd server && npm run build
 
       - name: Install client dependencies
         run: cd client && npm ci --no-audit --no-fund
@@ -49,28 +54,67 @@ jobs:
       - name: Build client
         run: cd client && npm run build
 
-      - name: Install Docker CLI
+      - name: Bake brochure index with cache-busted asset versions
         run: |
-          apt-get update -qq && apt-get install -y -qq docker.io curl
-          curl -fsSL "https://github.com/docker/compose/releases/download/v2.27.0/docker-compose-linux-$(uname -m)" -o /usr/local/bin/docker-compose
-          chmod +x /usr/local/bin/docker-compose
-
-      - name: Build server Docker image
-        run: docker build -t darkwatch-server:latest ./server
-
-      - name: Copy client build to webroot
-        run: cp -r client/dist/. /var/www/darkwatch/
-
-      - name: Copy brochure to webroot
-        run: |
-          mkdir -p /var/www/brochure
-          cp site/style.css site/main.js /var/www/brochure/
-          cp -r site/assets /var/www/brochure/
+          mkdir -p site/_dist
           HASH=$(git rev-parse --short HEAD)
-          sed "s/\.png\"/\.png?v=${HASH}\"/g" site/index.html > /var/www/brochure/index.html
+          sed "s/\.png\"/\.png?v=${HASH}\"/g" site/index.html > site/_dist/index.html
 
-      - name: Deploy server container
+      - name: Set up SSH (private key + known_hosts)
         env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 644 ~/.ssh/known_hosts
+          # Sanity check — fail fast if the key is malformed before we touch the Pi.
+          ssh-keygen -y -f ~/.ssh/id_ed25519 >/dev/null
+
+      - name: Rsync server source to Pi
+        env:
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+        run: |
+          # Source-only — the Dockerfile builds inside its own container on the Pi.
+          rsync -az --delete \
+            --exclude=node_modules --exclude=coverage --exclude=dist \
+            --exclude='*.log' --exclude='.DS_Store' \
+            -e 'ssh -i ~/.ssh/id_ed25519' \
+            server/ "${DEPLOY_USER}@${DEPLOY_HOST}:~/deploy/darkwatch/server/"
+
+      - name: Rsync client dist to webroot on Pi
+        env:
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+        run: |
+          rsync -az --delete \
+            -e 'ssh -i ~/.ssh/id_ed25519' \
+            client/dist/ "${DEPLOY_USER}@${DEPLOY_HOST}:/var/www/darkwatch/"
+
+      - name: Rsync brochure to webroot on Pi
+        env:
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+        run: |
+          # Deliberately NOT --delete on /var/www/brochure: it may contain
+          # screenshots not in the repo. We push specific files only.
+          rsync -az -e 'ssh -i ~/.ssh/id_ed25519' \
+            site/style.css site/main.js \
+            "${DEPLOY_USER}@${DEPLOY_HOST}:/var/www/brochure/"
+          rsync -az -e 'ssh -i ~/.ssh/id_ed25519' \
+            site/assets/ "${DEPLOY_USER}@${DEPLOY_HOST}:/var/www/brochure/assets/"
+          rsync -az -e 'ssh -i ~/.ssh/id_ed25519' \
+            site/_dist/index.html \
+            "${DEPLOY_USER}@${DEPLOY_HOST}:/var/www/brochure/index.html"
+
+      - name: Push runtime env file to Pi
+        env:
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
           DB_ROOT_PASSWORD: ${{ secrets.DB_ROOT_PASSWORD }}
           DB_NAME: ${{ secrets.DB_NAME }}
           DB_USER: ${{ secrets.DB_USER }}
@@ -78,6 +122,35 @@ jobs:
           JWT_SECRET: ${{ secrets.JWT_SECRET }}
           CLIENT_URL: ${{ secrets.CLIENT_URL }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
         run: |
+          # Build the env file with `printf '%s\n'` so values containing
+          # special chars (= ' " $) survive untouched.
+          umask 077
+          {
+            printf 'DB_ROOT_PASSWORD=%s\n' "$DB_ROOT_PASSWORD"
+            printf 'DB_NAME=%s\n' "$DB_NAME"
+            printf 'DB_USER=%s\n' "$DB_USER"
+            printf 'DB_PASSWORD=%s\n' "$DB_PASSWORD"
+            printf 'JWT_SECRET=%s\n' "$JWT_SECRET"
+            printf 'CLIENT_URL=%s\n' "$CLIENT_URL"
+            printf 'ANTHROPIC_API_KEY=%s\n' "$ANTHROPIC_API_KEY"
+            printf 'RESEND_API_KEY=%s\n' "$RESEND_API_KEY"
+          } > /tmp/darkwatch.deploy.env
+          scp -i ~/.ssh/id_ed25519 /tmp/darkwatch.deploy.env \
+            "${DEPLOY_USER}@${DEPLOY_HOST}:~/services/darkwatch/.env.deploy"
+          rm -f /tmp/darkwatch.deploy.env
+
+      - name: Build server image and (re)start container on Pi
+        env:
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+        run: |
+          ssh -i ~/.ssh/id_ed25519 "${DEPLOY_USER}@${DEPLOY_HOST}" bash <<'EOSSH'
+          set -euo pipefail
+          cd ~/deploy/darkwatch/server
+          docker build -t darkwatch-server:latest .
           docker rm -f darkwatch-server 2>/dev/null || true
-          docker-compose -f /home/ci/services/darkwatch/docker-compose.yml up -d --remove-orphans
+          cd ~/services/darkwatch
+          docker-compose --env-file .env.deploy up -d --remove-orphans
+          EOSSH
