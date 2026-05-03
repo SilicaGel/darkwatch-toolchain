@@ -40,6 +40,13 @@ jobs:
         with:
           ref: ${{ github.event.inputs.branch || 'main' }}
 
+      - name: Install rsync + openssh-client
+        # Forgejo runner images (act-based) don't include rsync or ssh by
+        # default. We need both to ship build artefacts to the Pi.
+        run: |
+          apt-get update -qq
+          apt-get install -y -qq rsync openssh-client
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
