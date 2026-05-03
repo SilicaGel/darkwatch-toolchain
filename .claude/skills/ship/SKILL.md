@@ -57,6 +57,28 @@ Run these in order. **Tell each sub-skill to skip its commit step** — ship han
    The `/update-brochure` skill will spin up its own isolated server/client on dedicated ports (see its SKILL.md), so this step is safe to run alongside other dev servers. Skip its commit — ship handles the coordinated commit.
 5. **Roadmap** — do NOT update by default. `ROADMAP.md` is now thematic, not a ticket tracker — it tracks strategic direction only. Only invoke `update-roadmap` if a theme has meaningfully shifted (new milestone starting / closing, longer-term idea promoted to active, strategic pivot). Per-ticket progress lives in Forgejo and the changelog.
 
+## Step 2.5: Rebase onto latest main
+
+Before committing docs, rebase onto `origin/main` so the changelog entry lands on top
+of any entries that merged since this branch was cut. Two branches shipping in sequence
+always conflict on `docs/CHANGELOG.md` — rebasing here prevents that.
+
+```bash
+git fetch origin main
+git rebase origin/main
+```
+
+If the rebase hits a conflict in `docs/CHANGELOG.md`, resolve it by keeping **both**
+entries — the one(s) from main and ours — with ours on top, bumped to the next
+available version number. Then:
+
+```bash
+git add docs/CHANGELOG.md
+git rebase --continue
+```
+
+After a successful rebase, Step 4 must use `--force-with-lease` instead of a plain push.
+
 ## Step 3: Commit all docs
 
 One coordinated commit covering whatever actually changed. Don't blind-add paths that weren't modified:
@@ -78,10 +100,15 @@ git commit -m "docs: update <comma-separated list of docs touched> for vX.Y.Z"
 ## Step 4: Push the branch
 
 ```bash
+# Use --force-with-lease if Step 2.5 did a rebase; plain push otherwise
 git push origin $(git branch --show-current)
 ```
 
-If already pushed, this is a no-op.
+If already pushed without a rebase, this is a no-op. With a rebase, use:
+
+```bash
+git push --force-with-lease origin $(git branch --show-current)
+```
 
 ## Step 5: Open the PR via Forgejo API
 
