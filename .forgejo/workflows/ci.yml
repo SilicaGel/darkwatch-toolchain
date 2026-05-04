@@ -99,12 +99,9 @@ jobs:
         run: cd server && npm run build
 
       - name: Test server
-        run: |
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            cd server && npm run test:coverage
-          else
-            cd server && npm run test
-          fi
+        # Always emit coverage — PR uses it for the diff-coverage comment;
+        # main uses it to write the server-coverage badge.
+        run: cd server && npm run test:coverage
 
       - name: Wait for MariaDB (for Kysely schema check)
         run: |
@@ -146,12 +143,7 @@ jobs:
           DB_PASSWORD: ${{ secrets.CI_DB_PASSWORD }}
           DB_NAME: ${{ secrets.CI_DB_NAME }}
           DATABASE_URL: mysql://${{ secrets.CI_DB_USER }}:${{ secrets.CI_DB_PASSWORD }}@mariadb:3306/${{ secrets.CI_DB_NAME }}
-        run: |
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            cd server && npm run test:int:coverage
-          else
-            cd server && npm run test:int
-          fi
+        run: cd server && npm run test:int:coverage
 
       - name: Install client dependencies
         run: cd client && npm ci
@@ -165,20 +157,15 @@ jobs:
         run: cd client && npm run build
 
       - name: Test client
-        run: |
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            cd client && npm run test:coverage
-          else
-            cd client && npm run test
-          fi
+        # Always emit coverage — PR uses it for the diff-coverage comment;
+        # main uses it to write the client-coverage badge.
+        run: cd client && npm run test:coverage
 
       - name: Test coverage-bot scripts
-        run: |
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            npm run test:scripts:coverage
-          else
-            npm run test:scripts
-          fi
+        # Always emit coverage — main needs the same dataset PR uses for the
+        # diff-coverage comment so reruns of `npm run test:scripts:coverage`
+        # locally produce parity with CI.
+        run: npm run test:scripts:coverage
 
       - name: Forbid numeric ID patterns
         run: |
@@ -323,6 +310,7 @@ jobs:
         run: cd tests && npm run typecheck
 
       - name: Smoke — run critical specs
+        id: smoke_e2e
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         env:
           E2E_SERVER_URL: "http://localhost:3001"
@@ -345,20 +333,95 @@ jobs:
             e2e/picker-commits.spec.ts \
             --reporter=line
 
-      # Badge endpoints — disabled until badges are surfaced somewhere on the brochure.
-      # To re-enable: change if: false back to the main-push condition and switch
-      # test:coverage back on main so the coverage-summary.json files exist.
-      - name: Generate coverage badge endpoints
-        if: false
+      # ---------------------------------------------------------------------------
+      # Badge row — feeds shields.io endpoints in README.md (#522).
+      # Five JSONs uploaded to MinIO at s3://darkwatch-images/site/<name>.json,
+      # public-readable at https://images.example.com/site/<name>.json:
+      #   build, e2e, server-coverage, client-coverage, version
+      # Runs `if: always()` on main pushes so a build failure flips the build
+      # badge red instead of leaving a stale green one. The Pi (not the runner)
+      # talks to MinIO via host network using `mc` in a docker container — same
+      # pattern as infra/minio/init-bucket.sh.
+      # ---------------------------------------------------------------------------
+
+      - name: Set up SSH for badge upload
+        if: always() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
         run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 644 ~/.ssh/known_hosts
+          ssh-keygen -y -f ~/.ssh/id_ed25519 >/dev/null
+
+      - name: Generate + upload badge endpoints to MinIO
+        if: always() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          E2E_OUTCOME: ${{ steps.smoke_e2e.outcome }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+        run: |
+          mkdir -p /tmp/badges
+          # Generate 5 shields.io endpoint JSONs. Build/e2e are inferred from
+          # the smoke step outcome: if smoke ran (success or failure), the
+          # build phase made it past every gate; if smoke was 'skipped' on a
+          # main push, an earlier gate failed → build red.
           node -e "
             const fs = require('fs');
-            function badge(label, summaryPath, outPath) {
-              const s = JSON.parse(fs.readFileSync(summaryPath));
-              const pct = s.total.lines.pct;
-              const color = pct >= 80 ? 'brightgreen' : pct >= 60 ? 'yellow' : pct >= 40 ? 'orange' : 'red';
-              fs.writeFileSync(outPath, JSON.stringify({ schemaVersion: 1, label, message: pct + '%', color }));
+            const out = '/tmp/badges';
+            const e2e = process.env.E2E_OUTCOME || 'skipped';
+            const buildOk = e2e === 'success' || e2e === 'failure';
+            const e2eOk = e2e === 'success';
+            fs.writeFileSync(out + '/build.json', JSON.stringify({
+              schemaVersion: 1, label: 'build',
+              message: buildOk ? 'passing' : 'failing',
+              color: buildOk ? 'brightgreen' : 'red'
+            }));
+            fs.writeFileSync(out + '/e2e.json', JSON.stringify({
+              schemaVersion: 1, label: 'e2e',
+              message: e2eOk ? 'passing' : 'failing',
+              color: e2eOk ? 'brightgreen' : 'red'
+            }));
+            function cov(label, p) {
+              try {
+                const s = JSON.parse(fs.readFileSync(p));
+                const pct = s.total.lines.pct;
+                const color = pct >= 80 ? 'brightgreen' : pct >= 60 ? 'yellow' : pct >= 40 ? 'orange' : 'red';
+                return { schemaVersion: 1, label, message: pct + '%', color };
+              } catch (e) {
+                return { schemaVersion: 1, label, message: 'n/a', color: 'lightgrey' };
+              }
             }
-            badge('server coverage', './server/coverage/coverage-summary.json', '/var/www/brochure/server-coverage.json');
-            badge('client coverage', './client/coverage/coverage-summary.json', '/var/www/brochure/client-coverage.json');
+            fs.writeFileSync(out + '/server-coverage.json',
+              JSON.stringify(cov('server coverage', './server/coverage/coverage-summary.json')));
+            fs.writeFileSync(out + '/client-coverage.json',
+              JSON.stringify(cov('client coverage', './client/coverage/coverage-summary.json')));
+            const cl = fs.readFileSync('./docs/CHANGELOG.md', 'utf8');
+            const m = cl.match(/^##\s+\d{4}-\d{2}-\d{2}\s+—\s+v(\d+\.\d+\.\d+)/m);
+            const version = m ? m[1] : '0.0.0';
+            fs.writeFileSync(out + '/version.json', JSON.stringify({
+              schemaVersion: 1, label: 'version', message: 'v' + version, color: 'blue'
+            }));
           "
+          ls -la /tmp/badges
+          # Hand off to the Pi: scp the JSONs, then exec mc inside docker on
+          # the Pi (--network host so it reaches darkwatch-minio on :9000).
+          # Credentials come from the deploy env file already on the Pi.
+          ssh -i ~/.ssh/id_ed25519 "${DEPLOY_USER}@${DEPLOY_HOST}" 'mkdir -p ~/tmp/badges && rm -f ~/tmp/badges/*.json'
+          scp -i ~/.ssh/id_ed25519 /tmp/badges/*.json "${DEPLOY_USER}@${DEPLOY_HOST}:~/tmp/badges/"
+          ssh -i ~/.ssh/id_ed25519 "${DEPLOY_USER}@${DEPLOY_HOST}" bash <<'EOSSH'
+          set -euo pipefail
+          set -a; . ~/services/darkwatch/.env.deploy; set +a
+          ENDPOINT_AUTH="${MINIO_ENDPOINT/:\/\//://${MINIO_ROOT_USER}:${MINIO_ROOT_PASSWORD}@}"
+          docker run --rm --network host \
+            -v "$HOME/tmp/badges:/badges:ro" \
+            -e "MC_HOST_dw=${ENDPOINT_AUTH}" \
+            minio/mc:RELEASE.2025-08-13T08-35-41Z \
+            cp /badges/build.json /badges/e2e.json /badges/server-coverage.json /badges/client-coverage.json /badges/version.json \
+              "dw/${MINIO_BUCKET}/site/"
+          rm -f "$HOME"/tmp/badges/*.json
+          EOSSH
