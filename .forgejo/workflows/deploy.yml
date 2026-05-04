@@ -130,6 +130,12 @@ jobs:
           CLIENT_URL: ${{ secrets.CLIENT_URL }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          MINIO_ROOT_USER: ${{ secrets.MINIO_ROOT_USER }}
+          MINIO_ROOT_PASSWORD: ${{ secrets.MINIO_ROOT_PASSWORD }}
+          MINIO_BUCKET: ${{ secrets.MINIO_BUCKET }}
+          MINIO_ENDPOINT: ${{ secrets.MINIO_ENDPOINT }}
+          MINIO_PUBLIC_BASE_URL: ${{ secrets.MINIO_PUBLIC_BASE_URL }}
+          MINIO_BROWSER_REDIRECT_URL: ${{ secrets.MINIO_BROWSER_REDIRECT_URL }}
         run: |
           # Build the env file with `printf '%s\n'` so values containing
           # special chars (= ' " $) survive untouched.
@@ -143,6 +149,12 @@ jobs:
             printf 'CLIENT_URL=%s\n' "$CLIENT_URL"
             printf 'ANTHROPIC_API_KEY=%s\n' "$ANTHROPIC_API_KEY"
             printf 'RESEND_API_KEY=%s\n' "$RESEND_API_KEY"
+            printf 'MINIO_ROOT_USER=%s\n' "$MINIO_ROOT_USER"
+            printf 'MINIO_ROOT_PASSWORD=%s\n' "$MINIO_ROOT_PASSWORD"
+            printf 'MINIO_BUCKET=%s\n' "$MINIO_BUCKET"
+            printf 'MINIO_ENDPOINT=%s\n' "$MINIO_ENDPOINT"
+            printf 'MINIO_PUBLIC_BASE_URL=%s\n' "$MINIO_PUBLIC_BASE_URL"
+            printf 'MINIO_BROWSER_REDIRECT_URL=%s\n' "$MINIO_BROWSER_REDIRECT_URL"
           } > /tmp/darkwatch.deploy.env
           scp -i ~/.ssh/id_ed25519 /tmp/darkwatch.deploy.env \
             "${DEPLOY_USER}@${DEPLOY_HOST}:~/services/darkwatch/.env.deploy"
