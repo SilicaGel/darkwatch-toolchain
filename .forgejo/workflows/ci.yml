@@ -276,6 +276,33 @@ jobs:
             [ "$i" -eq 30 ] && echo "Vite preview server never became ready" && exit 1
           done
 
+      - name: Smoke — warm up app server (login + auth + campaigns)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        # The first specs in the suite (level-up, picker-commits) hit cold
+        # connection pools, V8 JIT, and socket handlers, exceeding their
+        # 12-15s waits. Issuing a few authed requests here primes the app
+        # server's caches so the first specs land on warm code paths.
+        run: |
+          set -e
+          # Capture session cookie from login
+          curl -s -c /tmp/dm-cookies.txt -X POST http://localhost:3001/api/auth/login \
+            -H 'Content-Type: application/json' \
+            -d '{"email":"dm@darkwatch.test","password":"password"}' >/dev/null
+          curl -s -c /tmp/player-cookies.txt -X POST http://localhost:3001/api/auth/login \
+            -H 'Content-Type: application/json' \
+            -d '{"email":"player@darkwatch.test","password":"password"}' >/dev/null
+          # Hit the heavy authed endpoints: dashboard, campaign listing, characters,
+          # rulesets catalog. Two passes so connection pool stabilises.
+          for pass in 1 2; do
+            curl -s -b /tmp/dm-cookies.txt http://localhost:3001/api/auth/me >/dev/null
+            curl -s -b /tmp/dm-cookies.txt http://localhost:3001/api/campaigns >/dev/null
+            curl -s -b /tmp/dm-cookies.txt http://localhost:3001/api/dashboard >/dev/null
+            curl -s -b /tmp/player-cookies.txt http://localhost:3001/api/auth/me >/dev/null
+            curl -s -b /tmp/player-cookies.txt http://localhost:3001/api/dashboard >/dev/null
+          done
+          rm -f /tmp/dm-cookies.txt /tmp/player-cookies.txt
+          echo "warmup complete"
+
       - name: Cache Playwright browsers
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: actions/cache@v4
