@@ -415,18 +415,24 @@ jobs:
           scp -i ~/.ssh/id_ed25519 /tmp/badges/*.json "${DEPLOY_USER}@${DEPLOY_HOST}:~/tmp/badges/"
           ssh -i ~/.ssh/id_ed25519 "${DEPLOY_USER}@${DEPLOY_HOST}" bash <<'EOSSH'
           set -euo pipefail
-          # Read the values we need from .env.deploy WITHOUT sourcing it.
-          # Sourcing under `set -u` blew up when one of the secret values
-          # contained a literal `$D…` substring (bash tries to expand
-          # `$D…` and finds it unbound). grep+cut treats values as plain
-          # strings, which is what we want for credentials.
+          # Read values from .env.deploy WITHOUT sourcing it. Sourcing under
+          # `set -u` blew up when one of the secret values contained a literal
+          # `$D…` substring (bash would try to expand `$D…` and find it
+          # unbound). grep+cut treats values as plain strings.
           ENV_FILE="$HOME/services/darkwatch/.env.deploy"
           getval() { grep -E "^$1=" "$ENV_FILE" | head -1 | cut -d= -f2-; }
           MINIO_ENDPOINT="$(getval MINIO_ENDPOINT)"
           MINIO_ROOT_USER="$(getval MINIO_ROOT_USER)"
           MINIO_ROOT_PASSWORD="$(getval MINIO_ROOT_PASSWORD)"
           MINIO_BUCKET="$(getval MINIO_BUCKET)"
-          ENDPOINT_AUTH="${MINIO_ENDPOINT/:\/\//://${MINIO_ROOT_USER}:${MINIO_ROOT_PASSWORD}@}"
+          # URL-encode credentials before embedding them in the MC_HOST URL.
+          # Without this, special chars in the password (`$`, `/`, `@`, `:`,
+          # `%`, etc.) made `mc` compute the wrong S3 signature and every cp
+          # failed with "signature does not match".
+          urlenc() { python3 -c 'import sys, urllib.parse as u; sys.stdout.write(u.quote(sys.argv[1], safe=""))' "$1"; }
+          ENC_USER="$(urlenc "$MINIO_ROOT_USER")"
+          ENC_PASS="$(urlenc "$MINIO_ROOT_PASSWORD")"
+          ENDPOINT_AUTH="${MINIO_ENDPOINT/:\/\//://${ENC_USER}:${ENC_PASS}@}"
           docker run --rm --network host \
             -v "$HOME/tmp/badges:/badges:ro" \
             -e "MC_HOST_dw=${ENDPOINT_AUTH}" \
