@@ -29,6 +29,25 @@ jobs:
           --health-timeout=5s
           --health-retries=30
           --tmpfs /var/lib/mysql:rw,noexec,nosuid,size=512m
+      minio:
+        # The official minio/minio image needs `server /data` as its command;
+        # Forgejo's act_runner supports `cmd:` in service definitions.
+        # The image-library int tests create + drop a per-suite bucket against
+        # this instance.
+        image: minio/minio:RELEASE.2025-04-08T15-41-24Z
+        cmd:
+          - server
+          - /data
+          - --console-address
+          - ":9001"
+        env:
+          MINIO_ROOT_USER: darkwatch_admin
+          MINIO_ROOT_PASSWORD: darkwatch_minio_dev
+        options: >-
+          --health-cmd="curl -fsS http://localhost:9000/minio/health/ready || exit 1"
+          --health-interval=2s
+          --health-timeout=5s
+          --health-retries=30
     steps:
       - uses: actions/checkout@v4
         with:
@@ -112,6 +131,15 @@ jobs:
             [ "$i" -eq 30 ] && echo "MariaDB never became ready" && exit 1
           done
 
+      - name: Wait for MinIO (image-library int tests need it)
+        run: |
+          for i in $(seq 1 30); do
+            (echo > /dev/tcp/minio/9000) 2>/dev/null && echo "MinIO is ready" && break
+            echo "Waiting for MinIO... ($i/30)"
+            sleep 2
+            [ "$i" -eq 30 ] && echo "MinIO never became ready" && exit 1
+          done
+
       - name: Apply migrations to CI DB
         env:
           DB_HOST: mariadb
@@ -143,6 +171,9 @@ jobs:
           DB_PASSWORD: ${{ secrets.CI_DB_PASSWORD }}
           DB_NAME: ${{ secrets.CI_DB_NAME }}
           DATABASE_URL: mysql://${{ secrets.CI_DB_USER }}:${{ secrets.CI_DB_PASSWORD }}@mariadb:3306/${{ secrets.CI_DB_NAME }}
+          MINIO_ENDPOINT: http://minio:9000
+          MINIO_ROOT_USER: darkwatch_admin
+          MINIO_ROOT_PASSWORD: darkwatch_minio_dev
         run: cd server && npm run test:int:coverage
 
       - name: Install client dependencies
