@@ -415,7 +415,17 @@ jobs:
           scp -i ~/.ssh/id_ed25519 /tmp/badges/*.json "${DEPLOY_USER}@${DEPLOY_HOST}:~/tmp/badges/"
           ssh -i ~/.ssh/id_ed25519 "${DEPLOY_USER}@${DEPLOY_HOST}" bash <<'EOSSH'
           set -euo pipefail
-          set -a; . ~/services/darkwatch/.env.deploy; set +a
+          # Read the values we need from .env.deploy WITHOUT sourcing it.
+          # Sourcing under `set -u` blew up when one of the secret values
+          # contained a literal `$D…` substring (bash tries to expand
+          # `$D…` and finds it unbound). grep+cut treats values as plain
+          # strings, which is what we want for credentials.
+          ENV_FILE="$HOME/services/darkwatch/.env.deploy"
+          getval() { grep -E "^$1=" "$ENV_FILE" | head -1 | cut -d= -f2-; }
+          MINIO_ENDPOINT="$(getval MINIO_ENDPOINT)"
+          MINIO_ROOT_USER="$(getval MINIO_ROOT_USER)"
+          MINIO_ROOT_PASSWORD="$(getval MINIO_ROOT_PASSWORD)"
+          MINIO_BUCKET="$(getval MINIO_BUCKET)"
           ENDPOINT_AUTH="${MINIO_ENDPOINT/:\/\//://${MINIO_ROOT_USER}:${MINIO_ROOT_PASSWORD}@}"
           docker run --rm --network host \
             -v "$HOME/tmp/badges:/badges:ro" \
