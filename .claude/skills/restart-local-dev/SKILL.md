@@ -13,7 +13,7 @@ Kills all Darkwatch dev processes and restarts them clean.
 |------|---------|-----|
 | Client (Vite) + Server (Express) | `npm run dev` in project root | :5173 + :3000 |
 | WWW | `npx serve www -p 4200` | :4200 |
-| Brochure (Vite preview) | `npx vite preview --port 5199 --host 127.0.0.1` in `client/` | :5199 |
+| Brochure (static site) | `npx serve . -p 5199` in `site/` | :5199 |
 
 ## Steps
 
@@ -22,6 +22,7 @@ Kills all Darkwatch dev processes and restarts them clean.
    - `vite` (main workspace)
    - `vite preview` (main workspace)
    - `serve www` on port 4200
+   - `serve` on port 5199 (brochure)
 
 2. Clear Vite cache: `rm -rf client/node_modules/.vite`
 
