@@ -391,6 +391,9 @@ jobs:
 
       - name: Generate + upload badge endpoints to MinIO
         if: always() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        # Badges are cosmetic — an SSH/MinIO outage (e.g. tunnel down because the
+        # workflow can't reach the home Pi) shouldn't fail an otherwise-green CI.
+        continue-on-error: true
         env:
           E2E_OUTCOME: ${{ steps.smoke_e2e.outcome }}
           DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
