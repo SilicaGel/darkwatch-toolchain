@@ -91,6 +91,15 @@ jobs:
           TEST_HOOK_SECRET: e2e-test-hook-secret
           JWT_SECRET: e2e-test-secret
           CLIENT_URL: http://localhost:5173
+          # #388 cap is 5 sockets/user, 20/IP for prod abuse-prevention. E2E
+          # runs all tests as the same DM user; sockets from closed Playwright
+          # pages take a few seconds to register as disconnected, so they
+          # accumulate faster than they're reaped and the cap rejects new
+          # connections mid-batch (crit-banner & friends fail with the
+          # "Reconnecting to the game…" banner). Effectively disable both caps
+          # in CI — the test harness is not an abuse vector.
+          SOCKET_PER_USER_CAP: "1000"
+          SOCKET_PER_IP_CAP: "1000"
           NODE_OPTIONS: "--max-old-space-size=256"
         run: |
           node server/dist/index.js >/tmp/server.log 2>&1 &

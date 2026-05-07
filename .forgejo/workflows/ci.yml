@@ -269,6 +269,11 @@ jobs:
           TEST_HOOK_SECRET: e2e-test-hook-secret
           JWT_SECRET: e2e-test-secret
           CLIENT_URL: http://localhost:5173
+          # See e2e.yml — disable per-user/per-IP socket caps for CI runs
+          # so accumulating ghost sockets between Playwright tests don't
+          # block new connections.
+          SOCKET_PER_USER_CAP: "1000"
+          SOCKET_PER_IP_CAP: "1000"
           NODE_OPTIONS: "--max-old-space-size=256"
         run: |
           node server/dist/index.js >/tmp/server.log 2>&1 &
