@@ -138,9 +138,11 @@ jobs:
           mkdir -p /tmp/smoke-walk-artifacts
           cp /tmp/server.log /tmp/smoke-walk-artifacts/server.log 2>/dev/null || echo "(no server log)" > /tmp/smoke-walk-artifacts/server.log
           cp /tmp/vite.log /tmp/smoke-walk-artifacts/vite.log 2>/dev/null || echo "(no vite log)" > /tmp/smoke-walk-artifacts/vite.log
-          # Smoke-walk writes report.md and screenshots into tests/smoke-walk-report/
-          if [ -d tests/smoke-walk-report ]; then
-            cp -r tests/smoke-walk-report /tmp/smoke-walk-artifacts/
+          # Smoke-walk writes report.md and screenshots into tests/smoke-walk-out/
+          # (script's OUT_DIR is "smoke-walk-out", not "-report" — workflow was
+          # looking in the wrong place and silently dropping the report).
+          if [ -d tests/smoke-walk-out ]; then
+            cp -r tests/smoke-walk-out /tmp/smoke-walk-artifacts/
           fi
           # Also capture any Playwright screenshots from the smoke-walk Playwright usage
           if [ -d tests/test-results ]; then
