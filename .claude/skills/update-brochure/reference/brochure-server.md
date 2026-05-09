@@ -41,7 +41,10 @@ From the **current worktree root** (where `/ship` or `/update-brochure` was invo
 (cd client && npm run build)
 
 # 2. Start the server on the brochure server port in the background
-(cd server && PORT=3099 ALLOW_TEST_HOOKS=false NODE_ENV=development npm run dev > /tmp/brochure-server.log 2>&1) &
+# CLIENT_URL must match the brochure client port — the server's CSRF allowlist
+# defaults to CLIENT_URL and will 403-block every login if it's wrong.
+# Symptom: POST /api/auth/login returns 403 with "[csrf] blocked — origin not in allowlist"
+(cd server && PORT=3099 CLIENT_URL=http://localhost:5199 ALLOW_TEST_HOOKS=false NODE_ENV=development npm run dev > /tmp/brochure-server.log 2>&1) &
 BROCHURE_SERVER_PID=$!
 echo "$BROCHURE_SERVER_PID" > /tmp/brochure-server.pid
 
@@ -100,6 +103,7 @@ If screenshots look stale or wrong after a clean start:
 2. Check `/tmp/brochure-client.log` — did the build include your latest changes? (`ls -la client/dist/assets/*.js | head -1` — the hash should be recent)
 3. Try hard-rebuild: `rm -rf client/dist && (cd client && npm run build)`
 4. Confirm the seed data is present: `curl -s http://localhost:3099/api/auth/me -b "darkwatch_token=..."` after logging in — should return the seeded `dm@darkwatch.test` user
+5. **If login returns 403:** the server's CSRF allowlist rejected the origin. Check that `CLIENT_URL=http://localhost:5199` was set in step 2. The log will show `[csrf] blocked — origin not in allowlist`. Without it, the allowlist defaults to `http://localhost:5173` (the standard dev port) and every brochure login is blocked.
 
 ## Why not just use the existing dev server?
 
