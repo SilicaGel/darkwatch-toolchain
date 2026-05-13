@@ -51,58 +51,50 @@ This is the key step that lets you turn a 3-word input into a useful, specific i
 
 ---
 
-## Steps 3–4: Fetch open issues + duplicate check (Haiku subagent)
+## Steps 3–4: Fetch open issues + inline duplicate check
 
-Dispatch a Haiku subagent to fetch the open issue list and do the duplicate/related comparison **inside the subagent's context**. This keeps 20–50KB of raw issue JSON out of the main conversation — only the small structured summary returns.
+**Do not dispatch a sub-agent for this.** Earlier versions used a Haiku sub-agent for context isolation, but a foreground sub-agent blocks the parent — if it loops on tool calls (which it has, in practice), the whole session stalls and the user has no clean way to bail. `jq` filtering does the same job in seconds and keeps the parent in control. **The 20–50KB of raw JSON stays out of context as long as you only `jq` against the file and never print it.** Read excerpts only when you need them.
 
-Use the `Agent` tool with `model: "haiku"`:
+### Fetch open issues (paginated)
 
-```
-Agent({
-  model: "haiku",
-  description: "Forgejo duplicate/related check",
-  prompt: `You are checking whether a proposed Darkwatch issue duplicates or relates to an existing open issue.
-
-Proposed title:
-<paste the working title here>
-
-Proposed description:
-<paste the enriched description from Step 2 here>
-
-Steps:
-1. Fetch open issues from Forgejo:
-   curl -s -H "Authorization: token $FORGEJO_TOKEN" \\
-     "https://forge.example.com/api/v1/repos/aaron/darkwatch/issues?type=issues&state=open&limit=50&page=1"
-   If the response contains exactly 50 results, also fetch page 2.
-
-2. Compare the proposed title + description against every open issue's title and body.
-
-3. Return ONLY a JSON object — no prose, no code fences, no commentary:
-
-   {
-     "status": "new" | "duplicate" | "related",
-     "matches": [
-       { "id": <number>, "title": "<title>", "reason": "<one sentence on the overlap>" }
-     ]
-   }
-
-   Status meanings:
-   - "new":       no meaningful overlap with any open issue → matches: []
-   - "duplicate": same problem and same ask as an existing issue
-   - "related":   overlaps with one or more existing issues but different enough
-                  to warrant a separate issue or a stale-update
-
-   Include up to 3 most-relevant matches (in descending relevance). For "new", matches must be the empty array.`
-})
+```bash
+curl -sS -H "Authorization: token $FORGEJO_TOKEN" \
+  "https://forge.example.com/api/v1/repos/aaron/darkwatch/issues?state=open&limit=50&type=issues&page=1" > /tmp/_iss_p1.json
+curl -sS -H "Authorization: token $FORGEJO_TOKEN" \
+  "https://forge.example.com/api/v1/repos/aaron/darkwatch/issues?state=open&limit=50&type=issues&page=2" > /tmp/_iss_p2.json
+curl -sS -H "Authorization: token $FORGEJO_TOKEN" \
+  "https://forge.example.com/api/v1/repos/aaron/darkwatch/issues?state=open&limit=50&type=issues&page=3" > /tmp/_iss_p3.json
+jq -s 'add' /tmp/_iss_p1.json /tmp/_iss_p2.json /tmp/_iss_p3.json > /tmp/_iss_all.json
+echo "TOTAL=$(jq 'length' /tmp/_iss_all.json)"
 ```
 
-Use the returned JSON to choose the next action:
+Fetch page 3 only if page 2 returned 50 results (i.e. you might still be paginating). If `length` of page 2 < 50, drop the page-3 curl. The `jq -s 'add'` works fine with two files.
 
-| `status`    | Action |
-|-------------|--------|
-| `new`       | Proceed to Step 5 (clarifying questions) and Step 6 (write the issue). |
-| `duplicate` | Tell the user: *"#N already covers this: [title]. Want me to add a comment there, or create a separate issue anyway?"* |
-| `related`   | Show the user the overlap: *"This overlaps with #N — [title]. Add a comment there, or open a separate issue?"* If multiple matches were returned, list them. |
+### Filter against the proposed issue
+
+Distill the proposed title + description into 5–10 keywords + a few key phrases that any near-duplicate would also use. Then filter:
+
+```bash
+# Title-only scan (cheap, catches obvious dupes)
+jq -r '.[] | select(.title | test("KEY|PHRASES|HERE"; "i")) | "\(.number)\t\(.title)"' /tmp/_iss_all.json
+
+# Title + body scan (use when the title-only scan is empty)
+jq -r '.[] | select((.title + " " + (.body // "")) | test("KEY|PHRASES|HERE"; "i")) | "\(.number)\t\(.title)"' /tmp/_iss_all.json
+```
+
+Pick **specific** terms — `advantage|disadvantage|modifier key|shift.click` beats `roll` (too broad). Run a wider second pass with synonyms / adjacent terms if the first pass came up empty and you want to be sure. Keep total `jq` runs small (≤ 5 normally).
+
+### Classify the result
+
+Based on the matches you see (or don't), decide:
+
+| Classification | Meaning | Next action |
+|---|---|---|
+| **new**        | No meaningful overlap — empty filter or false-positives only | Proceed to Step 5 + Step 6 |
+| **duplicate**  | Same problem and same ask as an existing issue | Tell the user: *"#N already covers this: [title]. Want me to add a comment there, or create a separate issue anyway?"* |
+| **related**    | Overlap with one or more, different enough to warrant a separate issue | Show the overlap: *"This overlaps with #N — [title]. Add a comment there, or open a separate issue?"* |
+
+For multi-issue invocations (filing two related issues in one turn — e.g. "advantage UI" + "roll discoverability"), filter once for each and classify independently. They're separate decisions.
 
 ### Title/direction has changed (update case)
 
@@ -182,36 +174,68 @@ Then re-fetch the labels and overwrite the cache file.
 
 ## Step 8: Create or update
 
-### Creating a new issue — just do it
+### Critical: do not retry a POST on a parsing error
 
-No confirmation needed. After creating, report: *"Created #N: [title] — [link]"*
+A successful Forgejo write returns HTTP **201**. The body of that response can contain markdown with embedded newlines that `jq` will refuse to parse if you pipe it straight in. **A `jq` parse error on the response does NOT mean the POST failed** — it means the write succeeded but your display step broke.
+
+Always:
+
+1. Write the JSON payload to a file with `jq -n --rawfile`, then `curl --data-binary @file` — never inline a multi-line markdown body into `-d "..."`.
+2. Use `-o /tmp/resp.json -w '%{http_code}'` to capture the HTTP status separately from the body. **Branch on the status code, never on whether `jq` parsed the response.**
+3. If you see a `jq` error after a POST and you're not sure the write happened, do NOT retry — list your recent issues first (`GET …/issues?state=open&sort=newest&limit=5`) and check whether the issue you were trying to create is already there. Three identical issues filed 10 seconds apart is much worse than one issue with a missing screenshot.
+
+### Creating a new issue
+
+No confirmation needed. Use this recipe:
 
 ```bash
-curl -s -X POST \
+# Write the body to a file (avoids all shell quoting / heredoc pain)
+cat > /tmp/_issue_body.md <<'EOF'
+... markdown body, including ```code fences``` and newlines ...
+EOF
+
+# Build the JSON payload with jq --rawfile (correctly escapes everything)
+PAYLOAD=$(jq -n \
+  --arg t "Issue title goes here" \
+  --rawfile b /tmp/_issue_body.md \
+  '{title:$t, body:$b, labels:[1,3]}')
+
+# POST, capturing status code SEPARATELY from the response body
+CODE=$(curl -s -o /tmp/_issue_resp.json -w '%{http_code}' -X POST \
   -H "Authorization: token $FORGEJO_TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"title": "...", "body": "...", "labels": [id1, id2]}' \
-  "https://forge.example.com/api/v1/repos/aaron/darkwatch/issues"
+  --data-binary "$PAYLOAD" \
+  "https://forge.example.com/api/v1/repos/aaron/darkwatch/issues")
+
+if [ "$CODE" = "201" ]; then
+  jq '{number, title, html_url}' /tmp/_issue_resp.json
+else
+  echo "POST failed: HTTP $CODE"
+  head -c 500 /tmp/_issue_resp.json
+fi
 ```
 
-**If images were shared**, upload each one after creating the issue, then patch the body to embed them:
+After creating, report: *"Created #N: [title] — [link]"*.
+
+**If images were shared**, upload each one after creating the issue, then patch the body to embed them. Same status-code discipline applies:
 
 ```bash
 # 1. Upload the image — returns JSON with browser_download_url
-curl -s -X POST \
+CODE=$(curl -s -o /tmp/_upload.json -w '%{http_code}' -X POST \
   -H "Authorization: token $FORGEJO_TOKEN" \
   -F "attachment=@/path/to/screenshot.png" \
-  "https://forge.example.com/api/v1/repos/aaron/darkwatch/issues/{index}/assets"
+  "https://forge.example.com/api/v1/repos/aaron/darkwatch/issues/{index}/assets")
+[ "$CODE" = "201" ] && URL=$(jq -r '.browser_download_url' /tmp/_upload.json)
 
-# 2. Parse the URL
-# python3 -c "import sys,json; print(json.load(sys.stdin)['browser_download_url'])"
-
-# 3. PATCH the issue body to append the embedded image
-curl -s -X PATCH \
+# 2. Append the embedded image to the body file and PATCH
+echo -e "\n## Screenshot\n\n![screenshot]($URL)" >> /tmp/_issue_body.md
+PATCH_PAYLOAD=$(jq -n --rawfile b /tmp/_issue_body.md '{body:$b}')
+CODE=$(curl -s -o /tmp/_patch_resp.json -w '%{http_code}' -X PATCH \
   -H "Authorization: token $FORGEJO_TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"body": "...original body...\n\n## Screenshot\n\n![screenshot](https://...)"}' \
-  "https://forge.example.com/api/v1/repos/aaron/darkwatch/issues/{index}"
+  --data-binary "$PATCH_PAYLOAD" \
+  "https://forge.example.com/api/v1/repos/aaron/darkwatch/issues/{index}")
+[ "$CODE" = "201" ] || { echo "PATCH failed: $CODE"; head -c 500 /tmp/_patch_resp.json; }
 ```
 
 **macOS file access notes:**
