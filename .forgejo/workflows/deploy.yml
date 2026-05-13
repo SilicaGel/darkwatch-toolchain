@@ -160,6 +160,19 @@ jobs:
             "${DEPLOY_USER}@${DEPLOY_HOST}:~/services/darkwatch/.env.deploy"
           rm -f /tmp/darkwatch.deploy.env
 
+      - name: Rsync nginx config to Pi
+        env:
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+        run: |
+          # Copy nginx site config to the deploy directory on the Pi.
+          # The operator must symlink it once:
+          #   sudo ln -sf ~/deploy/darkwatch/deploy/nginx.conf \
+          #               /etc/nginx/sites-enabled/darkwatch.conf
+          rsync -az -e 'ssh -i ~/.ssh/id_ed25519' \
+            deploy/nginx.conf \
+            "${DEPLOY_USER}@${DEPLOY_HOST}:~/deploy/darkwatch/deploy/nginx.conf"
+
       - name: Build server image and (re)start container on Pi
         env:
           DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
@@ -172,4 +185,6 @@ jobs:
           docker rm -f darkwatch-server 2>/dev/null || true
           cd ~/services/darkwatch
           docker compose --env-file .env.deploy up -d --remove-orphans
+          # Reload nginx after the new config lands (no-op if config unchanged).
+          sudo nginx -t && sudo systemctl reload nginx
           EOSSH
