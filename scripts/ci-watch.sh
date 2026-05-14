@@ -7,12 +7,18 @@
 #   scripts/ci-watch.sh <sha_prefix> [--status-file <path>] [--pr <num>] [--batch <name>]
 #
 # Requires:
-#   - $FORGEJO_TOKEN in env (sourced from ~/.zshrc)
+#   - $FORGEJO_TOKEN exported in the calling environment (the shell rc
+#     should set + export it; do NOT try to re-source ~/.zshrc here —
+#     under bash that either no-ops or hangs on zsh-only syntax, killing
+#     the script silently with set -u in effect).
 #   - curl + jq
 
 set -u
 
-source ~/.zshrc >/dev/null 2>&1
+if [[ -z "${FORGEJO_TOKEN:-}" ]]; then
+  echo "ci-watch.sh: FORGEJO_TOKEN not set in environment" >&2
+  exit 1
+fi
 
 API="https://forge.example.com/api/v1/repos/aaron/darkwatch"
 sha="${1:-}"
