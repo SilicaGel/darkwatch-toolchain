@@ -1,5 +1,14 @@
 name: CI
 
+# Split into parallel jobs (#712): lint-typecheck / test / smoke run
+# concurrently on every PR and on push-to-main; badges is a main-only join
+# job. The Forgejo runner's capacity is set to 3 so the three primary jobs
+# actually run in parallel rather than serialising on one slot.
+#
+# Smoke now runs on PRs too (#711 workflow half — the gate that pinned it
+# to main-only pushes is gone). Branch protection (the other half of #711)
+# is configured in the Forgejo UI, not here.
+
 on:
   push:
     branches: [main]
@@ -10,7 +19,122 @@ permissions:
   pull-requests: write
 
 jobs:
-  build:
+  # ---------------------------------------------------------------------------
+  # lint-typecheck — static checks + compile. No DB, no build artifacts.
+  # Fastest signal: a typecheck or grep-gate failure surfaces here in well
+  # under a minute without waiting on tests or smoke.
+  # ---------------------------------------------------------------------------
+  lint-typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: |
+            package-lock.json
+            server/package-lock.json
+            client/package-lock.json
+            tests/package-lock.json
+
+      - name: Assert workflow Node.js versions are consistent
+        run: |
+          set -e
+          VERSIONS=$(grep -hE "^[[:space:]]+node-version:[[:space:]]+" .forgejo/workflows/*.yml \
+            | sed "s/.*node-version:[[:space:]]*//" | tr -d "' " | sort -u)
+          COUNT=$(echo "$VERSIONS" | grep -c .)
+          if [ "$COUNT" -ne "1" ]; then
+            echo "FAIL: mismatched node-version across workflows:"
+            grep -rn "node-version:" .forgejo/workflows/*.yml
+            exit 1
+          fi
+          echo "OK — all workflows use Node.js $VERSIONS"
+
+      - name: Install server dependencies
+        run: |
+          cd server && npm ci --no-audit --no-fund
+          # npm bug #4828: platform-specific optional bindings can be skipped when
+          # the runner's Node doesn't satisfy the package's engines field.
+          # Force-install the linux-arm64 rolldown binding if npm ci missed it.
+          if [ ! -d "node_modules/@rolldown/binding-linux-arm64-gnu" ]; then
+            VER=$(node -e "const l=JSON.parse(require('fs').readFileSync('package-lock.json','utf8')); console.log(l.packages['node_modules/@rolldown/binding-linux-arm64-gnu'].version)")
+            echo "Patching missing rolldown linux-arm64 binding @ $VER"
+            npm install --no-save --ignore-engines "@rolldown/binding-linux-arm64-gnu@$VER"
+          fi
+
+      - name: Install client dependencies
+        run: cd client && npm ci --no-audit --no-fund
+
+      # #413 — Fail PRs that introduce high/critical vulnerabilities.
+      # Moderate findings are tracked but not gating (uuid<14 via svix/resend
+      # is a known moderate; --audit-level=high skips moderates).
+      - name: Security audit (server)
+        run: cd server && npm audit --audit-level=high
+
+      # #413 — postcss moderate is known and does not gate.
+      - name: Security audit (client)
+        run: cd client && npm audit --audit-level=high
+
+      - name: Enforce soft-delete filters on core tables
+        run: |
+          # The three core repository files for soft-deleted tables must each
+          # contain a deleted_at filter. Fails fast if any file omits it.
+          fail=0
+          for f in \
+            server/src/repositories/campaignRepository.ts \
+            server/src/repositories/characterRepository.ts \
+            server/src/repositories/campaignMembershipRepository.ts; do
+            if ! grep -q "deleted_at" "$f"; then
+              echo "FAIL: $f has no deleted_at filter"
+              fail=1
+            fi
+          done
+          [ "$fail" -eq 0 ] && echo "Soft-delete filter check passed." || exit 1
+
+      - name: Forbid numeric ID patterns
+        run: |
+          set -e
+          if grep -rnE "Number\s*\(\s*req\.params" server/src client/src 2>/dev/null; then
+            echo "ERROR: Number() coercion on req.params is no longer valid — IDs are UUIDs."
+            exit 1
+          fi
+          # Entity ID fields typed as number in production source (tests may legitimately
+          # use numeric IDs for unrelated counters, so exclude test files). Catches both
+          # snake_case (user_id) and camelCase (characterId, campaignId) forms.
+          # Excludes RAF/timer handles (rafId, timeoutId, intervalId, frameId, animationId, timerId)
+          # which are legitimately numeric browser handles, not entity IDs.
+          if grep -rnE "(^|[[:space:](,{])(id|[a-zA-Z_]*_id|[a-zA-Z]+Id):[[:space:]]*number" server/src client/src \
+               --include="*.ts" --include="*.tsx" \
+               | grep -v -E "\.(test|spec)\.(ts|tsx)" \
+               | grep -v -E "\b(rafId|timeoutId|intervalId|frameId|animationId|timerId|pollId|handlerId):" ; then
+            echo "ERROR: entity ID field typed as number. IDs must be string."
+            exit 1
+          fi
+          # typeof guards that still check "number" for ID params
+          if grep -rnE "typeof[[:space:]]+[a-zA-Z_]*([Ii]d|_id)[[:space:]]*!==?[[:space:]]*\"number\"" \
+               server/src client/src --include="*.ts" --include="*.tsx" \
+               | grep -v -E "\.(test|spec)\.(ts|tsx)" ; then
+            echo "ERROR: typeof X !== \"number\" guard on an ID param. IDs must be string."
+            exit 1
+          fi
+          echo "OK — no numeric ID patterns found"
+
+      - name: Type check server
+        run: cd server && npm run build
+
+      - name: Type check + build client
+        run: cd client && npm run build
+
+  # ---------------------------------------------------------------------------
+  # test — server unit + integration + client unit + coverage-bot scripts.
+  # All four coverage datasets land in this one job so the diff-coverage PR
+  # comment can be assembled without cross-job artifact passing. Owns the
+  # mariadb + minio service containers.
+  # ---------------------------------------------------------------------------
+  test:
     runs-on: ubuntu-latest
     services:
       mariadb:
@@ -51,20 +175,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          # The diff-coverage comment needs history to diff against the base ref.
           fetch-depth: 0
-
-      - name: Assert workflow Node.js versions are consistent
-        run: |
-          set -e
-          VERSIONS=$(grep -hE "^[[:space:]]+node-version:[[:space:]]+" .forgejo/workflows/*.yml \
-            | sed "s/.*node-version:[[:space:]]*//" | tr -d "' " | sort -u)
-          COUNT=$(echo "$VERSIONS" | grep -c .)
-          if [ "$COUNT" -ne "1" ]; then
-            echo "FAIL: mismatched node-version across workflows:"
-            grep -rn "node-version:" .forgejo/workflows/*.yml
-            exit 1
-          fi
-          echo "OK — all workflows use Node.js $VERSIONS"
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -77,52 +189,27 @@ jobs:
             client/package-lock.json
             tests/package-lock.json
 
-      - name: Install root devDependencies (c8, concurrently)
+      - name: Install root devDependencies (c8 — coverage-bot scripts)
         run: npm ci --no-audit --no-fund
 
       - name: Install server dependencies
         run: |
           cd server && npm ci --no-audit --no-fund
-          # npm bug #4828: platform-specific optional bindings can be skipped when
-          # the runner's Node doesn't satisfy the package's engines field.
-          # Force-install the linux-arm64 rolldown binding if npm ci missed it.
           if [ ! -d "node_modules/@rolldown/binding-linux-arm64-gnu" ]; then
             VER=$(node -e "const l=JSON.parse(require('fs').readFileSync('package-lock.json','utf8')); console.log(l.packages['node_modules/@rolldown/binding-linux-arm64-gnu'].version)")
             echo "Patching missing rolldown linux-arm64 binding @ $VER"
             npm install --no-save --ignore-engines "@rolldown/binding-linux-arm64-gnu@$VER"
           fi
 
-      # #413 — Fail PRs that introduce high/critical vulnerabilities.
-      # Moderate findings are tracked but not gating (uuid<14 via svix/resend
-      # is a known moderate; --audit-level=high skips moderates).
-      - name: Security audit (server)
-        run: cd server && npm audit --audit-level=high
+      - name: Install client dependencies
+        run: cd client && npm ci --no-audit --no-fund
 
-      - name: Enforce soft-delete filters on core tables
-        run: |
-          # The three core repository files for soft-deleted tables must each
-          # contain a deleted_at filter. Fails fast if any file omits it.
-          fail=0
-          for f in \
-            server/src/repositories/campaignRepository.ts \
-            server/src/repositories/characterRepository.ts \
-            server/src/repositories/campaignMembershipRepository.ts; do
-            if ! grep -q "deleted_at" "$f"; then
-              echo "FAIL: $f has no deleted_at filter"
-              fail=1
-            fi
-          done
-          [ "$fail" -eq 0 ] && echo "Soft-delete filter check passed." || exit 1
-
-      - name: Type check server
-        run: cd server && npm run build
-
-      - name: Test server
+      - name: Test server (unit)
         # Always emit coverage — PR uses it for the diff-coverage comment;
         # main uses it to write the server-coverage badge.
         run: cd server && npm run test:coverage
 
-      - name: Wait for MariaDB (for Kysely schema check)
+      - name: Wait for MariaDB
         run: |
           for i in $(seq 1 30); do
             (echo > /dev/tcp/mariadb/3306) 2>/dev/null && echo "MariaDB is ready" && break
@@ -176,55 +263,13 @@ jobs:
           MINIO_ROOT_PASSWORD: darkwatch_minio_dev
         run: cd server && npm run test:int:coverage
 
-      - name: Install client dependencies
-        run: cd client && npm ci
-
-      # #413 — Audit client after install. postcss moderate is known and
-      # does not gate (--audit-level=high skips moderates).
-      - name: Security audit (client)
-        run: cd client && npm audit --audit-level=high
-
-      - name: Build client
-        run: cd client && npm run build
-
-      - name: Test client
+      - name: Test client (unit)
         # Always emit coverage — PR uses it for the diff-coverage comment;
         # main uses it to write the client-coverage badge.
         run: cd client && npm run test:coverage
 
       - name: Test coverage-bot scripts
-        # Always emit coverage — main needs the same dataset PR uses for the
-        # diff-coverage comment so reruns of `npm run test:scripts:coverage`
-        # locally produce parity with CI.
         run: npm run test:scripts:coverage
-
-      - name: Forbid numeric ID patterns
-        run: |
-          set -e
-          if grep -rnE "Number\s*\(\s*req\.params" server/src client/src 2>/dev/null; then
-            echo "ERROR: Number() coercion on req.params is no longer valid — IDs are UUIDs."
-            exit 1
-          fi
-          # Entity ID fields typed as number in production source (tests may legitimately
-          # use numeric IDs for unrelated counters, so exclude test files). Catches both
-          # snake_case (user_id) and camelCase (characterId, campaignId) forms.
-          # Excludes RAF/timer handles (rafId, timeoutId, intervalId, frameId, animationId, timerId)
-          # which are legitimately numeric browser handles, not entity IDs.
-          if grep -rnE "(^|[[:space:](,{])(id|[a-zA-Z_]*_id|[a-zA-Z]+Id):[[:space:]]*number" server/src client/src \
-               --include="*.ts" --include="*.tsx" \
-               | grep -v -E "\.(test|spec)\.(ts|tsx)" \
-               | grep -v -E "\b(rafId|timeoutId|intervalId|frameId|animationId|timerId|pollId|handlerId):" ; then
-            echo "ERROR: entity ID field typed as number. IDs must be string."
-            exit 1
-          fi
-          # typeof guards that still check "number" for ID params
-          if grep -rnE "typeof[[:space:]]+[a-zA-Z_]*([Ii]d|_id)[[:space:]]*!==?[[:space:]]*\"number\"" \
-               server/src client/src --include="*.ts" --include="*.tsx" \
-               | grep -v -E "\.(test|spec)\.(ts|tsx)" ; then
-            echo "ERROR: typeof X !== \"number\" guard on an ID param. IDs must be string."
-            exit 1
-          fi
-          echo "OK — no numeric ID patterns found"
 
       - name: Post diff coverage comment
         if: always() && github.event_name == 'pull_request'
@@ -245,18 +290,107 @@ jobs:
           node scripts/coverage-comment/build-comment.mjs \
             | node scripts/coverage-comment/post-comment.mjs
 
-      # ---------------------------------------------------------------------------
-      # Smoke E2E — runs on every PR push and on push/merge to main.
-      # Full E2E suite (every spec) lives in .forgejo/workflows/nightly-e2e.yml.
-      # ---------------------------------------------------------------------------
+      - name: Upload coverage summaries (consumed by the badges job)
+        if: always() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        # v4 requires GHES features Forgejo's actions backend doesn't expose.
+        # Pin to v3 — same constraint documented in e2e.yml.
+        uses: actions/upload-artifact@v3
+        with:
+          name: coverage-summaries
+          path: |
+            server/coverage/coverage-summary.json
+            client/coverage/coverage-summary.json
+          retention-days: 3
 
-      # ---------------------------------------------------------------------------
-      # Smoke E2E skipped on PRs — unit + integration tests are the PR gate.
-      # Smoke runs on push to main so regressions are caught before deploy.
-      # ---------------------------------------------------------------------------
+  # ---------------------------------------------------------------------------
+  # smoke — critical-path Playwright specs against the built app. Runs on
+  # every PR and on push-to-main (the main-only gate is gone — #711). Builds
+  # its own server + client and owns its own mariadb service. The full E2E
+  # suite still lives in nightly-e2e via e2e.yml.
+  # ---------------------------------------------------------------------------
+  smoke:
+    runs-on: ubuntu-latest
+    services:
+      mariadb:
+        image: mariadb:11
+        env:
+          MYSQL_ROOT_PASSWORD: ${{ secrets.CI_DB_ROOT_PASSWORD }}
+          MYSQL_DATABASE: ${{ secrets.CI_DB_NAME }}
+          MYSQL_USER: ${{ secrets.CI_DB_USER }}
+          MYSQL_PASSWORD: ${{ secrets.CI_DB_PASSWORD }}
+        options: >-
+          --health-cmd="healthcheck.sh --connect --innodb_initialized"
+          --health-interval=2s
+          --health-timeout=5s
+          --health-retries=30
+          --tmpfs /var/lib/mysql:rw,noexec,nosuid,size=512m
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: |
+            package-lock.json
+            server/package-lock.json
+            client/package-lock.json
+            tests/package-lock.json
+
+      - name: Install server dependencies
+        run: |
+          cd server && npm ci --no-audit --no-fund
+          if [ ! -d "node_modules/@rolldown/binding-linux-arm64-gnu" ]; then
+            VER=$(node -e "const l=JSON.parse(require('fs').readFileSync('package-lock.json','utf8')); console.log(l.packages['node_modules/@rolldown/binding-linux-arm64-gnu'].version)")
+            echo "Patching missing rolldown linux-arm64 binding @ $VER"
+            npm install --no-save --ignore-engines "@rolldown/binding-linux-arm64-gnu@$VER"
+          fi
+
+      - name: Build server
+        run: cd server && npm run build
+
+      - name: Install client dependencies
+        run: cd client && npm ci --no-audit --no-fund
+
+      - name: Build client
+        run: cd client && npm run build
+
+      - name: Wait for MariaDB
+        run: |
+          for i in $(seq 1 30); do
+            (echo > /dev/tcp/mariadb/3306) 2>/dev/null && echo "MariaDB is ready" && break
+            echo "Waiting for MariaDB... ($i/30)"
+            sleep 2
+            [ "$i" -eq 30 ] && echo "MariaDB never became ready" && exit 1
+          done
+
+      - name: Apply migrations to CI DB
+        env:
+          DB_HOST: mariadb
+          DB_PORT: "3306"
+          DB_USER: ${{ secrets.CI_DB_USER }}
+          DB_PASSWORD: ${{ secrets.CI_DB_PASSWORD }}
+          DB_NAME: ${{ secrets.CI_DB_NAME }}
+        run: cd server && npm run db:migrate
+
+      - name: Seed core + shadowdark + demo content (smoke specs assume seeded DB)
+        env:
+          DB_HOST: mariadb
+          DB_PORT: "3306"
+          DB_USER: ${{ secrets.CI_DB_USER }}
+          DB_PASSWORD: ${{ secrets.CI_DB_PASSWORD }}
+          DB_NAME: ${{ secrets.CI_DB_NAME }}
+        # The demo campaign ("Demo Campaign (Shadowdark)") is Tier 3 — it is
+        # NOT created by seed:shadowdark. The smoke specs' openCampaign()
+        # helper looks for it, so seed:shadowdark:demo is required. The old
+        # monolith ci.yml got away without it only because the integration
+        # tests ran first in the same job and left the demo campaign in the
+        # shared DB as a side effect; this job has its own fresh DB. Matches
+        # e2e.yml, which seeds all three tiers for the same reason.
+        run: cd server && npm run seed:core && npm run seed:shadowdark && npm run seed:shadowdark:demo
 
       - name: Smoke — start E2E app server
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         env:
           PORT: "3001"
           DB_HOST: mariadb
@@ -286,7 +420,6 @@ jobs:
           done
 
       - name: Smoke — start Vite preview server
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         env:
           API_PROXY_URL: "http://localhost:3001"
           NODE_OPTIONS: "--max-old-space-size=512"
@@ -300,7 +433,6 @@ jobs:
           done
 
       - name: Smoke — warm up app server (login + auth + campaigns)
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         # The first specs in the suite (level-up, picker-commits) hit cold
         # connection pools, V8 JIT, and socket handlers, exceeding their
         # 12-15s waits. Issuing a few authed requests here primes the app
@@ -327,7 +459,6 @@ jobs:
           echo "warmup complete"
 
       - name: Cache Playwright browsers
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: actions/cache@v4
         with:
           path: /home/ci/playwright-cache
@@ -336,18 +467,15 @@ jobs:
             playwright-${{ runner.os }}-
 
       - name: Smoke — install Playwright and browsers
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         env:
           PLAYWRIGHT_BROWSERS_PATH: /home/ci/playwright-cache
         run: cd tests && npm ci && npx playwright install chromium --with-deps
 
       - name: Typecheck tests/ (specs + helpers + smoke-walk)
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: cd tests && npm run typecheck
 
       - name: Smoke — run critical specs
         id: smoke_e2e
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         env:
           E2E_SERVER_URL: "http://localhost:3001"
           TEST_HOOK_SECRET: e2e-test-hook-secret
@@ -373,19 +501,45 @@ jobs:
             e2e/spell-exhaustion.spec.ts \
             --reporter=line
 
-      # ---------------------------------------------------------------------------
-      # Badge row — feeds shields.io endpoints in README.md (#522).
-      # Five JSONs uploaded to MinIO at s3://darkwatch-images/site/<name>.json,
-      # public-readable at https://images.example.com/site/<name>.json:
-      #   build, e2e, server-coverage, client-coverage, version
-      # Runs `if: always()` on main pushes so a build failure flips the build
-      # badge red instead of leaving a stale green one. The Pi (not the runner)
-      # talks to MinIO via host network using `mc` in a docker container — same
-      # pattern as infra/minio/init-bucket.sh.
-      # ---------------------------------------------------------------------------
+      - name: Dump server and vite logs on failure
+        if: failure()
+        run: |
+          echo "=== server log (last 200 lines) ==="
+          tail -n 200 /tmp/server.log || echo "no server log"
+          echo "=== vite log (last 200 lines) ==="
+          tail -n 200 /tmp/vite.log || echo "no vite log"
+
+  # ---------------------------------------------------------------------------
+  # badges — main-only join job. Feeds the shields.io endpoints in README.md
+  # (#522): build, e2e, server-coverage, client-coverage, version. Waits on
+  # the three primary jobs, reads their results + the coverage-summaries
+  # artifact, and pushes five JSONs to MinIO via the deploy host.
+  # `if: always()` so a failed gate flips the badge red instead of leaving a
+  # stale green one.
+  # ---------------------------------------------------------------------------
+  badges:
+    runs-on: ubuntu-latest
+    needs: [lint-typecheck, test, smoke]
+    if: always() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Download coverage summaries
+        # Restores server/coverage/coverage-summary.json + client/coverage/...
+        # at their original paths. continue-on-error: a failed `test` job may
+        # not have produced the artifact — the badge script degrades coverage
+        # entries to 'n/a' rather than failing.
+        uses: actions/download-artifact@v3
+        continue-on-error: true
+        with:
+          name: coverage-summaries
 
       - name: Set up SSH for badge upload
-        if: always() && github.event_name == 'push' && github.ref == 'refs/heads/main'
         env:
           DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
           DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
@@ -399,26 +553,30 @@ jobs:
           ssh-keygen -y -f ~/.ssh/id_ed25519 >/dev/null
 
       - name: Generate + upload badge endpoints to MinIO
-        if: always() && github.event_name == 'push' && github.ref == 'refs/heads/main'
         # Badges are cosmetic — an SSH/MinIO outage (e.g. tunnel down because the
-        # workflow can't reach the home Pi) shouldn't fail an otherwise-green CI.
+        # workflow can't reach the home deploy host) shouldn't fail an otherwise
+        # green CI.
         continue-on-error: true
         env:
-          E2E_OUTCOME: ${{ steps.smoke_e2e.outcome }}
+          # Job results from the three primary jobs. build = all non-smoke
+          # gates green; e2e = smoke green.
+          LINT_RESULT: ${{ needs.lint-typecheck.result }}
+          TEST_RESULT: ${{ needs.test.result }}
+          SMOKE_RESULT: ${{ needs.smoke.result }}
           DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
         run: |
           mkdir -p /tmp/badges
-          # Generate 5 shields.io endpoint JSONs. Build/e2e are inferred from
-          # the smoke step outcome: if smoke ran (success or failure), the
-          # build phase made it past every gate; if smoke was 'skipped' on a
-          # main push, an earlier gate failed → build red.
+          # Generate 5 shields.io endpoint JSONs. build is green only when
+          # lint-typecheck AND test both succeeded; e2e tracks the smoke job.
           node -e "
             const fs = require('fs');
             const out = '/tmp/badges';
-            const e2e = process.env.E2E_OUTCOME || 'skipped';
-            const buildOk = e2e === 'success' || e2e === 'failure';
-            const e2eOk = e2e === 'success';
+            const lint = process.env.LINT_RESULT || 'skipped';
+            const test = process.env.TEST_RESULT || 'skipped';
+            const smoke = process.env.SMOKE_RESULT || 'skipped';
+            const buildOk = lint === 'success' && test === 'success';
+            const e2eOk = smoke === 'success';
             fs.writeFileSync(out + '/build.json', JSON.stringify({
               schemaVersion: 1, label: 'build',
               message: buildOk ? 'passing' : 'failing',
@@ -451,9 +609,9 @@ jobs:
             }));
           "
           ls -la /tmp/badges
-          # Hand off to the Pi: scp the JSONs, then exec mc inside docker on
-          # the Pi (--network host so it reaches darkwatch-minio on :9000).
-          # Credentials come from the deploy env file already on the Pi.
+          # Hand off to the deploy host: scp the JSONs, then exec mc inside docker
+          # there (--network host so it reaches darkwatch-minio on :9000).
+          # Credentials come from the deploy env file already on the host.
           ssh -i ~/.ssh/id_ed25519 "${DEPLOY_USER}@${DEPLOY_HOST}" 'mkdir -p ~/tmp/badges && rm -f ~/tmp/badges/*.json'
           scp -i ~/.ssh/id_ed25519 /tmp/badges/*.json "${DEPLOY_USER}@${DEPLOY_HOST}:~/tmp/badges/"
           ssh -i ~/.ssh/id_ed25519 "${DEPLOY_USER}@${DEPLOY_HOST}" bash <<'EOSSH'

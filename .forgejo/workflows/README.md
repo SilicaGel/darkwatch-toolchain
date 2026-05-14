@@ -9,9 +9,10 @@ The workflows depend on the following secrets, configured in
 
 ### CI database (`ci.yml`, `nightly-e2e.yml`)
 
-The ephemeral MariaDB service container that backs the build job pulls its
-credentials from these secrets. They only exist for the lifetime of the CI
-run, but are kept out of the workflow file as a hygiene measure (see #138).
+The ephemeral MariaDB service containers that back the `test` and `smoke`
+jobs pull their credentials from these secrets. They only exist for the
+lifetime of the CI run, but are kept out of the workflow file as a hygiene
+measure (see #138).
 
 | Secret                 | Purpose                                 | Suggested value     |
 | ---------------------- | --------------------------------------- | ------------------- |
@@ -40,10 +41,21 @@ production MariaDB and are **separate** from the CI secrets above.
 
 ## Workflows
 
-- **`ci.yml`** — runs on every push and PR to `main`. Type-checks, runs
-  server + client unit tests, integration tests against MariaDB, builds the
-  client, generates coverage badges, and (on `main` push) runs the Smoke
-  Playwright specs, then deploys the server container + client + brochure.
+- **`ci.yml`** — runs on every push and PR to `main`. Split into three
+  parallel jobs plus a main-only join job (#712):
+  - `lint-typecheck` — static gates (soft-delete filter check, numeric-ID
+    ban, `npm audit`) + server/client type-check. No DB; the fastest
+    failure signal.
+  - `test` — server + client unit tests, integration tests against MariaDB
+    + MinIO, coverage-bot script tests, and the diff-coverage PR comment.
+  - `smoke` — builds the app and runs the critical-path Playwright specs
+    against it (MariaDB-backed). Runs on PRs as well as `main` (#711/#712
+    dropped the old main-only gate).
+  - `badges` — `main`-only; waits on the three jobs above and pushes the
+    shields.io endpoint JSONs (build / e2e / coverage / version) to MinIO.
+
+  The Forgejo runner's `capacity` is set to 3 so the three primary jobs run
+  concurrently rather than serialising on one slot.
 - **`nightly-e2e.yml`** — runs nightly at 03:00 UTC. Brings up the full
   app stack and runs the complete Playwright E2E suite. Heavier than CI;
   isolated to off-hours so the Pi4 runner isn't competing with daytime PR work.
