@@ -1,0 +1,38 @@
+name: Dead-code report (knip)
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  knip:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: "npm"
+          cache-dependency-path: |
+            package-lock.json
+            client/package-lock.json
+            server/package-lock.json
+
+      # Install every workspace knip needs to resolve config files (vite/vitest)
+      # and walk source. Failures here just skip the comment — non-blocking.
+      - name: Install dependencies
+        run: |
+          npm ci --no-audit --no-fund
+          (cd client && npm ci --no-audit --no-fund)
+          (cd server && npm ci --no-audit --no-fund)
+
+      - name: Run knip + post PR comment
+        env:
+          FORGEJO_URL: ${{ github.server_url }}
+          FORGEJO_TOKEN: ${{ github.token }}
+          REPO_OWNER: ${{ github.repository_owner }}
+          REPO_NAME: ${{ github.event.repository.name }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: node scripts/dead-code-comment/run-and-post.mjs

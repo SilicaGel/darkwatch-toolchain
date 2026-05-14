@@ -359,6 +359,7 @@ jobs:
           # is investigated and the waiter is hardened (or the wizard's
           # debounce is stabilised).
           cd tests && npx playwright test \
+            e2e/a11y.spec.ts \
             e2e/dashboard.spec.ts \
             e2e/death-timer.spec.ts \
             e2e/crit-banner.spec.ts \

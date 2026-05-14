@@ -1,0 +1,61 @@
+name: Lighthouse CI
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  lighthouse:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: "npm"
+          cache-dependency-path: |
+            package-lock.json
+            client/package-lock.json
+
+      - name: Install dependencies
+        run: |
+          npm ci --no-audit --no-fund
+          (cd client && npm ci --no-audit --no-fund)
+
+      - name: Build client
+        run: cd client && npm run build
+
+      # The Forgejo runner's node:22 base image has no Chrome on PATH.
+      # Use the same installer the e2e workflow uses (npx playwright
+      # install chromium --with-deps) — proven to work on this runner.
+      # `--with-deps` also installs system libraries chromium needs.
+      - name: Install Chromium (via Playwright)
+        run: npx --yes -p @playwright/test playwright install chromium --with-deps
+
+      # lhci uses chrome-launcher to find Chrome; chrome-launcher checks
+      # CHROME_PATH first, then several default paths. Playwright drops
+      # the binary at ~/.cache/ms-playwright/chromium-*/chrome-linux/chrome
+      # which isn't a default search path, so we set CHROME_PATH explicitly.
+      # `lhci autorun` reads lighthouserc.cjs, runs 3 Lighthouse passes
+      # against the static-served bundle, and writes JSON + HTML reports
+      # into .lighthouseci/. Always exit 0 — non-blocking. Comment-bot
+      # below surfaces scores + assertion failures regardless.
+      - name: Run Lighthouse CI
+        run: |
+          export CHROME_PATH=$(find "$HOME/.cache/ms-playwright" -name "chrome" -type f -path "*chrome-linux*" | head -1)
+          echo "Using CHROME_PATH=$CHROME_PATH"
+          # Invoke the local @lhci/cli binary directly. `npx lhci` would
+          # fall through to the npm registry on a cache miss and pull a
+          # known typosquat package named "lhci" (unrelated to @lhci/cli).
+          ./node_modules/.bin/lhci autorun || true
+
+      - name: Post PR comment
+        env:
+          FORGEJO_URL: ${{ github.server_url }}
+          FORGEJO_TOKEN: ${{ github.token }}
+          REPO_OWNER: ${{ github.repository_owner }}
+          REPO_NAME: ${{ github.event.repository.name }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: node scripts/lighthouse-comment/post-comment.mjs

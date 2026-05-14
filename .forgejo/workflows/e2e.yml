@@ -235,6 +235,7 @@ jobs:
           PLAYWRIGHT_BROWSERS_PATH: /home/ci/playwright-cache
         run: |
           cd tests && npx playwright test \
+            e2e/a11y.spec.ts \
             e2e/condition-expiry.spec.ts \
             e2e/creature-gallery.spec.ts \
             e2e/crit-banner.spec.ts \
