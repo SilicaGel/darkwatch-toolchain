@@ -76,6 +76,44 @@ echo "$(date -u +%FT%TZ) {batch_name} ticket=#<N> status=starting" >> {log_path}
 echo "$(date -u +%FT%TZ) {batch_name} ticket=#<N> status=working note=\"tests green, writing impl\"" >> {log_path}
 ```
 
+**Before declaring done — re-read acceptance + walk the user-visible surface**
+
+Do NOT proceed to "On ticket completion" until you've run this check. It exists
+because two tickets — **#693** (left-edge alignment) and **#700** (Background
+field in view mode) — once shipped fixes that passed the *literal* acceptance
+phrase but missed the *user-visible intent*, and both had to be reopened during QA:
+
+- **#693** asked for the party-page elements to "line up to a single left edge —
+  no staircase." The fix aligned two panel headers with each other, but the
+  character grid, NPC section, and Party Loot still sat at different offsets —
+  the staircase persisted down the rest of the rail.
+- **#700** asked for the Background field to "render in view mode." The fix added
+  exactly the Background field and nothing else — Class, Ancestry, and Level
+  (already present in edit mode) still didn't show in view mode, leaving a
+  half-populated Info panel.
+
+Both passed the text. Both failed the spirit. To avoid that:
+
+1. **Re-read the ticket's Acceptance section.** Treat each bullet as a separate
+   must-pass condition, not one phrase to satisfy. If there's no explicit
+   Acceptance section, derive the conditions from the problem description.
+2. **Walk the user-visible surface in code.** For UI tickets, open the
+   component(s) the reporter would actually see and trace *every* related field /
+   row / element — not just the one you changed. Ask: "rendered with my fix, does
+   this page now look how the reporter expected?" For an alignment ticket that
+   means every element on the rail; for a "field X shows" ticket, check whether
+   sibling fields the user expects alongside it are also present.
+3. **Write an end-state assertion when feasible.** Not "the new code path exists"
+   but "the rendered output contains all the elements the ticket implied." For
+   #700 that would have been a `getByText("Class") / getByText("Ancestry") /
+   getByText("Level")` check on the view-mode InfoPanel, not just Background.
+4. **If the real scope is bigger than the ticket's framing, safety-valve.**
+   "Background field renders" is a 5-minute fix; "view mode has parity with edit
+   mode for identity fields" is a different — bigger — ticket. Surface that with
+   `status=blocked` instead of quietly shipping the narrow read.
+
+Only once the acceptance walk passes do you proceed to:
+
 **On ticket completion**:
 1. Commit with a clear message, format `feat(#<N>): <summary>` / `fix(#<N>): …` / `security(#<N>): …` / `chore(#<N>): …`
 2. Comment on the Forgejo ticket:
