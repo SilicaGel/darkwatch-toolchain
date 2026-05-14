@@ -118,7 +118,7 @@ jobs:
           API_PROXY_URL: "http://localhost:3001"
           NODE_OPTIONS: "--max-old-space-size=512"
         run: |
-          cd client && npx vite preview >/tmp/vite.log 2>&1 &
+          cd client && ./node_modules/.bin/vite preview >/tmp/vite.log 2>&1 &
           VITE_PID=$!
           echo $VITE_PID > /tmp/vite.pid
           # Wait for Vite on port 5173
@@ -163,14 +163,14 @@ jobs:
       - name: Install Playwright and browsers
         env:
           PLAYWRIGHT_BROWSERS_PATH: /home/ci/playwright-cache
-        run: cd tests && npm ci --no-audit --no-fund && npx playwright install chromium --with-deps
+        run: cd tests && npm ci --no-audit --no-fund && ./node_modules/.bin/playwright install chromium --with-deps
 
       - name: Run Playwright E2E tests (stabilize-ownership — Death-save)
         env:
           E2E_SERVER_URL: "http://localhost:3001"
           TEST_HOOK_SECRET: e2e-test-hook-secret
           PLAYWRIGHT_BROWSERS_PATH: /home/ci/playwright-cache
-        run: cd tests && npx playwright test e2e/stabilize-ownership.spec.ts --grep "Death-save button" --reporter=line
+        run: cd tests && ./node_modules/.bin/playwright test e2e/stabilize-ownership.spec.ts --grep "Death-save button" --reporter=line
 
       - name: Restart Vite preview (mid-stabilize)
         env:
@@ -188,7 +188,7 @@ jobs:
             sleep 1
           done
           sleep 2
-          cd client && npx vite preview >/tmp/vite.log 2>&1 &
+          cd client && ./node_modules/.bin/vite preview >/tmp/vite.log 2>&1 &
           echo $! > /tmp/vite.pid
           for i in $(seq 1 30); do
             curl -s -o /dev/null http://localhost:5173 && break || true
@@ -202,7 +202,7 @@ jobs:
           E2E_SERVER_URL: "http://localhost:3001"
           TEST_HOOK_SECRET: e2e-test-hook-secret
           PLAYWRIGHT_BROWSERS_PATH: /home/ci/playwright-cache
-        run: cd tests && npx playwright test e2e/stabilize-ownership.spec.ts --grep "Stabilize button|DM control transfer" --reporter=line
+        run: cd tests && ./node_modules/.bin/playwright test e2e/stabilize-ownership.spec.ts --grep "Stabilize button|DM control transfer" --reporter=line
 
       - name: Restart Vite preview (clear memory between E2E batches)
         env:
@@ -219,7 +219,7 @@ jobs:
             sleep 1
           done
           sleep 2
-          cd client && npx vite preview >/tmp/vite.log 2>&1 &
+          cd client && ./node_modules/.bin/vite preview >/tmp/vite.log 2>&1 &
           echo $! > /tmp/vite.pid
           for i in $(seq 1 30); do
             curl -s -o /dev/null http://localhost:5173 && break || true
@@ -234,7 +234,7 @@ jobs:
           TEST_HOOK_SECRET: e2e-test-hook-secret
           PLAYWRIGHT_BROWSERS_PATH: /home/ci/playwright-cache
         run: |
-          cd tests && npx playwright test \
+          cd tests && ./node_modules/.bin/playwright test \
             e2e/a11y.spec.ts \
             e2e/condition-expiry.spec.ts \
             e2e/creature-gallery.spec.ts \
@@ -262,7 +262,7 @@ jobs:
             sleep 1
           done
           sleep 2
-          cd client && npx vite preview >/tmp/vite.log 2>&1 &
+          cd client && ./node_modules/.bin/vite preview >/tmp/vite.log 2>&1 &
           echo $! > /tmp/vite.pid
           for i in $(seq 1 30); do
             curl -s -o /dev/null http://localhost:5173 && break || true
@@ -277,7 +277,7 @@ jobs:
           TEST_HOOK_SECRET: e2e-test-hook-secret
           PLAYWRIGHT_BROWSERS_PATH: /home/ci/playwright-cache
         run: |
-          cd tests && npx playwright test \
+          cd tests && ./node_modules/.bin/playwright test \
             e2e/campaign-creation.spec.ts \
             e2e/character-creation.spec.ts \
             e2e/combat-damage.spec.ts \

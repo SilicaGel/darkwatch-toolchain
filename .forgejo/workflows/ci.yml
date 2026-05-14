@@ -53,6 +53,30 @@ jobs:
           fi
           echo "OK — all workflows use Node.js $VERSIONS"
 
+      - name: Forbid bare `npx <bin>` in workflows (typosquat fallthrough guard)
+        run: |
+          # `npx <bin>` silently fetches + runs a public-registry package if
+          # the local install is missing — a typosquat fallthrough vector
+          # (#722). Require either a direct ./node_modules/.bin path, or an
+          # npx call whose first argument is a flag (`--no-install` exits
+          # non-zero instead of fetching; `-p <pkg>` pins the package). The
+          # `awk -F'#'` strips trailing comments before matching so a `#`
+          # comment that mentions npx doesn't trip the gate. The pattern
+          # matches `npx ` + a lowercase letter (a real bin name) — so the
+          # `npx <bin>` / `npx --no-install` literals in this step's own
+          # name + echo strings don't self-trigger.
+          hits=$(for f in .forgejo/workflows/*.yml; do
+            awk -F'#' -v fn="$f" '{print fn ":" NR ":" $1}' "$f"
+          done | grep -E 'npx [a-z]' || true)
+          if [ -n "$hits" ]; then
+            echo "ERROR: bare 'npx <bin>' found in a workflow — use"
+            echo "  ./node_modules/.bin/<bin>   (preferred), or"
+            echo "  npx --no-install <bin>      (fails fast instead of fetching)"
+            echo "$hits"
+            exit 1
+          fi
+          echo "OK — no bare 'npx <bin>' in workflows"
+
       - name: Install server dependencies
         run: |
           cd server && npm ci --no-audit --no-fund
@@ -424,7 +448,9 @@ jobs:
           API_PROXY_URL: "http://localhost:3001"
           NODE_OPTIONS: "--max-old-space-size=512"
         run: |
-          cd client && npx vite preview >/tmp/vite.log 2>&1 &
+          # Direct binary path, not `npx vite` — `npx <bin>` silently fetches
+          # from the public registry if the local install is missing (#722).
+          cd client && ./node_modules/.bin/vite preview >/tmp/vite.log 2>&1 &
           for i in $(seq 1 30); do
             curl -s -o /dev/null http://localhost:5173 && break || true
             echo "Waiting for Vite... ($i/30)"
@@ -469,7 +495,8 @@ jobs:
       - name: Smoke — install Playwright and browsers
         env:
           PLAYWRIGHT_BROWSERS_PATH: /home/ci/playwright-cache
-        run: cd tests && npm ci && npx playwright install chromium --with-deps
+        # Direct binary path, not `npx playwright` — see #722.
+        run: cd tests && npm ci && ./node_modules/.bin/playwright install chromium --with-deps
 
       - name: Typecheck tests/ (specs + helpers + smoke-walk)
         run: cd tests && npm run typecheck
@@ -486,7 +513,7 @@ jobs:
           # cascade that #501 fixed. Re-enable only after the underlying race
           # is investigated and the waiter is hardened (or the wizard's
           # debounce is stabilised).
-          cd tests && npx playwright test \
+          cd tests && ./node_modules/.bin/playwright test \
             e2e/a11y.spec.ts \
             e2e/dashboard.spec.ts \
             e2e/death-timer.spec.ts \
