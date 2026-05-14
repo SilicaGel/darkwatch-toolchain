@@ -112,7 +112,7 @@ test("#NNN — short description of what's being verified", async ({ browser }) 
 <h1>QA #NNN — short description</h1>
 <p class="meta">One-sentence summary of what was fixed and what to look for.</p>
 <div class="grid">
-  <div class="cell"><h3>Tight crop: feature area</h3><img src="feature-tight-crop.png" alt="tight crop" onerror="this.parentNode.innerHTML+='<p style=color:#888>(target not found — check full screenshot)</p>'"></div>
+  <div class="cell"><h3>Tight crop: feature area</h3><img src="feature-tight-crop.png" alt="tight crop" onerror="this.onerror=null;this.outerHTML='<p style=color:#888>(target not found — check full screenshot)</p>'"></div>
   <div class="cell"><h3>Full page</h3><img src="feature-full.png" alt="full page"></div>
 </div>
 </body></html>`;

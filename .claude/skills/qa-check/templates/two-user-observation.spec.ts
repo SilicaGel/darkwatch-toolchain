@@ -111,8 +111,8 @@ test("#NNN — short description of what's being verified", async ({ browser }) 
 <h1>QA #NNN — short description</h1>
 <p class="meta">One-sentence summary of what was fixed and what to look for in both views.</p>
 <div class="grid">
-  <div class="cell"><h3>DM view</h3><img src="dm-view.png" alt="DM view" onerror="this.parentNode.innerHTML+='<p style=color:#888>(no campaign — see dm-dashboard.png)</p>'"></div>
-  <div class="cell"><h3>Player view</h3><img src="player-view.png" alt="Player view" onerror="this.parentNode.innerHTML+='<p style=color:#888>(no campaign — see player-dashboard.png)</p>'"></div>
+  <div class="cell"><h3>DM view</h3><img src="dm-view.png" alt="DM view" onerror="this.onerror=null;this.outerHTML='<p style=color:#888>(no campaign — see dm-dashboard.png)</p>'"></div>
+  <div class="cell"><h3>Player view</h3><img src="player-view.png" alt="Player view" onerror="this.onerror=null;this.outerHTML='<p style=color:#888>(no campaign — see player-dashboard.png)</p>'"></div>
 </div>
 </body></html>`;
   writeFileSync(resolve(OUT, "contact-sheet.html"), html, "utf-8");
