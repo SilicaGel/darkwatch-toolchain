@@ -235,6 +235,30 @@ When an agent writes `status=blocked`:
 - Never touch the `mysql` Docker container
 - `.js` imports everywhere (TypeScript ESM convention in this repo)
 
+The agent prompt (`templates/agent-prompt.md`) also contains a "Hard rules" section with the following hardened gotchas — these have each broken CI in past batch runs:
+
+1. **DB migration → codegen** — never hand-edit `server/src/db/db-schema.ts`; always regenerate via `npm run db:migrate && npm run db:codegen` after any SQL migration.
+2. **FK collation** — do not add an explicit `COLLATE` on new table FK columns; inherit the default `utf8mb4_general_ci`.
+3. **JSON_TABLE join order** — `JOIN JSON_TABLE` must precede any JOIN that references its aliases in an `ON` clause.
+4. **Third-party library API shapes** — read the installed `.d.ts` before calling any external function; never guess method names or signatures.
+5. **CI has no host Docker** — workflow steps cannot call `docker` CLI; no `docker prune` or similar in `.forgejo/workflows/`.
+6. **String UUIDv7 IDs** — entity `id` is always `string`; a CI gate fails on any `number`-typed `id`.
+7. **`forceRoll` pin hygiene** — each queued pin must be consumed or cleaned up; leaked pins corrupt subsequent specs.
+8. **Security-middleware smoke gate** — tickets that add/modify auth/CSRF middleware must pass the full Playwright smoke suite (`ALLOW_TEST_HOOKS=true npx playwright test`) before ship.
+
+### Pre-flight check for security-middleware tickets
+
+When triaging tickets for a batch, if any ticket adds or modifies request middleware (CSRF, origin checks, session validation), **add to its acceptance criteria before dispatch:**
+
+```
+- [ ] Full Playwright smoke suite passes: `ALLOW_TEST_HOOKS=true npx playwright test --reporter=line`
+  - Test-hook routes (`/api/test*`) are exempted from the new middleware
+  - `page.request` (server-side HTTP client, no Origin header) does not 403
+  - Vite preview proxy does not rewrite Origin so same-origin fallback breaks
+```
+
+Bake this into the per-ticket pre-made decisions block in the dispatched prompt.
+
 ## Defaults
 
 - Batch count: 3

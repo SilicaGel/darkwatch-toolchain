@@ -155,6 +155,57 @@ Shipping 3 solid tickets beats forcing 5 shaky ones.
 - **Never use `querySelector`** as a first resort in tests — use Testing Library
 - **Never add a soft-delete allowlist entry without a bucket justification** (see `.ci/soft-delete-allowlist.txt`)
 
+### DB migration → codegen (never hand-edit the schema)
+
+After writing or editing any SQL migration in `server/migrations/`, you **must** regenerate `server/src/db/db-schema.ts` by running:
+
+```bash
+(cd server && npm run db:migrate && npm run db:codegen)
+```
+
+Then commit the resulting `db-schema.ts` diff alongside the migration. **Never hand-edit `db-schema.ts`** — kysely-codegen owns that file. Hand-edits get the alphabetical column order wrong and can corrupt `Generated<>` wrapper types, both of which fail CI's `db:verify` step. If none of these 3 tickets touch the DB, this rule is a no-op for you — but if a ticket unexpectedly requires a migration, **safety-valve** before proceeding.
+
+### New table FK collation must match parent tables
+
+All existing tables are declared `ENGINE=InnoDB DEFAULT CHARSET=utf8mb4` with **no explicit `COLLATE`** — they inherit MariaDB's default (`utf8mb4_general_ci`). If you create a new table and add an explicit `COLLATE=utf8mb4_unicode_ci` (or any other collation) on FK columns, MariaDB will reject the foreign key constraint with `errno: 150 "Foreign key constraint is incorrectly formed"`.
+
+**Rule:** stop at `DEFAULT CHARSET=utf8mb4` — do NOT add an explicit `COLLATE` clause to any new table.
+
+### JSON_TABLE join order in data migrations
+
+When writing a `SELECT` that includes a `JSON_TABLE(...) AS jt` lateral join, the `JOIN JSON_TABLE` clause must come **before** any other JOIN whose `ON` clause references a `jt.*` alias. MariaDB resolves table aliases left-to-right in the FROM list — a forward reference fails with `Unknown column 'jt.x' in 'ON'` (errno 1054).
+
+### Never guess a third-party library's API shape
+
+Before calling any function from an installed package, **read its installed `.d.ts` types** — look in `node_modules/<pkg>/dist/*.d.ts` or `node_modules/@types/<pkg>/index.d.ts`. An incorrect API-shape guess (wrong method names, wrong argument order, wrong return type) breaks CI silently and is harder to debug than a 30-second type read. If you can't find the types, safety-valve.
+
+### CI containers have no host Docker access
+
+Forgejo Actions jobs run inside containers. Workflow steps **cannot** run `docker` CLI commands (e.g. `docker system prune`, `docker ps`, `docker start`) — there is no Docker socket available. If a ticket seems to require a CI step that calls `docker`, safety-valve. Do NOT add any `docker` commands to `.forgejo/workflows/` files.
+
+### String UUIDv7 IDs everywhere — never `number`
+
+Every entity `id` is a `VARCHAR(36)` UUIDv7 string, generated via `newId()` in `server/src/utils/ids.ts`. A CI gate (`scripts/check-id-types.ts`) fails the build on any entity field typed as `number` or any usage of `Number(req.params.id)`. When you add a new entity or extend an existing one, always type `id` as `string`.
+
+### `forceRoll` test pin hygiene
+
+The server maintains a per-character queue of `forceRoll` pins (used by E2E specs to get deterministic dice results). Each pin is consumed exactly once. If a Playwright spec queues a pin but then exits before consuming it (assertion failure, early `goto`, test timeout), that pin leaks into the next spec that rolls for the same character, corrupting its results.
+
+**Rules:**
+1. Every `forceRoll` pin your spec queues must be consumed by a roll in the same test, or cleaned up in an `afterEach`/`afterAll` hook via the `DELETE /api/test/force-roll/:characterId` endpoint.
+2. Never queue more pins in a single test than the number of rolls that test will actually trigger.
+3. If a spec fails mid-way and you're debugging, clear all outstanding pins before re-running.
+
+### Security-middleware tickets require a smoke E2E gate
+
+If a ticket adds or modifies any middleware that touches request auth, CSRF origin checks, or session cookies, the acceptance criteria **must include** running the full Playwright smoke suite locally before declaring done:
+
+```bash
+ALLOW_TEST_HOOKS=true npx playwright test --reporter=line
+```
+
+Common failure modes to check: test-hook routes not exempted from the new middleware, proxy-rewritten Origin headers breaking same-origin fallback, Playwright's `page.request` (server-side HTTP client) carrying cookies but no Origin header.
+
 ## Final report (when queue complete OR safety-valved)
 
 Write a concise report and return:
