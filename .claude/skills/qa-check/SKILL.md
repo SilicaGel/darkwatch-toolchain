@@ -29,6 +29,7 @@ Pick the cheapest mode that gives a real signal. Don't run Playwright when grep 
 - Filter by label **name**, URL-encoded: `?labels=status%2Fqa`. Numeric IDs silently no-op — same gotcha the `issue` skill documents.
 - Close: `PATCH /issues/{n}` with `{"state":"closed"}`.
 - Comment: `POST /issues/{n}/comments` with `{"body":"..."}`.
+- **Strip `status/qa` on every close:** `DELETE /issues/{n}/labels/38` (label id 38 = `status/qa`). The label means "awaiting verification" — once verified-and-closed, the label is misleading and clutters future audits. **Forgejo silently 204s on already-absent labels, so this is safe to run unconditionally.** Do this on every close, not just the "verified" ones — a "wontfix" / "duplicate" / "scope-changed" close shouldn't leave the label behind either.
 - Build all POST/PATCH bodies with `jq -n --arg/--argjson` so multi-line markdown bodies don't break quoting.
 
 ## Flow
@@ -75,6 +76,14 @@ For each issue, produce one mental result row:
 - New **migration / column** → confirm code actually reads or writes it, not just that the migration file exists.
 
 Any reachability grep coming up empty → the issue is **`partial`**, not `verified`: the build is real but the user-visible feature isn't there. This check is cheap and catches the most common QA miss — flag it before it reaches the report.
+
+**Maps-feature flag-gate check — mandatory when the issue carries the `maps-feature` label.** The maps feature lands incrementally behind `campaigns.settings.maps_enabled` (see the `feedback_maps_feature_flagged` memory). For every `maps-feature` issue, in addition to the normal verification, grep the diff for `maps_enabled` and confirm flag checks exist at every boundary that map code touches:
+
+- **Component render boundary** — `<MapTab>` (or any new map component) must be gated at its render call site, not just internally. A `return null` *inside* the component is fine but a parent-level `if (mapsEnabled)` is preferred. Either way, *something* must prevent the component from rendering when the flag is off.
+- **Route handler boundary** — any new `server/src/routes/maps*` endpoint must reject (404 or 403) when the campaign's `maps_enabled` is false. Without this, an unauthenticated curl could see map state for any campaign.
+- **Socket listener boundary** — any new socket event under a map namespace must no-op when the campaign flag is off. Otherwise a malicious client can drive map state into a non-maps campaign.
+
+If any boundary is missing the flag check, classify the issue **`missing`** regardless of other evidence — even if the feature works for flag-on users, the gate failure is a regression risk for everyone else. Cite the missing boundary in the evidence (`server/src/routes/maps-tokens.ts:42 — no maps_enabled check`).
 
 ### Step 4 — Run Playwright checks
 
@@ -158,13 +167,15 @@ The skill runs locally on macOS, so `open` works.
 
 After the report, work through the sections in order:
 
-1. **Verified.** Ask: "Close all M with the suggested comments? (Y / pick which / n)." Accept "all", a list of numbers, or "none." For each close, POST the comment, then PATCH state to closed.
-2. **Needs your eyes.** Ask one issue at a time. "For #N — does this look right? (y/n/skip). Contact sheet should be open in your browser." On "y" → close with the user's wording (or "Verified visually 2026-MM-DD"). On "n" → leave a comment describing the gap. On "skip" → leave it open, do nothing.
+1. **Verified.** Ask: "Close all M with the suggested comments? (Y / pick which / n)." Accept "all", a list of numbers, or "none." For each close: POST the comment → PATCH state to closed → DELETE the `status/qa` label (id 38). All three steps, every time.
+2. **Needs your eyes.** Ask one issue at a time. "For #N — does this look right? (y/n/skip). Contact sheet should be open in your browser." On "y" → POST the close comment (user's wording or "Verified visually 2026-MM-DD"), PATCH closed, DELETE `status/qa`. On "n" → leave a comment describing the gap (do not strip the label — still awaiting fix). On "skip" → leave it open, do nothing.
 3. **Scope decision (`partial`).** Recommend a concrete action — usually one of:
-   - *Build half done, rest is a real follow-up* → close the original with a done-vs-missing comment, then file the successor via the `issue` skill referencing the original.
+   - *Build half done, rest is a real follow-up* → close the original with a done-vs-missing comment, then file the successor via the `issue` skill referencing the original. **Strip `status/qa` on the close, same as the verified path.**
    - *Feature not usably done* (e.g. shipped but unreachable) → do **not** close: comment the QA finding, **drop the `status/qa` label** (→ `status/todo` if it's queued work), and file a successor for the split-out part.
    Use the `issue` skill for successors, not raw curl — it keeps labels correct.
 4. **Looks not done.** Never close. Post a comment surfacing the gap and what was expected. Move on.
+
+**Label hygiene rule of thumb:** if the issue's state is moving from "awaiting verification" to *anything else* (closed-verified, closed-duplicate, closed-wontfix, or kicked-back-to-todo), strip `status/qa` as part of that move. The only time `status/qa` should remain after an action is when the issue stays open AND the answer is still "yes this is in QA, just not done verifying yet."
 
 If the user types "stop" or "pause" mid-walkthrough, stop. Don't push.
 
