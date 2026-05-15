@@ -1,0 +1,67 @@
+#!/usr/bin/env bash
+#
+# pre-commit-no-main — block direct commits to `main` in the primary checkout.
+#
+# Why this exists (#755):
+#   Feature work happens in linked git worktrees under .claude/worktrees/.
+#   Direct commits on `main` in the primary checkout silently drift local
+#   `main` from `origin/main` and tangle later rebases. This hook makes that
+#   mistake loud and points at the worktree workflow.
+#
+# Rule:
+#   - Primary checkout AND branch == main → REJECT.
+#   - Linked worktree on any branch → PASS.
+#   - Primary checkout on a non-main branch → PASS.
+#   - `git commit --no-verify` bypasses this hook (intentional escape hatch).
+#
+# Detection — primary vs linked worktree:
+#   In the primary checkout, --git-dir and --git-common-dir resolve to the
+#   same path. In a linked worktree, --git-dir points at
+#   .git/worktrees/<name>/ while --git-common-dir still points at .git/.
+
+set -u
+
+GIT_DIR="$(git rev-parse --git-dir 2>/dev/null)"
+GIT_COMMON_DIR="$(git rev-parse --git-common-dir 2>/dev/null)"
+
+# Normalize to absolute paths so a relative .git and an absolute
+# .git/worktrees/foo path compare correctly.
+abs() { (cd "$1" 2>/dev/null && pwd) || echo "$1"; }
+GIT_DIR_ABS="$(abs "$GIT_DIR")"
+GIT_COMMON_DIR_ABS="$(abs "$GIT_COMMON_DIR")"
+
+# Linked worktree — let it through.
+if [ "$GIT_DIR_ABS" != "$GIT_COMMON_DIR_ABS" ]; then
+  exit 0
+fi
+
+# Primary checkout — check the branch.
+BRANCH="$(git symbolic-ref --short HEAD 2>/dev/null || true)"
+if [ "$BRANCH" != "main" ]; then
+  exit 0
+fi
+
+cat >&2 <<'MSG'
+
+  ✗ refusing to commit directly to `main` in the primary checkout.
+
+  Darkwatch feature work happens in linked git worktrees under
+  `.claude/worktrees/`. Committing on `main` here silently drifts local
+  `main` from `origin/main` and tangles future rebases (#755).
+
+  What to do instead:
+
+      # from the primary checkout:
+      git fetch origin
+      git worktree add .claude/worktrees/feat-<short-name> \
+          -b feat/<short-name> origin/main
+      cd .claude/worktrees/feat-<short-name>
+      # ... do work, commit, push, open PR ...
+
+  If you really mean to commit on `main` here (e.g. fixing a tracked file
+  that has to land outside a feature branch), bypass this hook explicitly:
+
+      git commit --no-verify
+
+MSG
+exit 1

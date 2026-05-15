@@ -1,0 +1,67 @@
+#!/usr/bin/env bash
+#
+# pre-push-no-main-ahead — block pushing a local `main` that's ahead of
+# `origin/main`. Pairs with pre-commit-no-main (#755).
+#
+# Rule:
+#   - If the ref being pushed is `refs/heads/main` AND there are commits on
+#     local `main` that aren't on `origin/main` → REJECT.
+#   - Anything else → PASS.
+#   - `git push --no-verify` bypasses this hook.
+#
+# git invokes pre-push as:
+#   pre-push <remote-name> <remote-url>
+# and pipes one line per ref on stdin:
+#   <local_ref> <local_sha> <remote_ref> <remote_sha>
+# (sha is 40 zeros when the ref is being deleted or doesn't exist yet.)
+
+set -u
+
+ZERO="0000000000000000000000000000000000000000"
+
+while read -r local_ref local_sha remote_ref remote_sha; do
+  # Deletion → ignore.
+  [ "$local_sha" = "$ZERO" ] && continue
+
+  # Only guard main.
+  [ "$remote_ref" = "refs/heads/main" ] || continue
+
+  # Make sure we have an up-to-date view of origin/main without fetching
+  # (the user may be offline or pushing to a different remote). Compare
+  # against whichever origin/main ref we have locally.
+  origin_sha="$(git rev-parse --verify --quiet refs/remotes/origin/main || true)"
+  if [ -z "$origin_sha" ]; then
+    # No origin/main known locally — can't compare safely; let git proceed.
+    continue
+  fi
+
+  # Count commits on local main that aren't on origin/main.
+  ahead="$(git rev-list --count "$origin_sha".."$local_sha" 2>/dev/null || echo 0)"
+  if [ "${ahead:-0}" -gt 0 ]; then
+    cat >&2 <<MSG
+
+  ✗ refusing to push: local \`main\` is $ahead commit(s) ahead of
+    \`origin/main\` (#755).
+
+    This usually means a commit landed on \`main\` in the primary checkout
+    by mistake. Recover with:
+
+        git fetch origin
+        git reset --hard origin/main
+
+    Then redo the work in a worktree:
+
+        git worktree add .claude/worktrees/feat-<short-name> \\
+            -b feat/<short-name> origin/main
+
+    To override (e.g. you're intentionally fast-forwarding main from a
+    merged PR's local copy), bypass this hook explicitly:
+
+        git push --no-verify
+
+MSG
+    exit 1
+  fi
+done
+
+exit 0
