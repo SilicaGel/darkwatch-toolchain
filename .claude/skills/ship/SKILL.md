@@ -1,6 +1,6 @@
 ---
 name: ship
-description: Use when a development branch is ready to merge — updates changelog, handbook, roadmap, and brochure (if UI changed), commits all docs in one coordinated commit, then opens a PR via the Forgejo API with `Ready #N` for every resolved issue (NOT `Closes` — issues stay open and get moved to `status/qa` on merge by the label-merged-issues workflow).
+description: Use when a development branch is ready to merge — updates changelog, handbook, roadmap, and brochure (if UI changed), commits all docs in one coordinated commit, drafts a `## Test plans` block (one entry per `Ready #N`) for the PR body, then opens a PR via the Forgejo API with `Ready #N` for every resolved issue (NOT `Closes` — issues stay open and get moved to `status/qa` on merge by the label-merged-issues workflow).
 ---
 
 # ship
@@ -152,24 +152,138 @@ If already pushed without a rebase, this is a no-op. With a rebase, use:
 git push --force-with-lease origin $(git branch --show-current)
 ```
 
+## Step 4.5: Draft test plans (one per `Ready #N`) — HALT if missing
+
+The PR body needs a `## Test plans` block with one entry per `Ready #N` line. This is the proactive complement to `qa-check`'s reachability grep — if you can't write a user-visible test plan, the feature probably isn't reachable, and that needs to be fixed BEFORE the PR opens (not caught in QA later — see #425 / 2FA for the canonical "shipped but unreachable" miss).
+
+### Procedure (interactive, one issue at a time)
+
+For each `Ready #N` identified in Step 1:
+
+1. **Fetch the issue body** to ground the draft in the original ask:
+   ```bash
+   curl -sS -H "Authorization: token $FORGEJO_TOKEN" \
+     "https://forge.example.com/api/v1/repos/aaron/darkwatch/issues/N" \
+     | jq -r '"#\(.number) — \(.title)\n\n\(.body)"'
+   ```
+2. **Auto-draft a plan** in the format below, grounded in the issue body + this branch's diff.
+3. **Present to user.** Show the drafted block and ask: *"Use as-is / edit / blocker?"*
+   - **as-is** → keep the draft.
+   - **edit** → user supplies replacement text; substitute their wording.
+   - **blocker** → something is genuinely wrong (e.g. you tried to draft the plan and realised the user-visible path doesn't exist). **STOP. Do not open the PR.** Surface the gap to the user — the right outcome is to fix the gap on this branch, not to ship around it.
+4. Once every `Ready #N` has a confirmed plan or escape hatch, assemble them into the `## Test plans` block for Step 5.
+
+### Format (locked — qa-check parses this)
+
+**User-visible work** — numbered steps + a required `Expected:` line at the bottom:
+
+```markdown
+### #<N> — <issue title>
+<Setup line if any environment prep is needed>
+1. <user action>
+2. <user action>
+3. <user action>
+Expected: <observable outcome — what success looks like to a human watching>
+```
+
+- **Role doesn't matter** — use a `Setup: …` preamble line if any prep is needed (e.g. *"Setup: log in as `Adventurer`; open the demo campaign."*), then numbered steps in second-person imperative. Use this only when the plan would read the same regardless of who's logged in (e.g. pure UI polish, layout fixes).
+- **Role matters** — prefix each numbered step with the role: `[Player]`, `[DM]`. Drop the `Setup:` preamble (the first `[Role]` step handles setup). Use this whenever **any** assertion depends on role, including:
+   - Multi-user observation (one acts, another observes).
+   - DM-only / player-only actions, even if only one role takes steps — add a step like `[Player] Observe X (or attempt to click Y)` so the negative case is asserted, not assumed. *"Players can't see this"* is half the test; if it's not in the plan, qa-check has nothing to verify.
+  
+  Maps directly to the `two-user-observation.spec.ts` Playwright template that `qa-check` can drive. When in doubt, use `[Role]` — it's slightly more verbose but never wrong.
+- **Dev seed accounts** named explicitly: `DungeonMaster` (DM), `Adventurer` / `Rook` / `Sylva` (players). Password is `password`. No "log in as a player" ambiguity.
+- The `Expected:` line is **required** for every user-visible plan — without it, qa-check has nothing to assert against and you risk a "verified-by-vibes" close (the #694 lesson).
+
+**No user surface** (tech-debt, infra, pure refactor, type tightening) — single bullet, no checklist:
+
+```markdown
+### #<N> — <issue title>
+- no user surface — verify via `<grep command or test file path>`
+```
+
+The escape hatch is load-bearing; don't write a contrived UI plan for a `Record<string, unknown>` audit. But also don't reach for it when there genuinely is a user surface — if the user can see the change, there's a plan to write.
+
+### Worked examples
+
+```markdown
+## Test plans
+
+### #694 — Players can roll dice on behalf of other characters without authorization
+1. [Player] Log in as `Adventurer`. Open the demo campaign.
+2. [Player] Open `BRAN`'s sheet (Adventurer doesn't own BRAN, no controller delegated).
+3. [Player] Attempt a roll from the attack row.
+4. [DM] In a second browser, log in as `DungeonMaster`; open the same campaign and `BRAN`'s sheet; roll an attack.
+Expected: step 3 either disables the button or rejects with a visible message and produces no game-log entry. Step 4 succeeds; the resulting game-log row attributes the roll to BRAN with no misattribution.
+
+### #758 — Equipping gear gives no immediate feedback
+Setup: log in as `Adventurer`; open your character sheet; navigate to Gear.
+1. Click **Equip** on the chain mail in your inventory.
+2. Observe the item's state and your AC without reloading.
+3. Reload the page.
+Expected: step 2 shows the item as equipped and AC updated immediately. Step 3 shows the same state — no change on reload.
+
+### #761 — Inventory remaining Record<string, unknown> instances
+- no user surface — verify via `grep -rc "Record<string, unknown>" server/src/ client/src/` returns the cleaned-up count documented in the PR body.
+```
+
+### Halting rule
+
+After interactive confirmation, if **any** `Ready #N` is missing a plan or escape hatch, **do not call Step 5**. Empty has to be a blocker — soft warnings get ignored, and the protocol's only value comes from the halt.
+
 ## Step 5: Open the PR via Forgejo API
 
-Use the resolved `#N` issues identified in Step 1 to build the `Ready` list. If no issues are being resolved by this branch, omit the `Ready` lines entirely — do not add a placeholder.
+Use the resolved `#N` issues identified in Step 1 to build the `Ready` list. If no issues are being resolved by this branch, omit the `Ready` lines AND the `## Test plans` block entirely — neither needs a placeholder.
+
+The PR body shape:
+
+```
+## Summary
+- <bullet>
+- <bullet>
+
+## Test plans
+<the `### #N` blocks drafted in Step 4.5, in the same order as the Ready lines below>
+
+Ready #N
+Ready #N
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+```
+
+Build the body via `jq -n --rawfile` (don't inline a multi-line markdown body into curl's `-d`) so newlines and code fences survive intact:
 
 ```bash
 BRANCH=$(git branch --show-current)
+cat > /tmp/_pr_body.md <<'EOF'
+## Summary
+- <bullet 1>
+- <bullet 2>
 
-curl -s -X POST \
+## Test plans
+
+### #N — <title>
+...
+
+Ready #N
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+EOF
+
+PAYLOAD=$(jq -n \
+  --arg title "short title under 70 chars" \
+  --arg head "$BRANCH" \
+  --arg base "main" \
+  --rawfile body /tmp/_pr_body.md \
+  '{title:$title, head:$head, base:$base, body:$body}')
+
+CODE=$(curl -s -o /tmp/_pr_resp.json -w '%{http_code}' -X POST \
   -H "Authorization: token $FORGEJO_TOKEN" \
   -H "Content-Type: application/json" \
-  -d "{
-    \"title\": \"short title under 70 chars\",
-    \"body\": \"## Summary\n- bullet 1\n- bullet 2\n\n## Test plan\n- [ ] item\n\nReady #N\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\",
-    \"head\": \"$BRANCH\",
-    \"base\": \"main\"
-  }" \
-  "https://forge.example.com/api/v1/repos/aaron/darkwatch/pulls" \
-  | jq '{number: .number, url: .html_url}'
+  --data-binary "$PAYLOAD" \
+  "https://forge.example.com/api/v1/repos/aaron/darkwatch/pulls")
+
+[ "$CODE" = "201" ] && jq '{number, html_url}' /tmp/_pr_resp.json || { echo "PR open failed: $CODE"; head -c 500 /tmp/_pr_resp.json; }
 ```
 
 Capture the PR number from the response — you need it for Step 6.

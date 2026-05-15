@@ -43,7 +43,44 @@ curl -s -H "Authorization: token $FORGEJO_TOKEN" \
 
 If the result is empty: "Nothing in QA right now." End. If non-empty, briefly tell the user the count and what you're about to do, then proceed.
 
-### Step 2 — Classify each issue
+### Step 1.5 — Fetch the closing PR's test plan (if any)
+
+Since the `ship` skill landed the test-plan protocol (#766), every PR opened after that date carries a `## Test plans` block with one `### #<N>` entry per resolved issue. **A test plan, when present, IS the verification target** — follow the plan instead of inventing one from the issue body. The plan was written by whoever shipped, with the issue body in front of them; it's the most current and most authoritative account of what success looks like.
+
+For each issue in the QA queue, find the closing PR and extract its plan:
+
+```bash
+# Find merged PRs that referenced this issue. Scan recent closed PRs and match `Ready #N`.
+N=<issue number>
+curl -sS -H "Authorization: token $FORGEJO_TOKEN" \
+  "https://forge.example.com/api/v1/repos/aaron/darkwatch/pulls?state=closed&limit=30&sort=newest" \
+  | jq -r --arg n "$N" '.[] | select(.merged == true and (.body // "" | test("Ready #" + $n + "\\b|Closes #" + $n + "\\b"))) | "\(.number)\t\(.html_url)\n---BODY---\n\(.body)\n---END---"' \
+  > /tmp/qa-pr-${N}.txt
+```
+
+If the result is empty, expand the PR search window (`limit=50`, paginate if needed). If still empty, this issue was closed without a referencing PR (manual close, API close, or a pre-#766 ship) — proceed to Step 2 with no plan.
+
+If a PR body was found, extract the `### #<N>` block from its `## Test plans` section:
+
+```bash
+awk -v n="$N" '
+  /^## Test plans/ { in_plans=1; next }
+  in_plans && /^## / { in_plans=0 }
+  in_plans && $0 ~ "^### #" n " " { in_block=1; print; next }
+  in_block && /^### / { in_block=0 }
+  in_block { print }
+' /tmp/qa-pr-${N}.txt
+```
+
+Classify the extracted block:
+
+- **User-visible plan** — has numbered steps and an `Expected:` line. **Use this as the verification target** — go straight to Step 4 (Playwright) using the steps. Skip the reachability grep in Step 3; the plan's existence + the author's confidence in writing it IS the reachability proof.
+- **No-user-surface escape hatch** — single bullet of the form `- no user surface — verify via <grep / file>`. Run the cited grep / read the cited file; that's the whole verification. Skip Step 4.
+- **Malformed** (heading present but neither shape) — note in the report and fall back to Step 2's heuristics.
+
+For issues with no test plan found, continue to Step 2 as before. The protocol is additive — pre-#766 issues use the legacy classification + reachability check.
+
+### Step 2 — Classify each issue (fallback when no test plan was found)
 
 For each issue, decide one mode:
 
