@@ -49,8 +49,24 @@ function authHeaders(env) {
   };
 }
 
-// Average category scores across all runs in the manifest.
-function loadAndAverageScores() {
+const CATEGORY_KEYS = ["performance", "accessibility", "best-practices", "seo"];
+
+// Normalise an LHR URL to its pathname. lhci's static server picks a random
+// port per run, so the host:port varies between runs — the pathname ("/",
+// "/forgot-password") is the stable key to group a page's runs under.
+function urlPath(u) {
+  try {
+    return new URL(u).pathname || "/";
+  } catch {
+    return u || "/";
+  }
+}
+
+// Group every lhr-*.json by URL pathname and average each category across
+// that page's runs. With one configured URL this is a single-row result;
+// with several (#724) each page gets its own averaged row — without this,
+// scores from different pages would be blended into one meaningless number.
+function loadScoresByUrl() {
   if (!existsSync(LHCI_DIR)) {
     console.error(`[lighthouse-bot] ${LHCI_DIR} missing; lhci didn't produce output`);
     return null;
@@ -60,21 +76,32 @@ function loadAndAverageScores() {
     console.error(`[lighthouse-bot] no lhr-*.json files in ${LHCI_DIR}`);
     return null;
   }
-  const totals = { performance: 0, accessibility: 0, "best-practices": 0, seo: 0 };
-  let count = 0;
+  // pathname -> { totals: {category: summed score}, count: runs }
+  const groups = new Map();
   for (const f of lhrs) {
     const lhr = JSON.parse(readFileSync(join(LHCI_DIR, f), "utf8"));
-    for (const key of Object.keys(totals)) {
-      const s = lhr.categories?.[key]?.score;
-      if (typeof s === "number") totals[key] += s;
+    const path = urlPath(lhr.requestedUrl || lhr.finalUrl || lhr.mainDocumentUrl);
+    let g = groups.get(path);
+    if (!g) {
+      g = { totals: { performance: 0, accessibility: 0, "best-practices": 0, seo: 0 }, count: 0 };
+      groups.set(path, g);
     }
-    count += 1;
+    for (const key of CATEGORY_KEYS) {
+      const s = lhr.categories?.[key]?.score;
+      if (typeof s === "number") g.totals[key] += s;
+    }
+    g.count += 1;
   }
-  const avg = {};
-  for (const key of Object.keys(totals)) {
-    avg[key] = count > 0 ? Math.round((totals[key] / count) * 100) : null;
-  }
-  return { scores: avg, runs: count };
+  const byUrl = [...groups.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([url, g]) => {
+      const scores = {};
+      for (const key of CATEGORY_KEYS) {
+        scores[key] = g.count > 0 ? Math.round((g.totals[key] / g.count) * 100) : null;
+      }
+      return { url, scores, runs: g.count };
+    });
+  return { byUrl, totalRuns: lhrs.length };
 }
 
 function loadAssertions() {
@@ -95,27 +122,37 @@ function scoreEmoji(score) {
   return "🔴";
 }
 
-function buildBody({ scores, runs }, assertions) {
-  if (!scores) {
+function buildBody(data, assertions) {
+  if (!data || !Array.isArray(data.byUrl) || data.byUrl.length === 0) {
     return `${MARKER}\n\n## 💡 Lighthouse: no data\n\nLHCI didn't produce any reports. Check the workflow logs.\n`;
   }
+  const { byUrl } = data;
   const failures = assertions.filter((a) => a.passed === false);
-  const parts = [MARKER, "", "## 💡 Lighthouse CI — login page"];
+  const parts = [MARKER, "", "## 💡 Lighthouse CI — public pages", ""];
+  const runsPerPage = byUrl[0]?.runs ?? 0;
+  parts.push(
+    `${byUrl.length} page${byUrl.length === 1 ? "" : "s"}, averaged across ` +
+      `**${runsPerPage}** run${runsPerPage === 1 ? "" : "s"} each.`,
+  );
   parts.push("");
-  parts.push(`Averaged across **${runs}** run${runs === 1 ? "" : "s"}.`);
-  parts.push("");
-  parts.push("| Category | Score |");
-  parts.push("|---|---:|");
-  parts.push(`| Performance | ${scoreEmoji(scores.performance)} ${scores.performance ?? "—"} |`);
-  parts.push(`| Accessibility | ${scoreEmoji(scores.accessibility)} ${scores.accessibility ?? "—"} |`);
-  parts.push(`| Best Practices | ${scoreEmoji(scores["best-practices"])} ${scores["best-practices"] ?? "—"} |`);
-  parts.push(`| SEO | ${scoreEmoji(scores.seo)} ${scores.seo ?? "—"} |`);
+  parts.push("| Page | Performance | Accessibility | Best Practices | SEO |");
+  parts.push("|---|---:|---:|---:|---:|");
+  for (const { url, scores } of byUrl) {
+    const cell = (k) => `${scoreEmoji(scores[k])} ${scores[k] ?? "—"}`;
+    parts.push(
+      `| \`${url}\` | ${cell("performance")} | ${cell("accessibility")} | ` +
+        `${cell("best-practices")} | ${cell("seo")} |`,
+    );
+  }
   parts.push("");
   if (failures.length > 0) {
     parts.push(`**${failures.length} assertion failure${failures.length === 1 ? "" : "s"}:**`);
     parts.push("");
     for (const f of failures.slice(0, 15)) {
-      parts.push(`- \`${f.auditId ?? f.assertion}\` — ${f.actual} (expected ${f.operator} ${f.expected})`);
+      // Assertion results carry the URL they came from — surface the page
+      // path so a failure is attributable when several pages are audited.
+      const where = f.url ? `\`${urlPath(f.url)}\` ` : "";
+      parts.push(`- ${where}\`${f.auditId ?? f.assertion}\` — ${f.actual} (expected ${f.operator} ${f.expected})`);
     }
     if (failures.length > 15) parts.push(`- …and ${failures.length - 15} more`);
     parts.push("");
@@ -176,9 +213,9 @@ async function deleteComment(base, headers, id) {
 
 async function main() {
   const env = parseEnv();
-  const scoreData = loadAndAverageScores();
+  const scoreData = loadScoresByUrl();
   const assertions = loadAssertions();
-  const body = buildBody(scoreData ?? { scores: null, runs: 0 }, assertions);
+  const body = buildBody(scoreData, assertions);
 
   const base = apiBase(env);
   const headers = authHeaders(env);
@@ -198,4 +235,4 @@ if (invokedDirectly) {
   await main();
 }
 
-export { loadAndAverageScores, loadAssertions, buildBody, MARKER, MARKER_RE };
+export { loadScoresByUrl, loadAssertions, buildBody, urlPath, MARKER, MARKER_RE };
