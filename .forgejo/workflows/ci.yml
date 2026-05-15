@@ -8,6 +8,11 @@ name: CI
 # Smoke now runs on PRs too (#711 workflow half — the gate that pinned it
 # to main-only pushes is gone). Branch protection (the other half of #711)
 # is configured in the Forgejo UI, not here.
+#
+# LOCAL MIRROR: scripts/preflight.sh reproduces the `lint-typecheck` and
+# `test` jobs for a one-command local pre-PR gate (and /ship runs it before
+# opening a PR). If you change either of those jobs, update preflight.sh —
+# it pins a SHA-256 of this file and will fail until reconciled.
 
 on:
   push:

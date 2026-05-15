@@ -39,6 +39,28 @@ git branch --show-current
 
 Note any `#N` references in the commit messages — **only those that are actually resolved by this branch** become `Ready #N` lines in the PR body. Use judgment: a commit that mentions an issue for context but doesn't fix it should NOT get a `Ready` line. (We intentionally do NOT use `Closes`: Forgejo auto-closes on that keyword, and we want issues to move to `status/qa` for real-world verification before closing.)
 
+## Step 1.5: Preflight gate
+
+Before any doc work, run the local pre-PR gate — it mirrors CI's blocking
+`lint-typecheck` + `test` jobs in one command:
+
+```bash
+scripts/preflight.sh
+```
+
+If it **fails**, STOP. Fix what it reports and re-run until green — do not
+proceed to docs, push, or PR with a red preflight. This is the gate that
+catches a broken build / unit test / typecheck before CI does. The point is
+that "verification" is running this one script, not hand-picking a subset of
+test commands from memory (subsets drift from CI by omission).
+
+If preflight reports a check **skipped** (e.g. `--skip-int` because the local
+DB is down), that's a real coverage gap — CI will be the first to run those.
+Prefer starting the DB and getting a fully-green preflight before shipping.
+
+(Preflight does not cover the `smoke` Playwright job or `knip` — if this
+branch's diff warrants it, run those too. See `scripts/preflight.sh` header.)
+
 ## Step 2: Update the docs
 
 Run these in order. **Tell each sub-skill to skip its commit step** — ship handles one coordinated commit in Step 3.
