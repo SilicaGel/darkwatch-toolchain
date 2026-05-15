@@ -67,6 +67,15 @@ For each issue, produce one mental result row:
 
 `partial` is real and important: ship a yellow flag if part of the issue is done but part isn't. Don't force a green/red binary. **Don't conflate "narrow fix passed the literal acceptance" with "user-visible intent is satisfied."** Walk the surface the user would see, not just the symbol the agent named.
 
+**Reachability check — run this for EVERY code-readable issue.** "The symbol exists" ≠ "a user can reach it." After confirming the cited code is present, grep that it's actually wired into a path a user (or another caller) hits:
+
+- New **component** → grep that something imports/renders it. Zero hits = orphaned. (#425 shipped `TwoFactorSettings.tsx` and the full 2FA backend, but nothing rendered the component and no settings route existed — 2FA was completely unreachable.)
+- New **endpoint / socket handler** → grep the *client* for a caller that actually hits it. Server-accepts ≠ client-sends. (#623's `monster:roll-attack` handler accepts and persists `targetCharacterId`, but the client never sends it — so the metadata is always empty in practice.)
+- New **route** → confirm it's mounted in `App.tsx` (client) or the route index (server).
+- New **migration / column** → confirm code actually reads or writes it, not just that the migration file exists.
+
+Any reachability grep coming up empty → the issue is **`partial`**, not `verified`: the build is real but the user-visible feature isn't there. This check is cheap and catches the most common QA miss — flag it before it reaches the report.
+
 ### Step 4 — Run Playwright checks
 
 Only attempted if there are playwright-runnable issues.
@@ -151,7 +160,10 @@ After the report, work through the sections in order:
 
 1. **Verified.** Ask: "Close all M with the suggested comments? (Y / pick which / n)." Accept "all", a list of numbers, or "none." For each close, POST the comment, then PATCH state to closed.
 2. **Needs your eyes.** Ask one issue at a time. "For #N — does this look right? (y/n/skip). Contact sheet should be open in your browser." On "y" → close with the user's wording (or "Verified visually 2026-MM-DD"). On "n" → leave a comment describing the gap. On "skip" → leave it open, do nothing.
-3. **Scope decision.** State the recommended action concretely. On agreement: close the original with a comment, then file the successor via the `issue` skill if needed.
+3. **Scope decision (`partial`).** Recommend a concrete action — usually one of:
+   - *Build half done, rest is a real follow-up* → close the original with a done-vs-missing comment, then file the successor via the `issue` skill referencing the original.
+   - *Feature not usably done* (e.g. shipped but unreachable) → do **not** close: comment the QA finding, **drop the `status/qa` label** (→ `status/todo` if it's queued work), and file a successor for the split-out part.
+   Use the `issue` skill for successors, not raw curl — it keeps labels correct.
 4. **Looks not done.** Never close. Post a comment surfacing the gap and what was expected. Move on.
 
 If the user types "stop" or "pause" mid-walkthrough, stop. Don't push.
