@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+#
+# pre-commit — composite hook that runs all pre-commit checks in order.
+# Each check exits non-zero on failure to abort the commit.
+#
+# Bypass with `git commit --no-verify` (escape hatch, use sparingly).
+#
+# Checks (in order):
+#   1) Block direct commits to `main` in the primary checkout (#755).
+#   2) Run lint-staged on staged files (#389 — react-hooks rules).
+
+set -u
+
+# 1) Block direct commits to main in the primary checkout.
+#    Resolves the source via the primary checkout's root — hook files live
+#    there as symlinks from .git/hooks/. `git rev-parse --git-common-dir`
+#    always points at the primary's .git/ even when called from a linked
+#    worktree.
+PRIMARY_ROOT="$(cd "$(git rev-parse --git-common-dir)/.." && pwd)"
+"$PRIMARY_ROOT/scripts/hooks/pre-commit-no-main" || exit $?
+
+# 2) Run lint-staged on staged files.
+#    Resolved from the current worktree's root — each worktree carries its
+#    own node_modules. Skip silently if lint-staged isn't installed yet
+#    (e.g. fresh clone before the prepare script runs).
+WORKTREE_ROOT="$(git rev-parse --show-toplevel)"
+if [ -x "$WORKTREE_ROOT/node_modules/.bin/lint-staged" ]; then
+  (cd "$WORKTREE_ROOT" && ./node_modules/.bin/lint-staged) || exit $?
+fi

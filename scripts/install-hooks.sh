@@ -64,6 +64,7 @@ install_one() {
 }
 
 echo "Installing Darkwatch git hooks into $HOOKS_DIR"
-install_one pre-commit scripts/hooks/pre-commit-no-main
+# pre-commit is a composite that chains pre-commit-no-main + lint-staged (#389).
+install_one pre-commit scripts/hooks/pre-commit
 install_one pre-push   scripts/hooks/pre-push-no-main-ahead
 echo "Done. Bypass an individual hook with --no-verify when truly needed."
