@@ -88,7 +88,18 @@ Run these in order. **Tell each sub-skill to skip its commit step** — ship han
 1. **Update the changelog** — use the `update-changelog` skill (skip its commit). This is the per-ticket record of what shipped.
 2. **Update the handbook** — use the `update-handbook` skill if any user-facing feature / product behaviour changed (skip its commit). Skip entirely if the diff is pure internal refactor / tooling.
 3. **Update the onboarding doc** — use the `update-onboarding` skill if any dev workflow, convention, stack item, npm script, env var, repo structure, new skill, or setup step changed (skip its commit). Skip entirely if the diff doesn't affect how a new contributor gets set up or what conventions they follow.
-4. **Update the brochure** — use the `update-brochure` skill if the diff touches any UI-affecting path. Skip entirely otherwise. Use a path-based check, not judgment:
+4. **Update the README** — use the `update-readme` skill if the diff touches README-visible facts. Two path-based checks (modified-files for most paths, add-or-delete-only for docs since the README links to docs by name, not content):
+
+   ```bash
+   if git diff main...HEAD --name-only | grep -qE '^(package\.json$|server/package\.json$|client/package\.json$|tests/package\.json$|.*\.env\.example|\.forgejo/workflows/ci\.yml|server/src/rulesets/[^/]+/seeds/.*\.ts$|\.claude/skills/[^/]+/SKILL\.md$|README\.md$)' \
+      || git diff main...HEAD --name-only --diff-filter=AD | grep -qE '^docs/[A-Z][^/]*\.md$'; then
+     # Invoke /update-readme — skip its commit
+   fi
+   ```
+
+   The first grep covers scripts / Node version / seed accounts / skills list. The second only fires when a doc file is **added or deleted** (`--diff-filter=AD`) — that's when the README's docs table needs a row added or removed. Plain edits to `docs/CHANGELOG.md` etc. don't trigger anything, so this stays off the critical path of every PR.
+
+5. **Update the brochure** — use the `update-brochure` skill if the diff touches any UI-affecting path. Skip entirely otherwise. Use a path-based check, not judgment:
 
    ```bash
    if git diff main...HEAD --name-only | grep -qE '^(client/src/|site/|client/public/)'; then
@@ -97,7 +108,7 @@ Run these in order. **Tell each sub-skill to skip its commit step** — ship han
    ```
 
    The `/update-brochure` skill will spin up its own isolated server/client on dedicated ports (see its SKILL.md), so this step is safe to run alongside other dev servers. Skip its commit — ship handles the coordinated commit.
-5. **Roadmap** — do NOT update by default. `ROADMAP.md` is now thematic, not a ticket tracker — it tracks strategic direction only. Only invoke `update-roadmap` if a theme has meaningfully shifted (new milestone starting / closing, longer-term idea promoted to active, strategic pivot). Per-ticket progress lives in Forgejo and the changelog.
+6. **Roadmap** — do NOT update by default. `ROADMAP.md` is now thematic, not a ticket tracker — it tracks strategic direction only. Only invoke `update-roadmap` if a theme has meaningfully shifted (new milestone starting / closing, longer-term idea promoted to active, strategic pivot). Per-ticket progress lives in Forgejo and the changelog.
 
 ## Step 2.5: Rebase onto latest main
 
@@ -127,12 +138,13 @@ One coordinated commit covering whatever actually changed. Don't blind-add paths
 
 ```bash
 # See what sub-skills touched
-git status --short docs/ site/
+git status --short docs/ site/ README.md
 
 # Stage only the changed files (mix-and-match from this list)
 git add docs/CHANGELOG.md
 git add docs/HANDBOOK.md       # only if changed
 git add docs/ONBOARDING.md     # only if changed
+git add README.md              # only if changed
 git add docs/ROADMAP.md        # only if changed (rare — see Step 2.5)
 git add site/                  # only if brochure changed
 
