@@ -1,8 +1,18 @@
 name: Lighthouse CI
 
+# Path-filtered: only run when something that can actually move Lighthouse
+# scores has changed (#814). Doc-only / skill-only / server-only / CI-tweak
+# PRs skip the whole ~6-8 min job. To smoke-test the workflow itself, edit
+# this file (already in the filter).
 on:
   pull_request:
     branches: [main]
+    paths:
+      - 'client/**'
+      - 'lighthouserc.cjs'
+      - '.forgejo/workflows/lighthouse.yml'
+      - 'package.json'
+      - 'package-lock.json'
 
 jobs:
   lighthouse:
@@ -27,24 +37,45 @@ jobs:
       - name: Build client
         run: cd client && npm run build
 
+      # Cache the Playwright chromium install across runs (#814). Mirrors the
+      # pattern in e2e.yml so both workflows share the same cache directory —
+      # one warm-up benefits both. Cache key is keyed on tests/package-lock.json
+      # because that's where @playwright/test's version is pinned; bumping
+      # Playwright there invalidates the cache and forces a fresh download.
+      - name: Cache Playwright browsers
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: /home/ci/playwright-cache
+          key: playwright-${{ runner.os }}-${{ hashFiles('tests/package-lock.json') }}
+          restore-keys: |
+            playwright-${{ runner.os }}-
+
       # The Forgejo runner's node:22 base image has no Chrome on PATH.
       # Use the same installer the e2e workflow uses (npx playwright
       # install chromium --with-deps) — proven to work on this runner.
       # `--with-deps` also installs system libraries chromium needs.
+      # On a cache hit, `playwright install` detects the existing browser
+      # at PLAYWRIGHT_BROWSERS_PATH and is a no-op for the download; the
+      # apt step is also a no-op when the libs are already installed on
+      # this self-hosted runner.
       - name: Install Chromium (via Playwright)
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: /home/ci/playwright-cache
         run: npx --yes -p @playwright/test playwright install chromium --with-deps
 
       # lhci uses chrome-launcher to find Chrome; chrome-launcher checks
-      # CHROME_PATH first, then several default paths. Playwright drops
-      # the binary at ~/.cache/ms-playwright/chromium-*/chrome-linux/chrome
-      # which isn't a default search path, so we set CHROME_PATH explicitly.
+      # CHROME_PATH first, then several default paths. With PLAYWRIGHT_BROWSERS_PATH
+      # set, the binary lands under /home/ci/playwright-cache/chromium-*/...
+      # rather than ~/.cache/ms-playwright, so we search the configured path.
       # `lhci autorun` reads lighthouserc.cjs, runs 3 Lighthouse passes
       # against the static-served bundle, and writes JSON + HTML reports
       # into .lighthouseci/. Always exit 0 — non-blocking. Comment-bot
       # below surfaces scores + assertion failures regardless.
       - name: Run Lighthouse CI
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: /home/ci/playwright-cache
         run: |
-          export CHROME_PATH=$(find "$HOME/.cache/ms-playwright" -name "chrome" -type f -path "*chrome-linux*" | head -1)
+          export CHROME_PATH=$(find "$PLAYWRIGHT_BROWSERS_PATH" -name "chrome" -type f -path "*chrome-linux*" | head -1)
           echo "Using CHROME_PATH=$CHROME_PATH"
           # Invoke the local @lhci/cli binary directly. `npx lhci` would
           # fall through to the npm registry on a cache miss and pull a
