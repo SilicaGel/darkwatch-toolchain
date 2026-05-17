@@ -15,7 +15,7 @@
 
 set -euo pipefail
 
-REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || {
+git rev-parse --show-toplevel >/dev/null 2>&1 || {
   echo "install-hooks: not inside a git repository" >&2
   exit 1
 }
@@ -23,8 +23,14 @@ REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || {
 # Always install into the primary checkout's hooks dir, even if the script is
 # invoked from a linked worktree (--git-common-dir always points at the
 # primary .git/).
-HOOKS_DIR="$(cd "$(git rev-parse --git-common-dir)" && pwd)/hooks"
+GIT_COMMON_DIR="$(cd "$(git rev-parse --git-common-dir)" && pwd)"
+HOOKS_DIR="$GIT_COMMON_DIR/hooks"
 mkdir -p "$HOOKS_DIR"
+
+# Source hook scripts from the PRIMARY checkout, not the calling worktree.
+# git-common-dir's parent is the primary checkout root and is stable across
+# worktree lifecycle — symlinks won't dangle when a worktree is removed.
+REPO_ROOT="$(dirname "$GIT_COMMON_DIR")"
 
 install_one() {
   local hook_name="$1" source_rel="$2"
