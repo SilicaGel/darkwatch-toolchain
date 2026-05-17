@@ -4,8 +4,20 @@ name: Lighthouse CI
 # scores has changed (#814). Doc-only / skill-only / server-only / CI-tweak
 # PRs skip the whole ~6-8 min job. To smoke-test the workflow itself, edit
 # this file (already in the filter).
+#
+# Also runs on push to main so post-merge scores get recorded — every PR
+# has a Lighthouse comment, but until now nothing measured main itself
+# after the merge. Badge upload to MinIO is tracked separately (#819).
 on:
   pull_request:
+    branches: [main]
+    paths:
+      - 'client/**'
+      - 'lighthouserc.cjs'
+      - '.forgejo/workflows/lighthouse.yml'
+      - 'package.json'
+      - 'package-lock.json'
+  push:
     branches: [main]
     paths:
       - 'client/**'
@@ -51,17 +63,22 @@ jobs:
             playwright-${{ runner.os }}-
 
       # The Forgejo runner's node:22 base image has no Chrome on PATH.
-      # Use the same installer the e2e workflow uses (npx playwright
-      # install chromium --with-deps) — proven to work on this runner.
-      # `--with-deps` also installs system libraries chromium needs.
-      # On a cache hit, `playwright install` detects the existing browser
-      # at PLAYWRIGHT_BROWSERS_PATH and is a no-op for the download; the
-      # apt step is also a no-op when the libs are already installed on
-      # this self-hosted runner.
+      # Install via the @playwright/test pinned in tests/package.json —
+      # NOT `npx --yes -p @playwright/test`, which would fetch the latest
+      # version from the npm registry, mismatch the cached chromium
+      # version, and force playwright to delete the cache and redownload
+      # (the bug that made the original #814 cache useless — see #818).
+      # By running the local pinned binary, the chromium version it
+      # expects matches the cache key (hashFiles('tests/package-lock.json')),
+      # so cache hits are real no-ops on the download step.
+      # `--with-deps` is still slow on first run; on this self-hosted
+      # runner the apt libs persist across runs and re-install is a no-op.
       - name: Install Chromium (via Playwright)
         env:
           PLAYWRIGHT_BROWSERS_PATH: /home/ci/playwright-cache
-        run: npx --yes -p @playwright/test playwright install chromium --with-deps
+        run: |
+          cd tests && npm ci --no-audit --no-fund
+          ./node_modules/.bin/playwright install chromium --with-deps
 
       # lhci uses chrome-launcher to find Chrome; chrome-launcher checks
       # CHROME_PATH first, then several default paths. With PLAYWRIGHT_BROWSERS_PATH
@@ -82,7 +99,11 @@ jobs:
           # known typosquat package named "lhci" (unrelated to @lhci/cli).
           ./node_modules/.bin/lhci autorun || true
 
+      # Only post a comment on PR runs — the push-to-main run has no PR to
+      # comment on (and the script exits cleanly on missing PR_NUMBER, but
+      # skipping the step is tidier than relying on the no-op).
       - name: Post PR comment
+        if: github.event_name == 'pull_request'
         env:
           FORGEJO_URL: ${{ github.server_url }}
           FORGEJO_TOKEN: ${{ github.token }}
