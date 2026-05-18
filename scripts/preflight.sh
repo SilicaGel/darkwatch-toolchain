@@ -205,10 +205,17 @@ elif (echo > "/dev/tcp/127.0.0.1/$DB_PORT") 2>/dev/null; then
   run_check "Kysely schema verify" bash -c "cd server && npm run db:verify"
   run_check "server integration tests" bash -c "cd server && npm run test:int"
   if [ "${#FAIL[@]}" -gt "$int_before" ]; then
-    echo "  ${YELLOW}hint:${RESET} the shared darkwatch-maria DB drifts as branches add migrations."
-    echo "        If these failed on schema/setup (not real logic), realign it:"
+    echo "  ${YELLOW}hint:${RESET} darkwatch-maria can drift from a clean migrate+seed if a feature-branch"
+    echo "        worktree applied migrations that aren't on the current checkout, or if seed data has"
+    echo "        diverged. CI runs against a clean container, so a green CI + red local on the same"
+    echo "        commit usually means local-state drift, not a code bug (see #769)."
+    echo
+    echo "        First try additive realignment (cheap, preserves data):"
     echo "          ${DIM}cd server && npm run db:migrate && npm run seed:core && npm run seed:shadowdark${RESET}"
-    echo "        then re-run. (db:migrate is additive; the seeds reset seed data.)"
+    echo "        If that doesn't fix it (extra tables/columns from a feature branch are still around),"
+    echo "        nuke and reseed:"
+    echo "          ${DIM}cd server && npm run test:int:reset${RESET}"
+    echo "        (only resets the maria volume — leaves darkwatch-minio alone.)"
   fi
 else
   echo "  ${RED}✗ darkwatch-maria not reachable on 127.0.0.1:$DB_PORT${RESET}"

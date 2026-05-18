@@ -141,6 +141,8 @@ Only attempted if there are playwright-runnable issues.
 
 ### Critical Playwright-side gotchas (learned the hard way)
 
+- **API recon before locator choices.** Before writing assertions, fetch the relevant API to learn what's in the seed: classes, owner_user_id distribution, equipped gear, etc. Specs that assume "any PC will do" silently land on the wrong PC and produce green-on-the-wrong-thing results. E.g. for #694's roll-auth gate (#777), only **attack-row** DiceButtons forward `characterId` to the server — so the disabled-state is only observable on a PC that has an equipped weapon (renders an AttackBlock). A wizard or thief PC produces zero disabled buttons and the spec passes without verifying anything. Fetch `/api/campaigns/<id>/characters` first; pick a Fighter or any PC with an `equipped` weapon.
+- **Stat-roll DiceButtons don't gate the same as attack-roll DiceButtons.** The `isForbidden = !isOwner && Boolean(characterId)` check only fires when `characterId` is forwarded. Stat-roll DiceButtons (STR/DEX/CON…) **don't** pass `characterId` — they're ambient (anyone can roll a d20 check, result lands in the roller's log). Only **attack-row** DiceButtons inside `AttackBlock` forward `characterId` and therefore observe the disabled state. If a spec is supposed to assert disabled-on-non-owner, target attack-row buttons, not stat buttons.
 - **State navigation via API beats heuristic clicks.** Dashboard cards (campaigns, characters, etc.) often share text — `page.locator(...).filter({hasText:/demo/i}).first()` lands on the wrong target. Fetch via the page's same-origin `/api` proxy and `page.goto(/campaign/${id})` instead:
   ```ts
   const id = await page.evaluate(async () => {
@@ -150,7 +152,14 @@ Only attempted if there are playwright-runnable issues.
   await page.goto(`/campaign/${id}`);
   ```
 - **Theme-iterating specs need ~1s settle after change.** WebGL-shader themes (laser, storm, arcane, ember, crystal, void, bone) need a few frames to initialize. 150ms is not enough.
-- **Character mini cards are `<div role="button">`,** not `<button>`. Use `page.getByRole("button")`, not `page.locator('button')`.
+- **`CompactCard` is a plain `<div onClick>`** — no `role="button"`, no native focus. Earlier guidance in this skill claimed it was `<div role="button">` — that was wrong. Two reliable ways to click it:
+  - **Preferred (post-#777):** `page.locator('[data-testid="character-card-<id>"]').click()` — stable across UI text changes.
+  - **Fallback:** `page.getByText(name, { exact: true }).first().click()` — the click bubbles up to the card's onClick. Works without testids but breaks if names collide or get renamed.
+- **Stable `data-testid` locators added in #777.** Prefer these over text/role queries when they fit:
+  - `character-card-<id>` — CompactCard root in the campaign view.
+  - `attack-block` — AttackBlock root in the Combat tab.
+  - `attack-roll-dice` / `attack-damage-dice` — the attack-row DiceButtons (both render once per equipped weapon). For roll-auth specs, target `attack-roll-dice` and assert `disabled` + `title="You don't control this character"`.
+  - `tab-combat` / `tab-spells` / `tab-gear` / `tab-background` — CharacterDetail tab buttons. The Spells tab only renders when `isCaster(className)` is true, so `tab-spells` being absent is the assertion for "this class can't cast."
 - **CharacterDetail edit toggle** is a pencil icon: `page.locator('button[title="Edit character"]').first()`.
 - **User dropdown trigger** is `button[aria-haspopup="true"]` (only one on the page); the dropdown menu has `role="menu"` — wait for it visible before screenshotting.
 - **After login, wait ~1s** for React hydration before first interaction.
