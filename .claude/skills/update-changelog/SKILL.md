@@ -23,7 +23,13 @@ Use this skill when a feature has shipped, a bug has been fixed, or a feature ha
    - **Minor** (0.x.0 → 0.x+1.0): new features or meaningful enhancements
    - **Major** (x.0.0 → x+1.0.0): breaking changes or significant redesigns (rare)
 
-5. Check the `## [Unreleased]` section — if it has content, include those items in the new version entry (move them, don't duplicate). Write the new entry **above** the previous version, using today's date and the bumped version:
+5. **Same-day grouping check.** Read the topmost entry's date. If it matches today's date AND no external release was cut between that entry and now, **prefer extending the existing entry** (append to its sections, bump its version, retitle if the scope broadened) over creating a new adjacent entry. Same-day cascades of `vX.Y.0 / vX.Y.1 / vX.Y.2` make the changelog hard to scan retrospectively and dilute the "what shipped in vX.Y" signal. Create a new entry only when:
+   - The work is conceptually separate from the existing same-day entry (different ticket, different surface), OR
+   - The existing entry has already been shipped to users (deployed, not just merged).
+
+   Otherwise extend in place.
+
+6. Check the `## [Unreleased]` section — if it has content, include those items in the new version entry (move them, don't duplicate). Write the new entry **above** the previous version, using today's date and the bumped version:
 
    ```markdown
    ## [0.2.0] - YYYY-MM-DD
@@ -43,7 +49,7 @@ Use this skill when a feature has shipped, a bug has been fixed, or a feature ha
 
    Only include sections that apply. Skip empty sections.
 
-6. Commit (skip this step if being called from the `ship` skill — ship handles the coordinated commit):
+7. Commit (skip this step if being called from the `ship` skill — ship handles the coordinated commit):
    ```bash
    git add docs/CHANGELOG.md
    git commit -m "chore: changelog v0.2.0"  # use the actual new version number

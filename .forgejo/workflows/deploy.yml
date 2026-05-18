@@ -169,7 +169,9 @@ jobs:
           # The operator must symlink it once:
           #   sudo ln -sf ~/deploy/darkwatch/deploy/nginx.conf \
           #               /etc/nginx/sites-enabled/darkwatch.conf
-          rsync -az -e 'ssh -i ~/.ssh/id_ed25519' \
+          # --mkpath: create ~/deploy/darkwatch/deploy/ on the Pi if it
+          # doesn't exist yet (first deploy after this step was added).
+          rsync -az --mkpath -e 'ssh -i ~/.ssh/id_ed25519' \
             deploy/nginx.conf \
             "${DEPLOY_USER}@${DEPLOY_HOST}:~/deploy/darkwatch/deploy/nginx.conf"
 
