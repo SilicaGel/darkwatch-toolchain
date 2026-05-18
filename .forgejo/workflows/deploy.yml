@@ -160,26 +160,17 @@ jobs:
             "${DEPLOY_USER}@${DEPLOY_HOST}:~/services/darkwatch/.env.deploy"
           rm -f /tmp/darkwatch.deploy.env
 
-      - name: Rsync nginx config to Pi
-        env:
-          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
-          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
-        run: |
-          # Copy nginx site config to the deploy directory on the Pi.
-          # The operator must symlink it once:
-          #   sudo ln -sf ~/deploy/darkwatch/deploy/nginx.conf \
-          #               /etc/nginx/sites-enabled/darkwatch.conf
-          # --mkpath: create ~/deploy/darkwatch/deploy/ on the Pi if it
-          # doesn't exist yet (first deploy after this step was added).
-          rsync -az --mkpath -e 'ssh -i ~/.ssh/id_ed25519' \
-            deploy/nginx.conf \
-            "${DEPLOY_USER}@${DEPLOY_HOST}:~/deploy/darkwatch/deploy/nginx.conf"
-
       - name: Build server image and (re)start container on Pi
         env:
           DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
         run: |
+          # The Pi's public-facing reverse proxy is Caddy (host systemd unit,
+          # /etc/caddy/Caddyfile), not nginx. Caddy serves static client
+          # assets from /var/www/darkwatch directly and reverse-proxies
+          # /api/* + /socket.io/* to localhost:8080 (this container's
+          # published port). Neither static-asset changes nor a server
+          # container restart require touching Caddy, so the deploy doesn't.
           ssh -i ~/.ssh/id_ed25519 "${DEPLOY_USER}@${DEPLOY_HOST}" bash <<'EOSSH'
           set -euo pipefail
           cd ~/deploy/darkwatch/server
@@ -187,6 +178,4 @@ jobs:
           docker rm -f darkwatch-server 2>/dev/null || true
           cd ~/services/darkwatch
           docker compose --env-file .env.deploy up -d --remove-orphans
-          # Reload nginx after the new config lands (no-op if config unchanged).
-          sudo nginx -t && sudo systemctl reload nginx
           EOSSH
