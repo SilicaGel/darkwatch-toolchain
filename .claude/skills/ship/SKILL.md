@@ -194,27 +194,27 @@ Run these in order. **Tell each sub-skill to skip its commit step** — ship han
    corresponding row(s) in the same pass. Diff hygiene matters more than
    completeness — the inventory is a living artifact, not a contract.
 
-## Step 2.5: Rebase onto latest main
+## Step 2.5: Merge latest main into the branch
 
-Before committing docs, rebase onto `origin/main` so the changelog entry lands on top
-of any entries that merged since this branch was cut. Two branches shipping in sequence
-always conflict on `docs/CHANGELOG.md` — rebasing here prevents that.
+Before committing docs, merge `origin/main` into the branch so the changelog
+entry lands on top of any entries that shipped while this branch was open.
+**Do not rebase** — PRs squash-merge here, so branch history is discarded
+anyway, and rebasing rewrites the remote-side commits which forces a
+force-push (which CLAUDE.md forbids). Merging keeps the push linear.
 
 ```bash
 git fetch origin main
-git rebase origin/main
+git merge origin/main --no-edit
 ```
 
-If the rebase hits a conflict in `docs/CHANGELOG.md`, resolve it by keeping **both**
-entries — the one(s) from main and ours — with ours on top, bumped to the next
-available version number. Then:
+If the merge hits a conflict in `docs/CHANGELOG.md`, resolve it by keeping
+**both** entries — the ones from main and ours — with ours on top, bumped
+to the next available version number. Then:
 
 ```bash
 git add docs/CHANGELOG.md
-git rebase --continue
+git commit --no-edit
 ```
-
-After a successful rebase, Step 4 must use `--force-with-lease` instead of a plain push.
 
 ## Step 3: Commit all docs
 
@@ -237,15 +237,11 @@ git commit -m "docs: update <comma-separated list of docs touched> for vX.Y.Z"
 
 ## Step 4: Push the branch
 
+Plain push, always. CLAUDE.md forbids force-push on this repo, and Step 2.5
+uses merge (not rebase) precisely so plain push is always sufficient.
+
 ```bash
-# Use --force-with-lease if Step 2.5 did a rebase; plain push otherwise
 git push origin $(git branch --show-current)
-```
-
-If already pushed without a rebase, this is a no-op. With a rebase, use:
-
-```bash
-git push --force-with-lease origin $(git branch --show-current)
 ```
 
 ## Step 4.5: Draft test plans (one per `Ready #N`) — HALT if missing
