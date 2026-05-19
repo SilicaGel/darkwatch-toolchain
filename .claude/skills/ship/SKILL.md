@@ -110,6 +110,30 @@ Run these in order. **Tell each sub-skill to skip its commit step** — ship han
    The `/update-brochure` skill will spin up its own isolated server/client on dedicated ports (see its SKILL.md), so this step is safe to run alongside other dev servers. Skip its commit — ship handles the coordinated commit.
 6. **Roadmap** — do NOT update by default. `ROADMAP.md` is now thematic, not a ticket tracker — it tracks strategic direction only. Only invoke `update-roadmap` if a theme has meaningfully shifted (new milestone starting / closing, longer-term idea promoted to active, strategic pivot). Per-ticket progress lives in Forgejo and the changelog.
 
+7. **Update the feature inventory** — until issue #856 lands a static-analysis script that regenerates `docs/feature-inventory.md` automatically, manually append/amend rows whenever a PR adds, removes, or renames user-facing surface. Detection is heuristic and soft — false positives are expected, you can decline:
+
+   ```bash
+   # New entry-point files in feature-bearing directories
+   NEW_SURFACE_FILES=$(git diff main...HEAD --name-only --diff-filter=A \
+     | grep -E '^(client/src/(components|pages|features)/.+\.(tsx|jsx)$|server/src/(routes|socket)/.+\.ts$)' || true)
+
+   # New socket event literals introduced in this diff (.emit('x') / .on('x'))
+   NEW_SOCKET_EVENTS=$(git diff main...HEAD --unified=0 \
+     | grep -E "^\+.*\.(emit|on)\([\"'\`][a-z]" \
+     | grep -v '^+++' || true)
+
+   INVENTORY_TOUCHED=$(git diff main...HEAD --name-only | grep -c '^docs/feature-inventory.md$' || true)
+   ```
+
+   If `NEW_SURFACE_FILES` or `NEW_SOCKET_EVENTS` is non-empty **and** `INVENTORY_TOUCHED` is `0`, prompt:
+
+   > *"This PR looks like it adds user-facing surface (`<short summary of what was detected>`) but `docs/feature-inventory.md` wasn't updated. Append rows for the new features? (y/n)"*
+
+   - **y** — open the file, add rows under the matching group(s). Format is fixed: `| Feature | Where | test-id | Socket? | Time-based | Flag |`. Use `needed` if no stable `data-testid` exists yet; don't backfill testids prophylactically (the tour can use role/text selectors).
+   - **n** — proceed. Acceptable when the detection is wrong (pure refactor that added a file but no new surface, renamed event that was already inventoried, etc.). Don't argue — the heuristic is a guide.
+
+   Removals / renames: if a feature was deleted or moved, edit the corresponding row(s) in the same pass. Diff hygiene matters more than completeness — the inventory is a living artifact, not a contract.
+
 ## Step 2.5: Rebase onto latest main
 
 Before committing docs, rebase onto `origin/main` so the changelog entry lands on top
