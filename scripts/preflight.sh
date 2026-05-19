@@ -45,6 +45,14 @@ REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || {
 }
 cd "$REPO_ROOT"
 
+# #859 — symlink gitignored env files into the worktree if missing. No-op
+# outside a linked worktree, no-op when files already exist. Without this,
+# running preflight in a fresh worktree fails as soon as it touches docker
+# (MARIADB_ROOT_PASSWORD unset → maria container restart loop).
+if [ -x "$REPO_ROOT/scripts/worktree-init.sh" ]; then
+  "$REPO_ROOT/scripts/worktree-init.sh" || true
+fi
+
 # WORKAROUND for #757 — not a real fix. auth.test.ts doesn't mock email.js,
 # so its email-sending tests behave differently based on whether RESEND_API_KEY
 # exists in the env (unset → sendEmail no-ops; set → real Resend call that

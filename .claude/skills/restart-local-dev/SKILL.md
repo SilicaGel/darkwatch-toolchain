@@ -17,17 +17,24 @@ Kills all Darkwatch dev processes and restarts them clean.
 
 ## Steps
 
-1. Find and kill all Darkwatch processes:
+1. **Ensure env files are in place** (#859): run `scripts/worktree-init.sh`
+   from the target checkout. It's a no-op on the main workspace and on any
+   worktree whose env symlinks already exist; it only acts when a fresh
+   worktree is missing `.env` or `server/.env`. Skipping this step in a
+   fresh worktree leads to `docker compose` restart loops and "Bind
+   parameters must not contain undefined" failures later.
+
+2. Find and kill all Darkwatch processes:
    - `tsx watch src/index.ts` (main workspace only, not worktrees)
    - `vite` (main workspace)
    - `vite preview` (main workspace)
    - `serve www` on port 4200
    - `serve` on port 5199 (brochure)
 
-2. Clear Vite cache: `rm -rf client/node_modules/.vite`
+3. Clear Vite cache: `rm -rf client/node_modules/.vite`
 
-3. Restart each server in the background, logging to `/tmp/darkwatch-*.log`
+4. Restart each server in the background, logging to `/tmp/darkwatch-*.log`
 
-4. Wait 3 seconds, then tail all logs to confirm startup
+5. Wait 3 seconds, then tail all logs to confirm startup
 
-5. Report which URLs are live
+6. Report which URLs are live

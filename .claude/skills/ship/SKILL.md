@@ -113,26 +113,86 @@ Run these in order. **Tell each sub-skill to skip its commit step** — ship han
 7. **Update the feature inventory** — until issue #856 lands a static-analysis script that regenerates `docs/feature-inventory.md` automatically, manually append/amend rows whenever a PR adds, removes, or renames user-facing surface. Detection is heuristic and soft — false positives are expected, you can decline:
 
    ```bash
-   # New entry-point files in feature-bearing directories
+   CHANGED_FILES=$(git diff main...HEAD --name-only)
+
+   # (a) New entry-point files in feature-bearing directories — catches a brand-new feature
    NEW_SURFACE_FILES=$(git diff main...HEAD --name-only --diff-filter=A \
      | grep -E '^(client/src/(components|pages|features)/.+\.(tsx|jsx)$|server/src/(routes|socket)/.+\.ts$)' || true)
 
-   # New socket event literals introduced in this diff (.emit('x') / .on('x'))
-   NEW_SOCKET_EVENTS=$(git diff main...HEAD --unified=0 \
+   # (b) New socket event literals introduced in this diff (.emit('x') / .on('x'))
+   #     Pathspec-bounded to source dirs so the detector doesn't match its own
+   #     documentation in SKILL.md / docs (false positive caught while shipping
+   #     #864 — the regex matched a comment line describing the regex itself).
+   NEW_SOCKET_EVENTS=$(git diff main...HEAD --unified=0 -- 'client/src/' 'server/src/' \
      | grep -E "^\+.*\.(emit|on)\([\"'\`][a-z]" \
      | grep -v '^+++' || true)
 
-   INVENTORY_TOUCHED=$(git diff main...HEAD --name-only | grep -c '^docs/feature-inventory.md$' || true)
+   # (c) Inventory rows whose referenced files were edited by this PR — catches
+   #     evolution of an EXISTING feature row (icon change, drifted line refs,
+   #     new captured context, etc.). Load-bearing because once a feature is
+   #     in the inventory, this is the signal that keeps the row honest.
+   #     Strips trailing `:LINE` before matching paths.
+   INVENTORY_ROWS_TOUCHED=$(
+     grep -oE '`[^`]+\.(tsx?|jsx?|ts|js|css)(:[0-9]+)?`' docs/feature-inventory.md 2>/dev/null \
+       | sed -E 's/`//g; s/:[0-9]+$//' \
+       | sort -u \
+       | while read path; do
+           echo "$CHANGED_FILES" | grep -qx "$path" && echo "$path"
+         done
+   )
+
+   INVENTORY_TOUCHED=$(echo "$CHANGED_FILES" | grep -c '^docs/feature-inventory.md$' || true)
    ```
 
-   If `NEW_SURFACE_FILES` or `NEW_SOCKET_EVENTS` is non-empty **and** `INVENTORY_TOUCHED` is `0`, prompt:
+   Then evaluate two separate gates (both fire when applicable; both prompts are
+   soft — y/n both proceed):
 
-   > *"This PR looks like it adds user-facing surface (`<short summary of what was detected>`) but `docs/feature-inventory.md` wasn't updated. Append rows for the new features? (y/n)"*
+   1. **New-surface gate** — if `NEW_SURFACE_FILES` or `NEW_SOCKET_EVENTS` is
+      non-empty **and** `INVENTORY_TOUCHED` is `0`, prompt:
 
-   - **y** — open the file, add rows under the matching group(s). Format is fixed: `| Feature | Where | test-id | Socket? | Time-based | Flag |`. Use `needed` if no stable `data-testid` exists yet; don't backfill testids prophylactically (the tour can use role/text selectors).
-   - **n** — proceed. Acceptable when the detection is wrong (pure refactor that added a file but no new surface, renamed event that was already inventoried, etc.). Don't argue — the heuristic is a guide.
+      > *"This PR looks like it adds user-facing surface (`<short summary of what was detected>`) but `docs/feature-inventory.md` wasn't updated. Append rows for the new features? (y/n)"*
 
-   Removals / renames: if a feature was deleted or moved, edit the corresponding row(s) in the same pass. Diff hygiene matters more than completeness — the inventory is a living artifact, not a contract.
+      On **y**, add rows under the matching group(s). Format is fixed:
+      `| Feature | Where | test-id | Socket? | Time-based | Flag |`. Use
+      `needed` if no stable `data-testid` exists yet — don't backfill testids
+      prophylactically (the tour can use role/text selectors).
+
+   2. **Inventory-row-touched gate** (#864) — if `INVENTORY_ROWS_TOUCHED` is
+      non-empty **and** `INVENTORY_TOUCHED` is `0`, prompt:
+
+      > *"This PR edits `<file>` which is referenced by `docs/feature-inventory.md`. Review the matching row(s) for staleness? (y/n)"*
+
+      Show the user the matching rows inline so they can decide in place rather
+      than grep themselves:
+
+      ```bash
+      printf '%s\n' "$INVENTORY_ROWS_TOUCHED" | while read -r f; do
+        [ -z "$f" ] && continue
+        echo "--- $f ---"
+        grep -n -F "$f" docs/feature-inventory.md
+      done
+      ```
+
+      (Use `printf | while read` rather than `for f in $VAR` — the Bash tool
+      on macOS runs `zsh`, which doesn't word-split unquoted variable
+      expansions like bash does. `for f in $multiline_var` only iterates once
+      in zsh, on the whole blob.)
+
+      Common reasons a row needs touching: drifted `file:LINE` refs after a
+      refactor, stale description (icon swap, new captured context, success
+      state added), removal of a referenced symbol (delete or re-target the
+      row). On **y**, open the file and amend the relevant row(s); on **n**,
+      proceed.
+
+   - **n on either gate** — proceed. Acceptable when the detection is wrong
+     (pure refactor that added a file but no new surface, an inventory-listed
+     file edited in a way that doesn't affect the row's accuracy, renamed
+     event that was already inventoried, etc.). Don't argue — both gates are
+     guides.
+
+   Removals / renames: if a feature was deleted or moved, edit the
+   corresponding row(s) in the same pass. Diff hygiene matters more than
+   completeness — the inventory is a living artifact, not a contract.
 
 ## Step 2.5: Rebase onto latest main
 
