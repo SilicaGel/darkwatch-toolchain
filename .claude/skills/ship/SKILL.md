@@ -61,11 +61,13 @@ Prefer starting the DB and getting a fully-green preflight before shipping.
 (Preflight does not cover the `smoke` Playwright job or `knip` — if this
 branch's diff warrants it, run those too. See `scripts/preflight.sh` header.)
 
-## Step 1.6: Maps-feature PR check
+## Step 1.6: Map-migration revert-log check
 
-The `maps-feature` work (#316 + successors) lands behind a feature flag
-incrementally, and additive DB changes must be loggable so they can be cleanly
-reverted if the feature is abandoned. Two checks before docs:
+Map DB changes must remain loggable in `docs/maps/db-revert.md` so the
+additive schema can be rolled back cleanly if needed. The flag-gating check
+that used to live here was retired in #843 once `campaigns.settings.maps_enabled`
+was removed — maps now runs unconditionally and there is no flag boundary to
+verify.
 
 ```bash
 # Certain map PR — paths that only exist for the maps feature
@@ -78,8 +80,6 @@ MIGRATIONS=$(git diff main...HEAD --name-only | grep '^server/migrations/' || tr
 - **Certain map PR + migrations touched** (`MAP_PATHS` non-empty AND `MIGRATIONS` non-empty) — hard prompt: *"This PR touches the maps feature and includes migrations. Did you update `docs/maps/db-revert.md` with revert SQL for the new tables/columns? (y/n)"* — if `n`, **stop and update the file before continuing.**
 - **Certain map PR + no migrations** — no prompt; nothing to log.
 - **Migrations only, no map paths** — print one-line reminder: *"FYI: if this migration is map-related, log it in `docs/maps/db-revert.md`."* Do not block. Most migrations aren't map-related; don't false-prompt.
-
-Also verify map-related changes are gated behind `campaigns.settings.maps_enabled` — if `MAP_PATHS` is non-empty, grep the diff for `maps_enabled` and confirm boundary checks exist. Map UI rendered without flag-gating is a regression.
 
 ## Step 2: Update the docs
 

@@ -114,14 +114,6 @@ For each issue, produce one mental result row:
 
 Any reachability grep coming up empty → the issue is **`partial`**, not `verified`: the build is real but the user-visible feature isn't there. This check is cheap and catches the most common QA miss — flag it before it reaches the report.
 
-**Maps-feature flag-gate check — mandatory when the issue carries the `maps-feature` label.** The maps feature lands incrementally behind `campaigns.settings.maps_enabled` (see the `feedback_maps_feature_flagged` memory). For every `maps-feature` issue, in addition to the normal verification, grep the diff for `maps_enabled` and confirm flag checks exist at every boundary that map code touches:
-
-- **Component render boundary** — `<MapTab>` (or any new map component) must be gated at its render call site, not just internally. A `return null` *inside* the component is fine but a parent-level `if (mapsEnabled)` is preferred. Either way, *something* must prevent the component from rendering when the flag is off.
-- **Route handler boundary** — any new `server/src/routes/maps*` endpoint must reject (404 or 403) when the campaign's `maps_enabled` is false. Without this, an unauthenticated curl could see map state for any campaign.
-- **Socket listener boundary** — any new socket event under a map namespace must no-op when the campaign flag is off. Otherwise a malicious client can drive map state into a non-maps campaign.
-
-If any boundary is missing the flag check, classify the issue **`missing`** regardless of other evidence — even if the feature works for flag-on users, the gate failure is a regression risk for everyone else. Cite the missing boundary in the evidence (`server/src/routes/maps-tokens.ts:42 — no maps_enabled check`).
-
 ### Step 4 — Run Playwright checks
 
 Only attempted if there are playwright-runnable issues.

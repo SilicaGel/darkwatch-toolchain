@@ -130,12 +130,6 @@ Skip the questions and write the issue directly if the intent is clear from cont
 - For features with choices: briefly note the options, with a recommendation if you have one
 - Keep it honest — don't pad. If the user typed "fix button color" and the conversation said it should be purple to match the border, say exactly that.
 
-**Maps-feature acceptance line.** If the issue body mentions maps, a map, tokens-on-a-map, fog-of-war, vision/LOS, or any other concept tied to the maps feature, append an Acceptance bullet:
-
-> - All changes must be gated by `campaigns.settings.maps_enabled` — the campaign-level toggle that controls maps feature visibility. UI renders nothing when the flag is off; sockets no-op; the campaign behaves identically to today.
-
-Reason: the maps feature is incrementally rolled out behind a flag (see the `feedback_maps_feature_flagged` memory). Issues filed without this line lose the gating requirement.
-
 ---
 
 ## Step 7: Suggest labels
