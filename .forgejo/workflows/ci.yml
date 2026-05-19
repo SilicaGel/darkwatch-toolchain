@@ -527,6 +527,7 @@ jobs:
             e2e/level-up.spec.ts \
             e2e/condition-expiry.spec.ts \
             e2e/dm-player-visibility.spec.ts \
+            e2e/character-sheet-ownership-gating.spec.ts \
             e2e/picker-commits.spec.ts \
             e2e/combat-damage.spec.ts \
             e2e/rest-button.spec.ts \
