@@ -61,26 +61,6 @@ Prefer starting the DB and getting a fully-green preflight before shipping.
 (Preflight does not cover the `smoke` Playwright job or `knip` — if this
 branch's diff warrants it, run those too. See `scripts/preflight.sh` header.)
 
-## Step 1.6: Map-migration revert-log check
-
-Map DB changes must remain loggable in `docs/maps/db-revert.md` so the
-additive schema can be rolled back cleanly if needed. The flag-gating check
-that used to live here was retired in #843 once `campaigns.settings.maps_enabled`
-was removed — maps now runs unconditionally and there is no flag boundary to
-verify.
-
-```bash
-# Certain map PR — paths that only exist for the maps feature
-MAP_PATHS=$(git diff main...HEAD --name-only | grep -E '^(client/src/(components|pages)/Map[A-Z]|client/src/lib/map|server/src/routes/maps)' || true)
-
-# Migrations touched by this PR (regardless of map-ness)
-MIGRATIONS=$(git diff main...HEAD --name-only | grep '^server/migrations/' || true)
-```
-
-- **Certain map PR + migrations touched** (`MAP_PATHS` non-empty AND `MIGRATIONS` non-empty) — hard prompt: *"This PR touches the maps feature and includes migrations. Did you update `docs/maps/db-revert.md` with revert SQL for the new tables/columns? (y/n)"* — if `n`, **stop and update the file before continuing.**
-- **Certain map PR + no migrations** — no prompt; nothing to log.
-- **Migrations only, no map paths** — print one-line reminder: *"FYI: if this migration is map-related, log it in `docs/maps/db-revert.md`."* Do not block. Most migrations aren't map-related; don't false-prompt.
-
 ## Step 2: Update the docs
 
 Run these in order. **Tell each sub-skill to skip its commit step** — ship handles one coordinated commit in Step 3.
