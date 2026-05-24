@@ -30,9 +30,17 @@ Use this skill when something that affects a new developer joining the project h
 
 4. **Keep ONBOARDING focused on the code side**. Product-level details (what the app does, user-facing features) belong in `docs/HANDBOOK.md`, not here. If a change is purely user-facing, use `update-handbook` instead.
 
-5. Make only the necessary edits. Don't rewrite sections that aren't affected.
+5. **Update the "Last updated" changelog (top of the doc).** It's a reverse-chronological bullet list (#861) — **not** a paragraph. Prepend a new entry to the **top** of the list as a single dated bullet:
 
-6. Commit (skip this step if being called from the `ship` skill — ship handles the coordinated commit):
+   ```markdown
+   - **YYYY-MM-DD — <short title> (vX.Y.Z and/or #N).** One or two sentences on what changed and where, with `code spans` and §-refs as needed.
+   ```
+
+   Keep the most-recent few entries inline; everything older lives in the `<details><summary>Older changes…</summary>` block below them. When the inline list grows past ~4–5 entries, move the oldest inline one down into the `<details>` block so the top stays skimmable. **Never** append to an existing bullet or collapse entries back into one paragraph — that's the exact regression #861 fixed. Bump the `**Last updated:** YYYY-MM-DD` date on the lead line to match your new entry.
+
+6. Make only the necessary edits. Don't rewrite sections that aren't affected.
+
+7. Commit (skip this step if being called from the `ship` skill — ship handles the coordinated commit):
    ```bash
    git add docs/ONBOARDING.md
    git commit -m "docs: update onboarding for [change name]"
