@@ -153,6 +153,7 @@ jobs:
           echo "warmup complete"
 
       - name: Cache Playwright browsers
+        id: playwright-cache
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: /home/ci/playwright-cache
@@ -163,7 +164,13 @@ jobs:
       - name: Install Playwright and browsers
         env:
           PLAYWRIGHT_BROWSERS_PATH: /home/ci/playwright-cache
-        run: cd tests && npm ci --no-audit --no-fund && ./node_modules/.bin/playwright install chromium --with-deps
+        run: |
+          cd tests && npm ci --no-audit --no-fund
+          if [ "${{ steps.playwright-cache.outputs.cache-hit }}" = "true" ]; then
+            ./node_modules/.bin/playwright install-deps chromium
+          else
+            ./node_modules/.bin/playwright install chromium --with-deps
+          fi
 
       - name: Run Playwright E2E tests (stabilize-ownership — Death-save)
         env:

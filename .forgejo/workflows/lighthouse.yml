@@ -55,6 +55,7 @@ jobs:
       # because that's where @playwright/test's version is pinned; bumping
       # Playwright there invalidates the cache and forces a fresh download.
       - name: Cache Playwright browsers
+        id: playwright-cache
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: /home/ci/playwright-cache
@@ -68,17 +69,18 @@ jobs:
       # version from the npm registry, mismatch the cached chromium
       # version, and force playwright to delete the cache and redownload
       # (the bug that made the original #814 cache useless — see #818).
-      # By running the local pinned binary, the chromium version it
-      # expects matches the cache key (hashFiles('tests/package-lock.json')),
-      # so cache hits are real no-ops on the download step.
-      # `--with-deps` is still slow on first run; on this self-hosted
-      # runner the apt libs persist across runs and re-install is a no-op.
+      # On a cache hit skip the binary download; still run install-deps
+      # since apt packages aren't cached across fresh containers (#969).
       - name: Install Chromium (via Playwright)
         env:
           PLAYWRIGHT_BROWSERS_PATH: /home/ci/playwright-cache
         run: |
           cd tests && npm ci --no-audit --no-fund
-          ./node_modules/.bin/playwright install chromium --with-deps
+          if [ "${{ steps.playwright-cache.outputs.cache-hit }}" = "true" ]; then
+            ./node_modules/.bin/playwright install-deps chromium
+          else
+            ./node_modules/.bin/playwright install chromium --with-deps
+          fi
 
       # lhci uses chrome-launcher to find Chrome; chrome-launcher checks
       # CHROME_PATH first, then several default paths. With PLAYWRIGHT_BROWSERS_PATH
