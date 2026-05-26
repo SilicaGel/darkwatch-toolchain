@@ -131,6 +131,7 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
           EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
+          FEEDBACK_NOTIFY_TO: ${{ secrets.FEEDBACK_NOTIFY_TO }}
           MINIO_ROOT_USER: ${{ secrets.MINIO_ROOT_USER }}
           MINIO_ROOT_PASSWORD: ${{ secrets.MINIO_ROOT_PASSWORD }}
           MINIO_BUCKET: ${{ secrets.MINIO_BUCKET }}
@@ -151,6 +152,7 @@ jobs:
             printf 'ANTHROPIC_API_KEY=%s\n' "$ANTHROPIC_API_KEY"
             printf 'RESEND_API_KEY=%s\n' "$RESEND_API_KEY"
             printf 'EMAIL_FROM=%s\n' "$EMAIL_FROM"
+            printf 'FEEDBACK_NOTIFY_TO=%s\n' "$FEEDBACK_NOTIFY_TO"
             printf 'MINIO_ROOT_USER=%s\n' "$MINIO_ROOT_USER"
             printf 'MINIO_ROOT_PASSWORD=%s\n' "$MINIO_ROOT_PASSWORD"
             printf 'MINIO_BUCKET=%s\n' "$MINIO_BUCKET"
