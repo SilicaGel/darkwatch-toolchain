@@ -53,7 +53,10 @@ function authHeaders(env) {
 // Knip exits non-zero when issues are found (its "found something" signal).
 // We don't care about exit code — only the JSON output on stdout.
 function runKnip() {
-  const result = spawnSync("npx", ["knip", "--reporter", "json"], {
+  // Direct binary path, not `npx knip` — knip is a root devDependency, and npx
+  // can otherwise fall back to a registry fetch (mirrors the lighthouse.yml
+  // pattern, #970).
+  const result = spawnSync("./node_modules/.bin/knip", ["--reporter", "json"], {
     encoding: "utf8",
     maxBuffer: 50 * 1024 * 1024,
   });
