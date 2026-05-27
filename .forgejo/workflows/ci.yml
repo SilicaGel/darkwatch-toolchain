@@ -344,7 +344,7 @@ jobs:
     # actions/setup-node. Pinned to the @playwright/test version; rebuilt by
     # build-ci-image.yml (Renovate keeps the tag in sync — #414).
     container:
-      image: forge.example.com/aaron/darkwatch-ci-playwright:1.59.1
+      image: forge.example.com/aaron/darkwatch-ci-playwright:1.60.0
     services:
       mariadb:
         image: mariadb:11
