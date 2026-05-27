@@ -29,17 +29,20 @@ on:
 jobs:
   lighthouse:
     runs-on: ubuntu-latest
+    # #969 — prebuilt CI image (Node 22 + Chromium + Playwright deps baked).
+    container:
+      image: forge.example.com/aaron/darkwatch-ci-playwright:1.59.1
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
 
-      - name: Use Node 22
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+      # #969 — Node 22 baked into the image; cache only the npm download dir.
+      - name: Cache npm downloads
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
-          node-version: '22'
-          cache: "npm"
-          cache-dependency-path: |
-            package-lock.json
-            client/package-lock.json
+          path: ~/.npm
+          key: npm-${{ runner.os }}-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: |
+            npm-${{ runner.os }}-
 
       - name: Install dependencies
         run: |
@@ -49,50 +52,23 @@ jobs:
       - name: Build client
         run: cd client && npm run build
 
-      # Cache the Playwright chromium install across runs (#814). Mirrors the
-      # pattern in e2e.yml so both workflows share the same cache directory —
-      # one warm-up benefits both. Cache key is keyed on tests/package-lock.json
-      # because that's where @playwright/test's version is pinned; bumping
-      # Playwright there invalidates the cache and forces a fresh download.
-      - name: Cache Playwright browsers
-        id: playwright-cache
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
-        with:
-          path: /home/ci/playwright-cache
-          key: playwright-${{ runner.os }}-${{ hashFiles('tests/package-lock.json') }}
-          restore-keys: |
-            playwright-${{ runner.os }}-
-
-      # The Forgejo runner's node:22 base image has no Chrome on PATH.
-      # Install via the @playwright/test pinned in tests/package.json —
-      # NOT `npx --yes -p @playwright/test`, which would fetch the latest
-      # version from the npm registry, mismatch the cached chromium
-      # version, and force playwright to delete the cache and redownload
-      # (the bug that made the original #814 cache useless — see #818).
-      # On a cache hit skip the binary download; still run install-deps
-      # since apt packages aren't cached across fresh containers (#969).
-      - name: Install Chromium (via Playwright)
+      # #969 — Chromium is baked into the image at /ms-playwright; just install
+      # the tests/ npm deps (provides @lhci/cli's peer + the playwright client).
+      - name: Install tests dependencies (browser baked in image)
         env:
-          PLAYWRIGHT_BROWSERS_PATH: /home/ci/playwright-cache
-        run: |
-          cd tests && npm ci --no-audit --no-fund
-          if [ "${{ steps.playwright-cache.outputs.cache-hit }}" = "true" ]; then
-            ./node_modules/.bin/playwright install-deps chromium
-          else
-            ./node_modules/.bin/playwright install chromium --with-deps
-          fi
+          PLAYWRIGHT_BROWSERS_PATH: /ms-playwright
+        run: cd tests && npm ci --no-audit --no-fund
 
       # lhci uses chrome-launcher to find Chrome; chrome-launcher checks
-      # CHROME_PATH first, then several default paths. With PLAYWRIGHT_BROWSERS_PATH
-      # set, the binary lands under /home/ci/playwright-cache/chromium-*/...
-      # rather than ~/.cache/ms-playwright, so we search the configured path.
+      # CHROME_PATH first, then several default paths. The baked Chromium lands
+      # under /ms-playwright/chromium-*/..., so we point CHROME_PATH there.
       # `lhci autorun` reads lighthouserc.cjs, runs 3 Lighthouse passes
       # against the static-served bundle, and writes JSON + HTML reports
       # into .lighthouseci/. Always exit 0 — non-blocking. Comment-bot
       # below surfaces scores + assertion failures regardless.
       - name: Run Lighthouse CI
         env:
-          PLAYWRIGHT_BROWSERS_PATH: /home/ci/playwright-cache
+          PLAYWRIGHT_BROWSERS_PATH: /ms-playwright
         run: |
           export CHROME_PATH=$(find "$PLAYWRIGHT_BROWSERS_PATH" -name "chrome" -type f -path "*chrome-linux*" | head -1)
           echo "Using CHROME_PATH=$CHROME_PATH"

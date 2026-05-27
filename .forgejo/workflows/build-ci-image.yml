@@ -1,0 +1,98 @@
+name: Build CI Playwright image
+
+# Rebuilds the prebuilt Playwright/Node image (#969) that the Playwright
+# pipelines (smoke / smoke-walk / lighthouse / e2e) run inside, and pushes it to
+# the Forgejo package registry. The image bakes Node 22 + Chromium + Playwright
+# system deps, so those jobs skip apt install-deps, the browser download, AND
+# actions/setup-node.
+#
+# WHY SSH-TO-PI (not a plain `docker push` on the runner): forge.example.com
+# is proxied through Cloudflare, which caps request bodies (~100MB) — a 2.4GB
+# image push is rejected with HTTP 413. So we build on the Pi and push to
+# localhost:3000 (Forgejo's direct HTTP port), bypassing Cloudflare entirely.
+# Pulls in the consuming pipelines go via forge.example.com (Cloudflare
+# serves downloads fine — the 413 is upload-only). Same pattern as deploy.yml.
+#
+# The image is PINNED to the @playwright/test version in tests/package-lock.json
+# (derived below). The consuming workflows reference
+# `darkwatch-ci-playwright:<that version>`, so the two must move together —
+# Renovate (#414) bumps the lockfile AND the image tag in the same PR via a
+# custom manager; this workflow then rebuilds on the lockfile change.
+#
+# Required secrets (DEPLOY_* already exist for deploy.yml):
+#   DEPLOY_SSH_KEY / DEPLOY_HOST / DEPLOY_USER / DEPLOY_KNOWN_HOSTS
+#   PACKAGES_TOKEN — a Forgejo token with package read/write (docker login)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.forgejo/ci-image/Dockerfile'
+      - '.forgejo/workflows/build-ci-image.yml'
+      - 'tests/package-lock.json'
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Install jq + openssh-client
+        # The runner's base image lacks both; jq reads the Playwright version
+        # from the lockfile, openssh-client ships the Dockerfile to the Pi.
+        run: |
+          apt-get update -qq
+          apt-get install -y -qq jq openssh-client
+
+      - name: Derive Playwright version from the lockfile
+        id: ver
+        run: |
+          VER=$(jq -r '.packages["node_modules/@playwright/test"].version' tests/package-lock.json)
+          if [ -z "$VER" ] || [ "$VER" = "null" ]; then
+            echo "Could not read @playwright/test version from tests/package-lock.json" >&2
+            exit 1
+          fi
+          echo "version=$VER" >> "$GITHUB_OUTPUT"
+          echo "Building darkwatch-ci-playwright:$VER"
+
+      - name: Set up SSH (private key + known_hosts)
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 644 ~/.ssh/known_hosts
+          ssh-keygen -y -f ~/.ssh/id_ed25519 >/dev/null
+
+      - name: Ship the Dockerfile to the Pi
+        env:
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+        run: |
+          ssh -i ~/.ssh/id_ed25519 "${DEPLOY_USER}@${DEPLOY_HOST}" 'rm -rf /tmp/ci-image && mkdir -p /tmp/ci-image'
+          scp -i ~/.ssh/id_ed25519 .forgejo/ci-image/Dockerfile \
+            "${DEPLOY_USER}@${DEPLOY_HOST}:/tmp/ci-image/Dockerfile"
+
+      - name: Build + push on the Pi (localhost:3000 — bypasses Cloudflare)
+        env:
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          PACKAGES_TOKEN: ${{ secrets.PACKAGES_TOKEN }}
+          VER: ${{ steps.ver.outputs.version }}
+        run: |
+          ssh -i ~/.ssh/id_ed25519 "${DEPLOY_USER}@${DEPLOY_HOST}" \
+            "PACKAGES_TOKEN='${PACKAGES_TOKEN}' VER='${VER}' bash -s" <<'EOSSH'
+          set -euo pipefail
+          IMAGE=localhost:3000/aaron/darkwatch-ci-playwright
+          echo "$PACKAGES_TOKEN" | docker login localhost:3000 -u aaron --password-stdin
+          cd /tmp/ci-image
+          docker build --build-arg PLAYWRIGHT_VERSION="$VER" \
+            -t "$IMAGE:$VER" -t "$IMAGE:latest" -f Dockerfile .
+          docker push "$IMAGE:$VER"
+          docker push "$IMAGE:latest"
+          docker logout localhost:3000
+          EOSSH

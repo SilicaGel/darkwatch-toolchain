@@ -339,6 +339,12 @@ jobs:
   # ---------------------------------------------------------------------------
   smoke:
     runs-on: ubuntu-latest
+    # #969 — run inside the prebuilt CI image (Node 22 + Chromium + Playwright
+    # system deps baked). No apt install-deps, no browser download, no
+    # actions/setup-node. Pinned to the @playwright/test version; rebuilt by
+    # build-ci-image.yml (Renovate keeps the tag in sync — #414).
+    container:
+      image: forge.example.com/aaron/darkwatch-ci-playwright:1.59.1
     services:
       mariadb:
         image: mariadb:11
@@ -356,16 +362,16 @@ jobs:
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
 
-      - name: Setup Node.js
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+      # #969 — Node 22 is baked into the container image, so no actions/setup-node.
+      # We still cache the npm download dir (what setup-node's cache:'npm' did)
+      # so `npm ci` doesn't re-fetch every tarball.
+      - name: Cache npm downloads
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
-          node-version: '22'
-          cache: 'npm'
-          cache-dependency-path: |
-            package-lock.json
-            server/package-lock.json
-            client/package-lock.json
-            tests/package-lock.json
+          path: ~/.npm
+          key: npm-${{ runner.os }}-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: |
+            npm-${{ runner.os }}-
 
       - name: Install server dependencies
         run: |
@@ -489,26 +495,13 @@ jobs:
           rm -f /tmp/dm-cookies.txt /tmp/player-cookies.txt
           echo "warmup complete"
 
-      - name: Cache Playwright browsers
-        id: playwright-cache
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
-        with:
-          path: /home/ci/playwright-cache
-          key: playwright-${{ runner.os }}-${{ hashFiles('tests/package-lock.json') }}
-          restore-keys: |
-            playwright-${{ runner.os }}-
-
-      - name: Smoke — install Playwright and browsers
+      # #969 — browsers + system deps are baked into the container image at
+      # /ms-playwright, so the actions/cache step and the install-deps/install
+      # branch are gone. Only the tests/ npm deps remain.
+      - name: Smoke — install tests deps (browsers baked in image)
         env:
-          PLAYWRIGHT_BROWSERS_PATH: /home/ci/playwright-cache
-        # Direct binary path, not `npx playwright` — see #722.
-        run: |
-          cd tests && npm ci
-          if [ "${{ steps.playwright-cache.outputs.cache-hit }}" = "true" ]; then
-            ./node_modules/.bin/playwright install-deps chromium
-          else
-            ./node_modules/.bin/playwright install chromium --with-deps
-          fi
+          PLAYWRIGHT_BROWSERS_PATH: /ms-playwright
+        run: cd tests && npm ci
 
       - name: Typecheck tests/ (specs + helpers + smoke-walk)
         run: cd tests && npm run typecheck
@@ -518,7 +511,7 @@ jobs:
         env:
           E2E_SERVER_URL: "http://localhost:3001"
           TEST_HOOK_SECRET: e2e-test-hook-secret
-          PLAYWRIGHT_BROWSERS_PATH: /home/ci/playwright-cache
+          PLAYWRIGHT_BROWSERS_PATH: /ms-playwright
         run: |
           # character-creation.spec is excluded (#490) — confirmed in run 743
           # to be a real step-3 PATCH waiter race, separate from the Zod
