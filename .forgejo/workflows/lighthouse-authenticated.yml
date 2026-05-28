@@ -1,0 +1,190 @@
+name: Lighthouse CI — authenticated pages
+
+# Audits the authenticated surfaces (dashboard, campaign view) that users
+# actually spend time in. Complements lighthouse.yml which only covers the
+# public no-auth shell. Requires the full Express + MariaDB + Vite stack.
+# Tracked in #725.
+#
+# Path filter: client changes, server changes that affect rendered pages,
+# or this workflow / its config files.
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "client/**"
+      - "server/src/**"
+      - "lighthouserc.authenticated.cjs"
+      - "scripts/lighthouse-comment/puppeteer-login.cjs"
+      - ".forgejo/workflows/lighthouse-authenticated.yml"
+  push:
+    branches: [main]
+    paths:
+      - "client/**"
+      - "server/src/**"
+      - "lighthouserc.authenticated.cjs"
+      - "scripts/lighthouse-comment/puppeteer-login.cjs"
+      - ".forgejo/workflows/lighthouse-authenticated.yml"
+
+jobs:
+  lighthouse-authenticated:
+    runs-on: ubuntu-latest
+    container:
+      image: forge.example.com/aaron/darkwatch-ci-playwright:1.60.0
+    services:
+      mariadb:
+        image: mariadb:11
+        env:
+          MYSQL_ROOT_PASSWORD: ${{ secrets.CI_DB_ROOT_PASSWORD }}
+          MYSQL_DATABASE: ${{ secrets.CI_DB_NAME }}
+          MYSQL_USER: ${{ secrets.CI_DB_USER }}
+          MYSQL_PASSWORD: ${{ secrets.CI_DB_PASSWORD }}
+        options: >-
+          --health-cmd="healthcheck.sh --connect --innodb_initialized"
+          --health-interval=2s
+          --health-timeout=5s
+          --health-retries=30
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Cache npm downloads
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/.npm
+          key: npm-${{ runner.os }}-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: |
+            npm-${{ runner.os }}-
+
+      - name: Install server dependencies
+        run: cd server && npm ci --no-audit --no-fund
+
+      - name: Build server
+        run: cd server && npm run build
+
+      - name: Install client dependencies
+        run: cd client && npm ci --no-audit --no-fund
+
+      - name: Build client
+        run: cd client && npm run build
+
+      - name: Install root dependencies (@lhci/cli)
+        run: npm ci --no-audit --no-fund
+
+      - name: Wait for MariaDB
+        run: |
+          for i in $(seq 1 30); do
+            (echo > /dev/tcp/mariadb/3306) 2>/dev/null && echo "MariaDB is ready" && break
+            echo "Waiting for MariaDB... ($i/30)"
+            sleep 2
+            [ "$i" -eq 30 ] && echo "MariaDB never became ready" && exit 1
+          done
+
+      - name: Apply migrations
+        env:
+          DB_HOST: mariadb
+          DB_PORT: "3306"
+          DB_USER: ${{ secrets.CI_DB_USER }}
+          DB_PASSWORD: ${{ secrets.CI_DB_PASSWORD }}
+          DB_NAME: ${{ secrets.CI_DB_NAME }}
+        run: cd server && npm run db:migrate
+
+      - name: Seed core + shadowdark content
+        env:
+          DB_HOST: mariadb
+          DB_PORT: "3306"
+          DB_USER: ${{ secrets.CI_DB_USER }}
+          DB_PASSWORD: ${{ secrets.CI_DB_PASSWORD }}
+          DB_NAME: ${{ secrets.CI_DB_NAME }}
+        run: cd server && npm run seed:core && npm run seed:shadowdark && npm run seed:shadowdark:demo
+
+      - name: Extract seed IDs for Lighthouse URLs
+        env:
+          DB_HOST: mariadb
+          DB_PORT: "3306"
+          DB_USER: ${{ secrets.CI_DB_USER }}
+          DB_PASSWORD: ${{ secrets.CI_DB_PASSWORD }}
+          DB_NAME: ${{ secrets.CI_DB_NAME }}
+        run: |
+          CAMPAIGN_ID=$(node -e "
+            const m = require('./server/node_modules/mysql2/promise');
+            m.createConnection({
+              host: process.env.DB_HOST,
+              port: Number(process.env.DB_PORT),
+              user: process.env.DB_USER,
+              password: process.env.DB_PASSWORD,
+              database: process.env.DB_NAME,
+            }).then(c =>
+              c.execute('SELECT id FROM campaigns ORDER BY created_at LIMIT 1')
+                .then(([rows]) => { console.log(rows[0]?.id ?? ''); process.exit(0); })
+            ).catch(() => process.exit(0));
+          ")
+          echo "LHCI_CAMPAIGN_ID=$CAMPAIGN_ID" >> $GITHUB_ENV
+
+      - name: Start app server
+        env:
+          PORT: "3001"
+          DB_HOST: mariadb
+          DB_PORT: "3306"
+          DB_USER: ${{ secrets.CI_DB_USER }}
+          DB_PASSWORD: ${{ secrets.CI_DB_PASSWORD }}
+          DB_NAME: ${{ secrets.CI_DB_NAME }}
+          NODE_ENV: test
+          JWT_SECRET: lhci-test-secret
+          CLIENT_URL: http://localhost:5173
+          NODE_OPTIONS: "--max-old-space-size=256"
+        run: |
+          node server/dist/index.js >/tmp/server.log 2>&1 &
+          echo $! > /tmp/server.pid
+          for i in $(seq 1 30); do
+            status=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:3001/api/auth/me 2>/dev/null || true)
+            echo "$status" | grep -qE '^(200|401)$' && break || true
+            echo "Waiting for app server... ($i/30) [got: $status]"
+            sleep 2
+            [ "$i" -eq 30 ] && echo "App server never became ready" && exit 1
+          done
+
+      - name: Start Vite preview server
+        env:
+          API_PROXY_URL: "http://localhost:3001"
+          NODE_OPTIONS: "--max-old-space-size=512"
+        run: |
+          cd client && ./node_modules/.bin/vite preview >/tmp/vite.log 2>&1 &
+          echo $! > /tmp/vite.pid
+          for i in $(seq 1 30); do
+            curl -s -o /dev/null http://localhost:5173 && break || true
+            echo "Waiting for Vite... ($i/30)"
+            sleep 2
+            [ "$i" -eq 30 ] && echo "Vite preview server never became ready" && exit 1
+          done
+
+      - name: Run Lighthouse CI (authenticated)
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: /ms-playwright
+          LHCI_CLIENT_URL: "http://localhost:5173"
+          # LHCI_CAMPAIGN_ID exported by the extract-seed-IDs step above
+        run: |
+          export CHROME_PATH=$(find "$PLAYWRIGHT_BROWSERS_PATH" -name "chrome" -type f -path "*chrome-linux*" | head -1)
+          echo "Using CHROME_PATH=$CHROME_PATH"
+          echo "Auditing campaign ID: $LHCI_CAMPAIGN_ID"
+          ./node_modules/.bin/lhci autorun --config=lighthouserc.authenticated.cjs || true
+
+      - name: Post PR comment
+        if: github.event_name == 'pull_request'
+        env:
+          FORGEJO_URL: ${{ github.server_url }}
+          FORGEJO_TOKEN: ${{ github.token }}
+          REPO_OWNER: ${{ github.repository_owner }}
+          REPO_NAME: ${{ github.event.repository.name }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          LHCI_DIR: ".lighthouseci-auth"
+          LHCI_BOT_MARKER: "<!-- lighthouse-bot-auth:v1 -->"
+          LHCI_BOT_TITLE: "Lighthouse CI — authenticated pages"
+        run: node scripts/lighthouse-comment/post-comment.mjs
+
+      - name: Dump server and vite logs on failure
+        if: failure()
+        run: |
+          echo "=== server log (last 100 lines) ==="
+          tail -n 100 /tmp/server.log || echo "no server log"
+          echo "=== vite log (last 100 lines) ==="
+          tail -n 100 /tmp/vite.log || echo "no vite log"

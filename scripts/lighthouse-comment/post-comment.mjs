@@ -12,14 +12,24 @@
 //   REPO_OWNER     e.g. aaron
 //   REPO_NAME      e.g. darkwatch
 //   PR_NUMBER      the PR index
+//
+// Optional env (for authenticated-pages bot — see lighthouse-authenticated.yml):
+//   LHCI_DIR         output dir to read from (default: .lighthouseci)
+//   LHCI_BOT_MARKER  full sentinel marker string (default: <!-- lighthouse-bot:v1 -->)
+//   LHCI_BOT_TITLE   section heading in the comment (default: Lighthouse CI — public pages)
 
 import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
 
-const MARKER = "<!-- lighthouse-bot:v1 -->";
-const MARKER_RE = /<!-- lighthouse-bot:v(\d+) -->/;
+// Allow the authenticated-pages bot to override these so its comments don't
+// collide with the public-pages bot. Derive MARKER_RE from the marker prefix
+// so version-upgrade cleanup still works across both bots independently.
+const MARKER = process.env.LHCI_BOT_MARKER || "<!-- lighthouse-bot:v1 -->";
+const _markerPrefix = MARKER.replace(/:v\d+\s*-->$/, "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const MARKER_RE = new RegExp(`${_markerPrefix}:v(\\d+) -->`);
 const CURRENT_VERSION = 1;
-const LHCI_DIR = ".lighthouseci";
+const LHCI_DIR = process.env.LHCI_DIR || ".lighthouseci";
+const BOT_TITLE = process.env.LHCI_BOT_TITLE || "Lighthouse CI — public pages";
 
 function parseEnv() {
   const env = {
@@ -62,18 +72,26 @@ function urlPath(u) {
   }
 }
 
-// Group every lhr-*.json by URL pathname and average each category across
-// that page's runs. With one configured URL this is a single-row result;
-// with several (#724) each page gets its own averaged row — without this,
-// scores from different pages would be blended into one meaningless number.
+// Group every LHR report JSON by URL pathname and average each category
+// across that page's runs. With one configured URL this is a single-row
+// result; with several (#724) each page gets its own averaged row.
+// Without this, scores from different pages would be blended into one
+// meaningless number. Handles both naming patterns lhci emits: the old
+// `lhr-<ts>.json` and the 0.14+ `<host>-<path>-<datetime>.report.json`.
 function loadScoresByUrl() {
   if (!existsSync(LHCI_DIR)) {
     console.error(`[lighthouse-bot] ${LHCI_DIR} missing; lhci didn't produce output`);
     return null;
   }
-  const lhrs = readdirSync(LHCI_DIR).filter((f) => f.startsWith("lhr-") && f.endsWith(".json"));
+  const lhrs = readdirSync(LHCI_DIR).filter(
+    (f) =>
+      f.endsWith(".json") &&
+      f !== "manifest.json" &&
+      f !== "assertion-results.json" &&
+      (f.startsWith("lhr-") || f.endsWith(".report.json")),
+  );
   if (lhrs.length === 0) {
-    console.error(`[lighthouse-bot] no lhr-*.json files in ${LHCI_DIR}`);
+    console.error(`[lighthouse-bot] no LHR JSON files in ${LHCI_DIR}`);
     return null;
   }
   // pathname -> { totals: {category: summed score}, count: runs }
@@ -124,11 +142,11 @@ function scoreEmoji(score) {
 
 function buildBody(data, assertions) {
   if (!data || !Array.isArray(data.byUrl) || data.byUrl.length === 0) {
-    return `${MARKER}\n\n## 💡 Lighthouse: no data\n\nLHCI didn't produce any reports. Check the workflow logs.\n`;
+    return `${MARKER}\n\n## 💡 ${BOT_TITLE}: no data\n\nLHCI didn't produce any reports. Check the workflow logs.\n`;
   }
   const { byUrl } = data;
   const failures = assertions.filter((a) => a.passed === false);
-  const parts = [MARKER, "", "## 💡 Lighthouse CI — public pages", ""];
+  const parts = [MARKER, "", `## 💡 ${BOT_TITLE}`, ""];
   const runsPerPage = byUrl[0]?.runs ?? 0;
   parts.push(
     `${byUrl.length} page${byUrl.length === 1 ? "" : "s"}, averaged across ` +
