@@ -1,8 +1,17 @@
 #!/usr/bin/env node
-// Run knip, summarise the result, post (or update) a comment on the current PR.
+// Run knip, summarise the result, post (or update) a comment on the current PR,
+// then GATE: fail the job if knip found anything (#845).
 //
-// Non-blocking by design: this script always exits 0 even if knip finds issues.
-// The point is visibility (a PR comment reviewers can act on), not a build gate.
+// History: knip started life as a non-blocking comment-bot (#970) while the
+// baseline was ~280 items. #401 drove that to zero, so #845 flips this to a
+// hard gate — the count is now a one-way ratchet. The comment still posts for
+// visibility; the process just exits non-zero afterward when the count is > 0.
+//
+// IMPORTANT — the gate fails on *findings*, never on *infrastructure*. A knip
+// crash, a JSON parse failure, a missing env var, or an unreachable Forgejo all
+// still exit 0 (non-blocking), exactly as before. Only real dead code (knip
+// total > 0) fails the build, and only when the PR title lacks the documented
+// `[allow-dead-code]` escape hatch.
 //
 // Required env:
 //   FORGEJO_URL    base URL, e.g. https://forge.example.com
@@ -10,11 +19,31 @@
 //   REPO_OWNER     e.g. aaron
 //   REPO_NAME      e.g. darkwatch
 //   PR_NUMBER      the PR index
+// Optional env:
+//   PR_TITLE       the PR title — if it contains `[allow-dead-code]`, the gate
+//                  is skipped (comment still posts). For the rare legit case
+//                  (generated code, an intentionally-exported library surface).
 //
 // Uses the find-or-create pattern from scripts/coverage-comment/post-comment.mjs
 // so each new push to a PR updates the existing comment instead of stacking.
 
 import { spawnSync } from "node:child_process";
+
+// Marker the gate looks for in the PR title to skip failing the build.
+const ALLOW_MARKER = "[allow-dead-code]";
+
+// Pure gate decision — kept separate from I/O so it's unit-testable.
+// Returns { fail: boolean, reason: string }.
+//   total === 0            → pass (clean)
+//   total > 0, no marker   → fail (the ratchet bites)
+//   total > 0, marker set  → pass (documented escape hatch)
+export function shouldFailGate({ total, prTitle }) {
+  if (total === 0) return { fail: false, reason: "clean" };
+  if (typeof prTitle === "string" && prTitle.includes(ALLOW_MARKER)) {
+    return { fail: false, reason: "allow-dead-code escape hatch in PR title" };
+  }
+  return { fail: true, reason: `knip found ${total} unused item(s)` };
+}
 
 const MARKER = "<!-- dead-code-bot:v1 -->";
 const MARKER_RE = /<!-- dead-code-bot:v(\d+) -->/;
@@ -228,6 +257,24 @@ async function main() {
 
   if (sameVersion) await patchComment(base, headers, sameVersion.id, body);
   else await createComment(base, headers, env.PR_NUMBER, body);
+
+  // #845 — hard gate. The comment is posted above first so the dev can see
+  // exactly what to remove; only then do we fail. Infra failures earlier in
+  // this script already exited 0, so reaching here means knip ran cleanly and
+  // the count is trustworthy.
+  const gate = shouldFailGate({ total: summary.counts.total, prTitle: process.env.PR_TITLE });
+  if (gate.fail) {
+    console.error(
+      `[dead-code-bot] GATE FAILED — ${gate.reason}. ` +
+        `Knip's baseline is zero (#401); this PR introduces unused code. ` +
+        `See the dead-code bot comment on the PR for the exact files/exports/types, ` +
+        `then remove them or make the symbol non-exported. ` +
+        `Rare legitimate case (generated code, intentional library surface)? ` +
+        `Add "${ALLOW_MARKER}" to the PR title to skip this gate.`,
+    );
+    process.exit(1);
+  }
+  console.error(`[dead-code-bot] gate passed — ${gate.reason}`);
 }
 
 const invokedDirectly =

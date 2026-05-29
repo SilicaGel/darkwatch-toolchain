@@ -33,11 +33,17 @@ jobs:
           (cd server && npm ci --no-audit --no-fund)
           (cd tests && npm ci --no-audit --no-fund)
 
-      - name: Run knip + post PR comment
+      # #845 — hard gate. The script posts/updates the PR comment, then exits
+      # non-zero if knip's total > 0 (baseline is zero since #401). Infra
+      # failures (knip crash, unreachable Forgejo, missing env) still exit 0 —
+      # only real dead code fails the build. Escape hatch: put
+      # `[allow-dead-code]` in the PR title (passed through as PR_TITLE).
+      - name: Run knip + post PR comment + gate
         env:
           FORGEJO_URL: ${{ github.server_url }}
           FORGEJO_TOKEN: ${{ github.token }}
           REPO_OWNER: ${{ github.repository_owner }}
           REPO_NAME: ${{ github.event.repository.name }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
         run: node scripts/dead-code-comment/run-and-post.mjs
