@@ -600,6 +600,10 @@ jobs:
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
         run: |
           mkdir -p /tmp/badges
+          # Version for the badge — via the shared CHANGELOG parser
+          # (scripts/app-version.mjs), the one source the client masthead +
+          # server /health also use. No inline regex copy here anymore.
+          BADGE_VERSION="$(node scripts/app-version.mjs)"
           # Generate 5 shields.io endpoint JSONs. build is green only when
           # lint-typecheck AND test both succeeded; e2e tracks the smoke job.
           node -e "
@@ -634,9 +638,7 @@ jobs:
               JSON.stringify(cov('server coverage', './server/coverage/coverage-summary.json')));
             fs.writeFileSync(out + '/client-coverage.json',
               JSON.stringify(cov('client coverage', './client/coverage/coverage-summary.json')));
-            const cl = fs.readFileSync('./docs/CHANGELOG.md', 'utf8');
-            const m = cl.match(/^##\s+\d{4}-\d{2}-\d{2}\s+—\s+v(\d+\.\d+\.\d+)/m);
-            const version = m ? m[1] : '0.0.0';
+            const version = process.env.BADGE_VERSION || '0.0.0';
             fs.writeFileSync(out + '/version.json', JSON.stringify({
               schemaVersion: 1, label: 'version', message: 'v' + version, color: 'blue'
             }));

@@ -139,10 +139,16 @@ jobs:
           MINIO_PUBLIC_BASE_URL: ${{ secrets.MINIO_PUBLIC_BASE_URL }}
           MINIO_BROWSER_REDIRECT_URL: ${{ secrets.MINIO_BROWSER_REDIRECT_URL }}
         run: |
+          # App version reported by /health + Sentry: the canonical CHANGELOG
+          # version (shared parser) plus the short git sha, e.g. "0.102.21+a6f2e45".
+          # The CHANGELOG version matches the client masthead + README badge; the
+          # sha pins the exact build. node + git are available from earlier steps.
+          APP_VERSION="$(node scripts/app-version.mjs)+$(git rev-parse --short HEAD)"
           # Build the env file with `printf '%s\n'` so values containing
           # special chars (= ' " $) survive untouched.
           umask 077
           {
+            printf 'APP_VERSION=%s\n' "$APP_VERSION"
             printf 'DB_ROOT_PASSWORD=%s\n' "$DB_ROOT_PASSWORD"
             printf 'DB_NAME=%s\n' "$DB_NAME"
             printf 'DB_USER=%s\n' "$DB_USER"
