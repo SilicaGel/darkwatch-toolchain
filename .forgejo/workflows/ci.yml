@@ -603,7 +603,11 @@ jobs:
           # Version for the badge — via the shared CHANGELOG parser
           # (scripts/app-version.mjs), the one source the client masthead +
           # server /health also use. No inline regex copy here anymore.
-          BADGE_VERSION="$(node scripts/app-version.mjs)"
+          # MUST be `export`ed: the `node -e` block below reads it via
+          # process.env, which only sees EXPORTED shell vars — a plain
+          # assignment left the badge reading undefined → "v0.0.0" (#1046 regression).
+          export BADGE_VERSION="$(node scripts/app-version.mjs)"
+          echo "badge version: ${BADGE_VERSION}"
           # Generate 5 shields.io endpoint JSONs. build is green only when
           # lint-typecheck AND test both succeeded; e2e tracks the smoke job.
           node -e "
