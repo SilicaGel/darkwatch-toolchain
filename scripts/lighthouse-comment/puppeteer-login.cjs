@@ -10,7 +10,7 @@ const BASE_URL = process.env.LHCI_CLIENT_URL || "http://localhost:5173";
 const USERNAME = process.env.LHCI_LOGIN_USER || "DungeonMaster";
 const PASSWORD = process.env.LHCI_LOGIN_PASS || "password";
 
-/** @param {import('puppeteer').Browser} browser */
+/** @param {import('puppeteer-core').Browser} browser — lhci injects the browser; puppeteer-core is the installed (transitive) types package */
 module.exports = async (browser) => {
   const page = await browser.newPage();
   await page.goto(`${BASE_URL}/login`, { waitUntil: "networkidle0", timeout: 30000 });
