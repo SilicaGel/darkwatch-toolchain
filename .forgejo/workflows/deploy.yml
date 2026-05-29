@@ -164,17 +164,32 @@ jobs:
             "${DEPLOY_USER}@${DEPLOY_HOST}:~/services/darkwatch/.env.deploy"
           rm -f /tmp/darkwatch.deploy.env
 
+      - name: Push prod docker-compose to Pi (#852)
+        # Ship the version-controlled compose file so prod config is no longer
+        # a hand-edited file living only on the Pi. The next step's
+        # `docker compose up` reads ~/services/darkwatch/docker-compose.yml,
+        # so overwrite it from the repo copy here. The repo copy is byte-for-
+        # byte the live file as of this PR, so the first deploy is a no-op;
+        # thereafter, env-var/port/volume changes are reviewed in the same PR
+        # as the deploy.yml + secret changes (no more split-brain — #852).
+        # Target dir is user-owned (~), so no sudo needed.
+        env:
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+        run: |
+          scp -i ~/.ssh/id_ed25519 deploy/docker-compose.prod.yml \
+            "${DEPLOY_USER}@${DEPLOY_HOST}:~/services/darkwatch/docker-compose.yml"
+
       - name: Build server image and (re)start container on Pi
         env:
           DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
         run: |
           # The Pi's public-facing reverse proxy is Caddy (host systemd unit,
-          # /etc/caddy/Caddyfile), not nginx. Caddy serves static client
-          # assets from /var/www/darkwatch directly and reverse-proxies
-          # /api/* + /socket.io/* to localhost:8080 (this container's
-          # published port). Neither static-asset changes nor a server
-          # container restart require touching Caddy, so the deploy doesn't.
+          # /etc/caddy/Caddyfile), not nginx. It serves static client assets
+          # from /var/www/darkwatch and reverse-proxies /api/* + /socket.io/* +
+          # /health to localhost:8080 (this container's published port). The
+          # Caddyfile is shipped + reloaded by the separate step below (#1037).
           ssh -i ~/.ssh/id_ed25519 "${DEPLOY_USER}@${DEPLOY_HOST}" bash <<'EOSSH'
           set -euo pipefail
           cd ~/deploy/darkwatch/server
@@ -182,4 +197,36 @@ jobs:
           docker rm -f darkwatch-server 2>/dev/null || true
           cd ~/services/darkwatch
           docker compose --env-file .env.deploy up -d --remove-orphans
+          EOSSH
+
+      - name: Push Caddyfile to Pi and reload (#1037)
+        # Ship the version-controlled Caddyfile and graceful-reload Caddy so the
+        # public reverse-proxy config is reviewed in PRs, not hand-edited on the
+        # host. Ordered LAST — after the container is already deployed — so a
+        # Caddy/sudo hiccup can never block the app rollout.
+        #
+        # Safety:
+        #   - `caddy validate` on the staged file before we touch /etc — a
+        #     malformed Caddyfile aborts here, before install/reload.
+        #   - `systemctl reload caddy` is graceful and itself re-validates,
+        #     keeping the running config if the new one is bad → a bad reload
+        #     cannot take the proxy down.
+        #   - all sudo uses `-n` (non-interactive): if the deploy user lacks
+        #     NOPASSWD for `install` to /etc/caddy or `systemctl reload caddy`,
+        #     the step fails loudly instead of hanging on a password prompt.
+        #     (Requires a sudoers rule for the deploy user — see deploy/README
+        #     / PR #<this>. The app deploy above is unaffected either way.)
+        env:
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+        run: |
+          scp -i ~/.ssh/id_ed25519 deploy/Caddyfile \
+            "${DEPLOY_USER}@${DEPLOY_HOST}:/tmp/darkwatch.Caddyfile.staged"
+          ssh -i ~/.ssh/id_ed25519 "${DEPLOY_USER}@${DEPLOY_HOST}" bash <<'EOSSH'
+          set -euo pipefail
+          caddy validate --adapter caddyfile --config /tmp/darkwatch.Caddyfile.staged
+          sudo -n install -m 644 -o root -g root /tmp/darkwatch.Caddyfile.staged /etc/caddy/Caddyfile
+          sudo -n systemctl reload caddy
+          rm -f /tmp/darkwatch.Caddyfile.staged
+          echo "Caddy reloaded with repo Caddyfile."
           EOSSH
