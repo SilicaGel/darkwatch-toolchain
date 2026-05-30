@@ -36,7 +36,7 @@ set -uo pipefail
 # To update: review `git diff` of .forgejo/workflows/ci.yml, confirm this
 # script still mirrors the `lint-typecheck` + `test` jobs (update the checks
 # below if they changed), then set this to the value preflight prints.
-EXPECTED_CI_HASH="0cb2570a3fedf2743d32c60744950784fbd3548f6b46a90292ed136a1b33aef6"
+EXPECTED_CI_HASH="3daccb610212e9189718caf6ace20a01cc14ce4dc3a45ce4bbba55e5b9afe382"
 
 # --- setup ------------------------------------------------------------------
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || {
@@ -187,6 +187,9 @@ check_numeric_ids() {
   fi
 }
 run_check "no numeric ID patterns" check_numeric_ids
+
+# #761 — ratchet: fail if `Record<string, unknown>` count climbs above baseline.
+run_check "Record<string,unknown> budget" node scripts/check-record-type-budget.mjs
 
 # --- 2. typecheck + build (lint-typecheck job) ------------------------------
 echo "${BOLD}typecheck + build${RESET}"

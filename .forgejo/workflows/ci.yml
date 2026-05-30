@@ -151,6 +151,11 @@ jobs:
           fi
           echo "OK — no numeric ID patterns found"
 
+      - name: Record<string,unknown> budget (anti-bleed ratchet, #761)
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: node scripts/check-record-type-budget.mjs
+
       - name: Type check server
         run: cd server && npm run build
 
