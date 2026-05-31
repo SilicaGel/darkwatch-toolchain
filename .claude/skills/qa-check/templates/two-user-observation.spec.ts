@@ -13,6 +13,10 @@
 // COPY INTO  tests/qa-check/<N>/spec.ts
 // RUN        cd tests && npx playwright test --config qa-check.config.ts qa-check/<N>/spec.ts
 //
+// IMPORT NOTE: this file is COPIED to tests/qa-check/<N>/spec.ts before running.
+//   The harness import path below resolves from that copy location:
+//   tests/qa-check/<N>/spec.ts  →  ..  →  tests/qa-check/  →  tools/lib/harness.js
+//
 // THINGS TO ADAPT
 //   1. Which two (or three) users — DM + PLAYER, or PLAYER + PLAYER2
 //   2. The navigation strategy in each context
@@ -24,20 +28,10 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
-import { DM, PLAYER, loginAs } from "../../helpers/auth.js";
+import { login, navViaApi } from "../tools/lib/harness.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const OUT = __dirname;
-
-// Resolve target IDs via the page's same-origin /api proxy.
-async function firstCampaignId(page: import("@playwright/test").Page): Promise<string | null> {
-  return page.evaluate(async () => {
-    const res = await fetch("/api/campaigns", { credentials: "include" });
-    if (!res.ok) return null;
-    const body = await res.json();
-    return body?.data?.[0]?.id ?? null;
-  });
-}
 
 test("#NNN — short description of what's being verified", async ({ browser }) => {
   test.setTimeout(120_000);
@@ -46,14 +40,13 @@ test("#NNN — short description of what's being verified", async ({ browser }) 
   // --- DM context ---
   const dmCtx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
   const dmPage = await dmCtx.newPage();
-  await loginAs(dmPage, DM.username, DM.password);
-  await dmPage.waitForURL("/");
-  await dmPage.waitForTimeout(800);
+  // login() fills username/password, submits, waits for URL "/" + hydration settle.
+  await login(dmPage, "DungeonMaster");
 
-  const dmCampId = await firstCampaignId(dmPage);
+  // navViaApi fetches the list, picks item[index].id, calls page.goto + settle.
+  // Returns the id (or null if list empty / request failed).
+  const dmCampId = await navViaApi(dmPage, "/api/campaigns", "/campaign/:id");
   if (dmCampId) {
-    await dmPage.goto(`/campaign/${dmCampId}`, { waitUntil: "domcontentloaded" });
-    await dmPage.waitForTimeout(1500);
     await dmPage.screenshot({ path: resolve(OUT, "dm-view.png"), fullPage: false });
     console.log(`  ✓ dm-view.png (campaign ${dmCampId.slice(0, 8)})`);
   } else {
@@ -64,14 +57,11 @@ test("#NNN — short description of what's being verified", async ({ browser }) 
   // --- Player context ---
   const playerCtx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
   const playerPage = await playerCtx.newPage();
-  await loginAs(playerPage, PLAYER.username, PLAYER.password);
-  await playerPage.waitForURL("/");
-  await playerPage.waitForTimeout(800);
+  // ADAPT: swap "Adventurer" for "Rook" / "Sylva" as needed.
+  await login(playerPage, "Adventurer");
 
-  const plCampId = await firstCampaignId(playerPage);
+  const plCampId = await navViaApi(playerPage, "/api/campaigns", "/campaign/:id");
   if (plCampId) {
-    await playerPage.goto(`/campaign/${plCampId}`, { waitUntil: "domcontentloaded" });
-    await playerPage.waitForTimeout(1500);
     await playerPage.screenshot({ path: resolve(OUT, "player-view.png"), fullPage: false });
     console.log(`  ✓ player-view.png (campaign ${plCampId.slice(0, 8)})`);
   } else {

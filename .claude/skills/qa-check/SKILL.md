@@ -87,9 +87,15 @@ For each issue, decide one mode:
 1. **Hint check first.** If the body cites a Playwright spec path (e.g. `tests/e2e/<name>.spec.ts`) or directly says "verify with E2E," route to **playwright-runnable**.
 2. **Code-readable** if the body cites concrete server/client paths, function names, table/column names, route paths, or migration filenames.
 3. **Playwright-runnable** by overlap if the issue keywords match a spec name in `tests/e2e/`, OR if the fix is user-visible and a contact-sheet would let the user sign off in 10 seconds.
-4. **Visual-only** otherwise — animation, layout, timing without a concrete asset to screenshot.
+4. **Backend / headless** if the issue is a pure server-side or migration change with no UI surface (e.g. a new endpoint, a column, a data-migration). Don't classify these as visual-only — use `qa api` to hit the endpoint as a seed user and assert with `--expect`:
+   ```bash
+   cd tests && npx tsx qa-check/tools/qa.ts api DungeonMaster GET /api/campaigns
+   cd tests && npx tsx qa-check/tools/qa.ts api DungeonMaster PATCH /api/characters/<id> \
+     '{"name":"x"}' --expect name=x
+   ```
+5. **Visual-only** — animation, layout, timing without a concrete asset to screenshot.
 
-Hints beat heuristics. When in doubt, prefer code-readable over Playwright (faster, no dev server needed) and Playwright over visual-only (gives the user a contact sheet to glance at).
+Hints beat heuristics. When in doubt, prefer code-readable over Playwright (faster, no dev server needed), backend issues over visual-only (`qa api` gives a real signal), and Playwright over visual-only (gives the user a contact sheet to glance at).
 
 ### Step 3 — Run code checks inline (do NOT dispatch a sub-agent)
 
@@ -105,14 +111,23 @@ For each issue, produce one mental result row:
 
 `partial` is real and important: ship a yellow flag if part of the issue is done but part isn't. Don't force a green/red binary. **Don't conflate "narrow fix passed the literal acceptance" with "user-visible intent is satisfied."** Walk the surface the user would see, not just the symbol the agent named.
 
-**Reachability check — run this for EVERY code-readable issue.** "The symbol exists" ≠ "a user can reach it." After confirming the cited code is present, grep that it's actually wired into a path a user (or another caller) hits:
+**Reachability check — run this for EVERY code-readable issue.** "The symbol exists" ≠ "a user can reach it." After confirming the cited code is present, check that it's wired into a path a user (or another caller) hits:
 
-- New **component** → grep that something imports/renders it. Zero hits = orphaned. (#425 shipped `TwoFactorSettings.tsx` and the full 2FA backend, but nothing rendered the component and no settings route existed — 2FA was completely unreachable.)
-- New **endpoint / socket handler** → grep the *client* for a caller that actually hits it. Server-accepts ≠ client-sends. (#623's `monster:roll-attack` handler accepts and persists `targetCharacterId`, but the client never sends it — so the metadata is always empty in practice.)
-- New **route** → confirm it's mounted in `App.tsx` (client) or the route index (server).
-- New **migration / column** → confirm code actually reads or writes it, not just that the migration file exists.
+```bash
+cd tests && npx tsx qa-check/tools/qa.ts reach <target> --kind <kind>
+# --kind: component | route | endpoint | socket | column
+# e.g.  qa.ts reach TwoFactorSettings --kind component
+# e.g.  qa.ts reach "monster:roll-attack" --kind socket
+```
 
-Any reachability grep coming up empty → the issue is **`partial`**, not `verified`: the build is real but the user-visible feature isn't there. This check is cheap and catches the most common QA miss — flag it before it reaches the report.
+The tool reports `REACHABLE`, `ORPHANED`, or `PARTIAL` with counts. **Treat `ORPHANED` or `PARTIAL` as `partial` status** — the build is real but something isn't wired. The tool surfaces the mechanical fact; you supply the verdict:
+
+- **component** `ORPHANED` → nothing imports/renders it. (#425 shipped `TwoFactorSettings.tsx` and the full 2FA backend, but the component was unreachable — route didn't exist either.)
+- **endpoint / socket** `ORPHANED` → the server accepts but the client never sends. (#623's `monster:roll-attack` handler accepts `targetCharacterId`; client never sends it — always empty in practice.)
+- **route** → check it's mounted in `App.tsx` (client) or the route index (server).
+- **column** `ORPHANED` → migration ran but no code reads or writes the column.
+
+Any `ORPHANED`/`PARTIAL` result → the issue is **`partial`**, not `verified`: the build is real but the user-visible feature isn't there. This check is cheap and catches the most common QA miss — flag it before it reaches the report.
 
 ### Step 4 — Run Playwright checks
 
@@ -133,8 +148,13 @@ Only attempted if there are playwright-runnable issues.
 
 ### Critical Playwright-side gotchas (learned the hard way)
 
-- **API recon before locator choices.** Before writing assertions, fetch the relevant API to learn what's in the seed: classes, owner_user_id distribution, equipped gear, etc. Specs that assume "any PC will do" silently land on the wrong PC and produce green-on-the-wrong-thing results. E.g. for #694's roll-auth gate (#777), only **attack-row** DiceButtons forward `characterId` to the server — so the disabled-state is only observable on a PC that has an equipped weapon (renders an AttackBlock). A wizard or thief PC produces zero disabled buttons and the spec passes without verifying anything. Fetch `/api/campaigns/<id>/characters` first; pick a Fighter or any PC with an `equipped` weapon.
+- **Seed recon before locator choices.** Before writing assertions, run `qa seed all` to learn what's in the seed database — campaigns, characters with class, owner username, equipped_gear count:
+  ```bash
+  cd tests && npx tsx qa-check/tools/qa.ts seed all
+  ```
+  Specs that assume "any PC will do" silently land on the wrong PC and produce green-on-the-wrong-thing results. **Brynn and Zara are the Fighters with equipped weapons** — pick one of them for attack-row/AttackBlock checks (e.g. the roll-auth gate in #777 only shows disabled state on a PC with an equipped weapon; a wizard produces zero disabled buttons and the spec passes without verifying anything).
 - **Stat-roll DiceButtons don't gate the same as attack-roll DiceButtons.** The `isForbidden = !isOwner && Boolean(characterId)` check only fires when `characterId` is forwarded. Stat-roll DiceButtons (STR/DEX/CON…) **don't** pass `characterId` — they're ambient (anyone can roll a d20 check, result lands in the roller's log). Only **attack-row** DiceButtons inside `AttackBlock` forward `characterId` and therefore observe the disabled state. If a spec is supposed to assert disabled-on-non-owner, target attack-row buttons, not stat buttons.
+- **Harness helpers — use, don't reinvent.** `tests/qa-check/tools/lib/harness.ts` exports: `login`, `navViaApi`, `characterCard`, `clickTab`, `mapToken`, `dragBy`, `rightClick`, `clickCanvasAt`, `hover`. Import these in throwaway specs; don't replicate navigation or login boilerplate inline.
 - **State navigation via API beats heuristic clicks.** Dashboard cards (campaigns, characters, etc.) often share text — `page.locator(...).filter({hasText:/demo/i}).first()` lands on the wrong target. Fetch via the page's same-origin `/api` proxy and `page.goto(/campaign/${id})` instead:
   ```ts
   const id = await page.evaluate(async () => {
@@ -155,6 +175,37 @@ Only attempted if there are playwright-runnable issues.
 - **CharacterDetail edit toggle** is a pencil icon: `page.locator('button[title="Edit character"]').first()`.
 - **User dropdown trigger** is `button[aria-haspopup="true"]` (only one on the page); the dropdown menu has `role="menu"` — wait for it visible before screenshotting.
 - **After login, wait ~1s** for React hydration before first interaction.
+
+### DB-evidence for state-change issues
+
+For issues whose acceptance criterion is a **state change** (a row written, a column updated, a token moved), observe the database directly — screenshots alone don't prove persistence.
+
+Choose the right driver:
+
+- **Manual** (one-off; any action type): run `qa db check`, perform the action in the app, press Enter:
+  ```bash
+  cd tests && npx tsx qa-check/tools/qa.ts db check --tables <tables> [--where "col = 'x'"]
+  ```
+  Canonical drag→DB example (proven maps pattern):
+  ```bash
+  # In the app: open the campaign's Map tab with an active scene + a token, then:
+  cd tests && npx tsx qa-check/tools/qa.ts db check --tables map_tokens
+  # press Enter prompt → drag the token in the browser → press Enter
+  # delta shows:  map_tokens:  ~ <id>  x …→…, y …→…
+  ```
+- **API driver** (repeatable REST mutations): add `--driver api --as <user> --call "METHOD /path" [--data '{json}']`:
+  ```bash
+  cd tests && npx tsx qa-check/tools/qa.ts db check --tables characters \
+    --driver api --as DungeonMaster --call "PATCH /api/characters/<id>" --data '{"name":"x"}'
+  ```
+- **Throwaway spec** (click/drag flows — the "Playwright driver"): write `tests/qa-check/<N>/spec.ts` importing the harness and dbcheck libs:
+  ```ts
+  import { login, navViaApi, mapToken, dragBy } from "../tools/lib/harness.js";
+  import { snapshot, diffSnapshots, expectChanged, renderDelta } from "../tools/lib/dbcheck.js";
+  // snapshot → interact → snapshot → assert
+  ```
+
+Rolls are SOCKET-only — use the manual driver or a throwaway spec for rolls, not the API driver.
 
 ### Step 5 — True visual-only issues
 
@@ -225,6 +276,34 @@ Write a short markdown log to `tests/qa-check/session-<YYYY-MM-DD-HHMM>.md` (NOT
 - Successor issues filed.
 
 Useful audit trail. Brief — don't restate the report.
+
+### Step 9 — Promotion recommendation (when warranted)
+
+After the session log, for any issue whose behavior is **critical and regression-prone**, recommend promoting its QA spec to a durable test. This is a recommendation only — the durable-suite wiring is tracked as a separate follow-up issue.
+
+Decide the layer:
+
+- **Pure logic** (e.g. damage math, stat calculations, permission predicates with no browser dependency) → recommend an **int/unit test** alongside the server code.
+- **Client-path behavior** (clicks, drags, real-time flows) → recommend moving `tests/qa-check/<N>/spec.ts` into `tests/e2e/` and tagging it `@regression`.
+
+Phrase the recommendation in the session log entry for the issue, e.g.:
+
+> "Recommend promoting `tests/qa-check/777/spec.ts` to `tests/e2e/roll-auth.spec.ts` tagged `@regression` — follow-up filed as #N."
+
+Do not wire the durable suite yourself in the QA pass. File the successor via the `issue` skill and reference it in the session log.
+
+## Tools
+
+All commands run as `cd tests && npx tsx qa-check/tools/qa.ts <cmd>`.
+
+| Tool | Example |
+|------|---------|
+| qa seed | `cd tests && npx tsx qa-check/tools/qa.ts seed all` |
+| qa reach | `cd tests && npx tsx qa-check/tools/qa.ts reach TwoFactorSettings --kind component` |
+| qa db check | `cd tests && npx tsx qa-check/tools/qa.ts db check --tables roll_log` (manual) |
+| qa db --driver api | `cd tests && npx tsx qa-check/tools/qa.ts db check --tables characters --driver api --as DungeonMaster --call "PATCH /api/characters/<id>" --data '{"name":"x"}'` |
+| qa api | `cd tests && npx tsx qa-check/tools/qa.ts api DungeonMaster GET /api/campaigns` |
+| qa specs | `cd tests && npx tsx qa-check/tools/qa.ts specs roll --run` |
 
 ## Templates
 

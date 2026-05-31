@@ -13,6 +13,10 @@
 // COPY INTO  tests/qa-check/<N>/spec.ts
 // RUN        cd tests && npx playwright test --config qa-check.config.ts qa-check/<N>/spec.ts
 //
+// IMPORT NOTE: this file is COPIED to tests/qa-check/<N>/spec.ts before running.
+//   The harness import path below resolves from that copy location:
+//   tests/qa-check/<N>/spec.ts  →  ..  →  tests/qa-check/  →  tools/lib/harness.js
+//
 // THINGS TO ADAPT
 //   1. The user fixture (DM vs PLAYER) — depends on which role surfaces the feature
 //   2. The navigation strategy: which API endpoint + URL pattern
@@ -29,21 +33,10 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
-import { DM, loginAs } from "../../helpers/auth.js";
+import { login, navViaApi } from "../tools/lib/harness.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const OUT = __dirname;
-
-// Resolve a target ID via the page's same-origin /api proxy.
-// Adapt the endpoint to whatever resource you need (campaigns, characters, etc.).
-async function firstCampaignId(page: import("@playwright/test").Page): Promise<string | null> {
-  return page.evaluate(async () => {
-    const res = await fetch("/api/campaigns", { credentials: "include" });
-    if (!res.ok) return null;
-    const body = await res.json();
-    return body?.data?.[0]?.id ?? null;
-  });
-}
 
 test("#NNN — short description of what's being verified", async ({ browser }) => {
   test.setTimeout(60_000);
@@ -51,22 +44,25 @@ test("#NNN — short description of what's being verified", async ({ browser }) 
 
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
   const page = await ctx.newPage();
-  await loginAs(page, DM.username, DM.password);
-  await page.waitForURL("/");
-  // CRITICAL: React hydration wait before first interaction.
-  await page.waitForTimeout(1000);
+
+  // ADAPT: swap "DungeonMaster" for "Adventurer" / "Rook" / "Sylva" as needed.
+  await login(page, "DungeonMaster");
 
   // ADAPT: navigate to the right surface via API + page.goto.
-  // Example variants:
-  //   const campId = await firstCampaignId(page);
-  //   await page.goto(`/campaign/${campId}`);
+  // navViaApi fetches the list from `apiPath`, picks item[index].id, and
+  // calls page.goto(pathTemplate.replace(":id", id)).
+  // Returns the id (or null if the list is empty / request failed).
   //
-  // For character-level navigation, open the character mini card. NOTE
-  // CharacterMiniCard is `<div role="button">`, NOT `<button>` — use
-  // page.getByRole("button"), not page.locator('button').
-  const characterBtn = page.getByRole("button").filter({ hasText: /HP \d+ \/ \d+/ }).first();
-  await characterBtn.click();
-  await page.waitForTimeout(1500);
+  // Example variants:
+  //   const campId = await navViaApi(page, "/api/campaigns", "/campaign/:id");
+  //   // character navigation — open the character mini card after landing in a campaign:
+  //   const characterBtn = page.getByRole("button").filter({ hasText: /HP \d+ \/ \d+/ }).first();
+  //   await characterBtn.click();
+  //   await page.waitForTimeout(1500);
+  const campId = await navViaApi(page, "/api/campaigns", "/campaign/:id");
+  if (!campId) {
+    console.log("  · No campaign found — check seed data");
+  }
 
   // ADAPT: full-page screenshot, then optional tight crop of the area
   // being verified.

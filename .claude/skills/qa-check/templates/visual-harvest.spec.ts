@@ -12,6 +12,10 @@
 // COPY INTO  tests/qa-check/<N>/spec.ts
 // RUN        cd tests && npx playwright test --config qa-check.config.ts qa-check/<N>/spec.ts
 //
+// IMPORT NOTE: this file is COPIED to tests/qa-check/<N>/spec.ts before running.
+//   The harness import path below resolves from that copy location:
+//   tests/qa-check/<N>/spec.ts  →  ..  →  tests/qa-check/  →  tools/lib/harness.js
+//
 // THINGS TO ADAPT
 //   1. THEMES (or whatever you're iterating over) — match the ticket scope
 //   2. The "open the state to capture" block inside the loop
@@ -24,7 +28,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
-import { DM, loginAs } from "../../helpers/auth.js";
+import { login } from "../tools/lib/harness.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const OUT = __dirname;
@@ -56,11 +60,9 @@ test("#NNN — short description of what's being verified", async ({ browser }) 
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } });
   const page = await ctx.newPage();
 
-  await loginAs(page, DM.username, DM.password);
-  await page.waitForURL("/");
-  // CRITICAL: let React hydrate before the first interaction. Without
-  // this wait the first click can hit a not-yet-mounted handler.
-  await page.waitForTimeout(1000);
+  // login() fills username/password, submits, waits for URL "/" + hydration settle.
+  // ADAPT: swap "DungeonMaster" for "Adventurer" / "Rook" / "Sylva" as needed.
+  await login(page, "DungeonMaster");
 
   const captured: string[] = [];
 
