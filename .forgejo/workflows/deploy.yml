@@ -118,6 +118,36 @@ jobs:
             site/_dist/index.html \
             "${DEPLOY_USER}@${DEPLOY_HOST}:/var/www/brochure/index.html"
 
+      - name: Back up current Pi config before it's replaced
+        # Keep ONE rolling backup slot per replaced config file (overwritten each
+        # deploy — no clutter) so a deploy that wedges on a config change can be
+        # diagnosed/rolled back against the last-known-good. Runs BEFORE the env
+        # + compose pushes below (and before the Caddyfile install) so each .bak
+        # captures the pre-deploy file. Entirely best-effort: every line is
+        # guarded so a missing file or a sudo denial can NEVER fail the deploy.
+        env:
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+        run: |
+          ssh -i ~/.ssh/id_ed25519 "${DEPLOY_USER}@${DEPLOY_HOST}" bash <<'EOSSH'
+          if [ -d ~/services/darkwatch ]; then
+            cd ~/services/darkwatch
+            if [ -f docker-compose.yml ]; then cp -f docker-compose.yml docker-compose.yml.bak && echo "[backup] docker-compose.yml -> docker-compose.yml.bak"; fi
+            if [ -f .env.deploy ]; then cp -f .env.deploy .env.deploy.bak && echo "[backup] .env.deploy -> .env.deploy.bak"; fi
+          fi
+          # Caddyfile is root-owned — back it up best-effort. If the deploy
+          # user's sudoers doesn't permit `cp` (it's scoped to `install` +
+          # `systemctl reload caddy`), this logs a skip and the deploy proceeds;
+          # `caddy validate` before install already blocks a malformed config.
+          if [ -f /etc/caddy/Caddyfile ]; then
+            if sudo -n cp -f /etc/caddy/Caddyfile /etc/caddy/Caddyfile.bak 2>/dev/null; then
+              echo "[backup] /etc/caddy/Caddyfile -> /etc/caddy/Caddyfile.bak"
+            else
+              echo "[backup] SKIPPED /etc/caddy/Caddyfile (sudo cp not permitted — add 'cp' to the deploy user's sudoers if you want this backup)"
+            fi
+          fi
+          EOSSH
+
       - name: Push runtime env file to Pi
         env:
           DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
