@@ -19,25 +19,30 @@ name: Renovate
 #      A token missing `user` read is the classic init auth failure.
 #   2. Add it to this repo's Actions secrets as `RENOVATE_TOKEN`
 #      (Settings → Actions → Secrets).
-#   Until that secret exists the scheduled run no-ops at the auth step.
+#   3. (Optional but recommended — #1121) Create a github.com PAT (classic, NO
+#      scopes — public read is enough) and add it as the `GITHUB_COM_TOKEN`
+#      secret. Without it, github.com version/release lookups for actions/* and
+#      node are unauthenticated (60 req/hr) and runs log a rate-limit warning.
+#   Until RENOVATE_TOKEN exists the scheduled run no-ops at the auth step.
 #   Migrating to a dedicated renovate-bot user later is tracked in #1115.
 # ─────────────────────────────────────────────────────────────────────────────
 
 on:
   schedule:
-    # Weekly, Monday 06:00 UTC. Forgejo cron is UTC; renovate.json sets the
-    # display timezone (America/Toronto) for PR scheduling text only.
-    - cron: "0 6 * * 1"
+    # Weekly, Monday 09:00 UTC ≈ 05:00 America/Toronto (EDT). Forgejo cron is
+    # fixed-UTC, so it lands at 04:00 ET during winter (EST). renovate.json sets
+    # the display timezone for PR-scheduling text only.
+    - cron: "0 9 * * 1"
   workflow_dispatch:
     inputs:
       dryRun:
-        # Defaults ON so the first manual run is consequence-free: Renovate
-        # computes everything and logs what it WOULD do, but creates no
-        # branches/PRs/issues. Re-dispatch with this unchecked to open the
-        # real batch. The scheduled run is always a real run (no input → off).
+        # Manual dispatch only. Defaults OFF — a manual run does real work
+        # (opens PRs) just like the schedule, now that the config is verified.
+        # Check the box for a consequence-free, log-only preview. The scheduled
+        # run never sees this input, so it's always a real run.
         description: "Dry run — log only, create no branches/PRs/issues"
         type: boolean
-        default: true
+        default: false
 
 jobs:
   renovate:
@@ -51,6 +56,7 @@ jobs:
       - name: Run Renovate
         env:
           RENOVATE_TOKEN: ${{ secrets.RENOVATE_TOKEN }}
+          GITHUB_COM_TOKEN: ${{ secrets.GITHUB_COM_TOKEN }} # optional — avoids github.com rate-limiting (#1121)
           RENOVATE_PLATFORM: forgejo # native Forgejo platform (host is Forgejo 15.0.0)
           RENOVATE_ENDPOINT: ${{ github.server_url }}/api/v1
           RENOVATE_REPOSITORIES: ${{ github.repository }}
