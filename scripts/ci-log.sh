@@ -52,7 +52,24 @@ curl -sS -H "Authorization: token $FORGEJO_TOKEN" \
     '.workflow_runs[] | select(.id == ($id | tonumber)) | "# task=\(.id) run=\(.run_number) branch=\(.head_branch) sha=\(.head_sha[0:7]) status=\(.status)"' >&2
 
 # ── Fetch + decompress the log.
-# Shard dir is the task id in 2-char lowercase hex.
-shard=$(printf '%02x' "$task_id")
-ssh -o BatchMode=yes "$PI_HOST" \
-  "sudo zstdcat '$LOG_DIR/$shard/$task_id.log.zst' 2>/dev/null || sudo zstdcat \$(sudo find '$LOG_DIR' -name '$task_id.log.zst' | head -1)"
+# Locate the file with `find` rather than guessing a shard subdir (Forgejo's
+# shard prefix has changed across versions, so the guess was fragile). A
+# just-finished run isn't compressed to .log.zst yet, so fall back to the
+# uncompressed .log; if neither exists, say so and exit instead of hanging.
+#
+# Why the rewrite: the old code ran `zstdcat $(find …)`. When find returned
+# nothing (fresh task, not yet flushed) that became a bare `zstdcat`, which
+# blocks reading stdin forever — the infinite hang. The guards below never
+# invoke zstdcat/cat without a file, and the SSH keepalive options cap any
+# server-side stall at ~15s instead of waiting indefinitely.
+ssh -o BatchMode=yes -o ConnectTimeout=10 \
+    -o ServerAliveInterval=5 -o ServerAliveCountMax=3 \
+    "$PI_HOST" bash -s <<REMOTE
+set -euo pipefail
+z="\$(sudo find '$LOG_DIR' -name '$task_id.log.zst' 2>/dev/null | head -1)"
+if [ -n "\$z" ]; then sudo zstdcat "\$z"; exit 0; fi
+u="\$(sudo find '$LOG_DIR' -name '$task_id.log' 2>/dev/null | head -1)"
+if [ -n "\$u" ]; then sudo cat "\$u"; exit 0; fi
+echo "ci-log: no log for task $task_id under $LOG_DIR yet — a just-finished run can take a few seconds to flush; retry shortly." >&2
+exit 3
+REMOTE
