@@ -10,8 +10,13 @@ name: Renovate
 #
 # ── ONE-TIME SETUP (not automatable from here) ───────────────────────────────
 #   Runs as my own account for now (RENOVATE_GIT_AUTHOR below = aaron@3d.ca).
-#   1. Generate a Personal Access Token on this Forgejo instance with
-#      `repository` read+write (and `issue` write, for the dependency dashboard).
+#   1. Generate a Personal Access Token on this Forgejo instance with ALL of:
+#        user          (read)        — Renovate's init `GET /user`; missing this
+#                                      throws "Authentication failure" before any work
+#        repository    (read+write)  — branches & PRs
+#        issue         (read+write)  — the dependency dashboard
+#        organization  (read)        — labels / teams (Forgejo >= 1.20)
+#      A token missing `user` read is the classic init auth failure.
 #   2. Add it to this repo's Actions secrets as `RENOVATE_TOKEN`
 #      (Settings → Actions → Secrets).
 #   Until that secret exists the scheduled run no-ops at the auth step.
@@ -46,7 +51,7 @@ jobs:
       - name: Run Renovate
         env:
           RENOVATE_TOKEN: ${{ secrets.RENOVATE_TOKEN }}
-          RENOVATE_PLATFORM: gitea # Forgejo is Gitea-API-compatible
+          RENOVATE_PLATFORM: forgejo # native Forgejo platform (host is Forgejo 15.0.0)
           RENOVATE_ENDPOINT: ${{ github.server_url }}/api/v1
           RENOVATE_REPOSITORIES: ${{ github.repository }}
           RENOVATE_GIT_AUTHOR: "aaron <aaron@3d.ca>" # personal token for now; bot user tracked in #1115
