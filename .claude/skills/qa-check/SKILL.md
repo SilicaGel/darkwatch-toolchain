@@ -207,11 +207,20 @@ Choose the right driver:
 
 Rolls are SOCKET-only — use the manual driver or a throwaway spec for rolls, not the API driver.
 
-### Step 5 — True visual-only issues
+### Step 5 — Layout/visual issues
 
-Don't run anything. List them in the report with concrete reproduction steps lifted from the issue body, e.g. "open two browsers as DM + player, cast a spell that nat-1s, watch the d12 land before the resulting damage roll."
+Split these two ways before reaching for a contact sheet:
 
-Most issues that *look* visual-only can actually be captured with the `visual-harvest` template — when in doubt, try the contact sheet first.
+**Component layout/sizing/spacing/empty-state changes → component-preview harness.** When the issue changed how a single UI component *looks* (not how it *behaves*), drive it through the dev-only harness in `client/src/preview/` rather than flagging vaguely for visual review:
+
+1. Pick the relevant preview key(s) from `client/src/preview/registry.tsx`. If the changed component or state isn't in the catalog, add an entry there (fixture + `render()`), then re-run `npx vitest run src/preview/` so the render-smoke test stays green.
+2. Make sure the worktree's Vite dev server is up and note its port (default `5173`).
+3. Hand the user the live URL: `http://localhost:<port>/preview.html?key=<key>` (`/preview.html` with no key lists every entry). **The URL is the confirm channel — pushed screenshots don't reach the user, so don't rely on them.**
+4. Ask the user to confirm or reject before recommending a close. This lands in the **Needs your eyes** section of the report.
+
+**Behavior/interaction/state (clicks, turn order, death-save counts) → Playwright** (Step 4 specs). The harness shows layout; the specs assert behavior — they complement, not replace, each other. Use the right one for what the issue actually changed.
+
+**True visual-only** (animation, timing, multi-user real-time feel with no isolable component) → don't run anything. List them in the report with concrete reproduction steps lifted from the issue body, e.g. "open two browsers as DM + player, cast a spell that nat-1s, watch the d12 land before the resulting damage roll." Most of these can still be captured with the `visual-harvest` template — when in doubt, try the contact sheet first.
 
 ### Step 6 — Present the report
 
