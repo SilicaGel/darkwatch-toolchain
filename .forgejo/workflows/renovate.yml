@@ -1,0 +1,67 @@
+name: Renovate
+
+# Self-hosted Renovate run (#414). Watches upstream releases and files one PR
+# per update for: actions/* SHA pins, npm deps across all four workspaces, and
+# the darkwatch-ci-playwright image tag (kept in lockstep with @playwright/test
+# via the custom.regex manager in renovate.json).
+#
+# Repo-level behaviour lives in /renovate.json; this workflow only configures
+# Renovate (platform, endpoint, which repo, token, author) and decides WHEN it runs.
+#
+# ── ONE-TIME SETUP (not automatable from here) ───────────────────────────────
+#   Runs as my own account for now (RENOVATE_GIT_AUTHOR below = aaron@3d.ca).
+#   1. Generate a Personal Access Token on this Forgejo instance with
+#      `repository` read+write (and `issue` write, for the dependency dashboard).
+#   2. Add it to this repo's Actions secrets as `RENOVATE_TOKEN`
+#      (Settings → Actions → Secrets).
+#   Until that secret exists the scheduled run no-ops at the auth step.
+#   Migrating to a dedicated renovate-bot user later is tracked in #1115.
+# ─────────────────────────────────────────────────────────────────────────────
+
+on:
+  schedule:
+    # Weekly, Monday 06:00 UTC. Forgejo cron is UTC; renovate.json sets the
+    # display timezone (America/Toronto) for PR scheduling text only.
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+    inputs:
+      dryRun:
+        # Defaults ON so the first manual run is consequence-free: Renovate
+        # computes everything and logs what it WOULD do, but creates no
+        # branches/PRs/issues. Re-dispatch with this unchecked to open the
+        # real batch. The scheduled run is always a real run (no input → off).
+        description: "Dry run — log only, create no branches/PRs/issues"
+        type: boolean
+        default: true
+
+jobs:
+  renovate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Use Node 22
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+
+      - name: Run Renovate
+        env:
+          RENOVATE_TOKEN: ${{ secrets.RENOVATE_TOKEN }}
+          RENOVATE_PLATFORM: gitea # Forgejo is Gitea-API-compatible
+          RENOVATE_ENDPOINT: ${{ github.server_url }}/api/v1
+          RENOVATE_REPOSITORIES: ${{ github.repository }}
+          RENOVATE_GIT_AUTHOR: "aaron <aaron@3d.ca>" # personal token for now; bot user tracked in #1115
+          # Empty on the scheduled run (no input) → real run; 'full' when the
+          # manual-dispatch dryRun box is checked → log-only, no writes.
+          RENOVATE_DRY_RUN: ${{ inputs.dryRun && 'full' || '' }}
+          LOG_LEVEL: info
+        # Renovate clones the repo itself and reads /renovate.json as the repo
+        # config — no checkout step needed. Skips cleanly when the token is unset.
+        run: |
+          if [ -z "$RENOVATE_TOKEN" ]; then
+            echo "::warning::RENOVATE_TOKEN secret not set — see one-time setup in this workflow file. Skipping."
+            exit 0
+          fi
+          if [ -n "$RENOVATE_DRY_RUN" ]; then
+            echo "::notice::Dry-run mode — computing updates, creating NO branches/PRs/issues."
+          fi
+          npx --yes renovate
