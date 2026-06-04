@@ -141,7 +141,7 @@ function buildBody({ counts, files, issues }) {
     return `${MARKER}\n\n## 🧹 Dead code: clean\n\nKnip found no unused files, deps, exports, or duplicates. ✨\n`;
   }
 
-  const parts = [`${MARKER}`, "", "## 🧹 Dead-code report (non-blocking)"];
+  const parts = [`${MARKER}`, "", "## 🧹 Dead-code report"];
   parts.push("");
   parts.push(`Knip found **${counts.total}** unused items on this branch:`);
   parts.push("");
@@ -184,7 +184,9 @@ function buildBody({ counts, files, issues }) {
   parts.push(formatList(flat.duplicates, "Duplicate exports"));
 
   parts.push("");
-  parts.push("_Non-blocking. Track follow-up in a dedicated cleanup PR (see #401)._");
+  parts.push(
+    "_This check is a hard gate — remove the unused items above. For a legitimate case (generated code, an intentional library surface), add `[allow-dead-code]` to the PR title to override._",
+  );
   return parts.filter(Boolean).join("\n");
 }
 
@@ -266,7 +268,7 @@ async function main() {
   if (gate.fail) {
     console.error(
       `[dead-code-bot] GATE FAILED — ${gate.reason}. ` +
-        `Knip's baseline is zero (#401); this PR introduces unused code. ` +
+        `Knip's baseline is zero; this PR introduces unused code. ` +
         `See the dead-code bot comment on the PR for the exact files/exports/types, ` +
         `then remove them or make the symbol non-exported. ` +
         `Rare legitimate case (generated code, intentional library surface)? ` +

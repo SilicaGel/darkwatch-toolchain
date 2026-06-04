@@ -1,0 +1,537 @@
+{
+  "ok": true,
+  "data": [
+    {
+      "type": "npm",
+      "name": "resend",
+      "version": "6.12.4",
+      "alerts": [
+        {
+          "key": "Q9xLfPVk0FIgu8AM4fzfHgUiLP9uS8yK6Ffch_fTfkWE",
+          "type": "envVars",
+          "severity": "low",
+          "category": "supplyChainRisk",
+          "action": "ignore",
+          "props": {
+            "envVars": ""
+          }
+        },
+        {
+          "key": "Q9xLfPVk0FIgu8AM4fzfHgUiLP9uS8yK6Ffch_fTfkWE",
+          "type": "envVars",
+          "severity": "low",
+          "category": "supplyChainRisk",
+          "action": "ignore",
+          "props": {
+            "envVars": "RESEND_BASE_URL"
+          }
+        },
+        {
+          "key": "Q9xLfPVk0FIgu8AM4fzfHgUiLP9uS8yK6Ffch_fTfkWE",
+          "type": "envVars",
+          "severity": "low",
+          "category": "supplyChainRisk",
+          "action": "ignore",
+          "props": {
+            "envVars": ""
+          }
+        },
+        {
+          "key": "Q9xLfPVk0FIgu8AM4fzfHgUiLP9uS8yK6Ffch_fTfkWE",
+          "type": "envVars",
+          "severity": "low",
+          "category": "supplyChainRisk",
+          "action": "ignore",
+          "props": {
+            "envVars": "RESEND_USER_AGENT"
+          }
+        },
+        {
+          "key": "Q9xLfPVk0FIgu8AM4fzfHgUiLP9uS8yK6Ffch_fTfkWE",
+          "type": "envVars",
+          "severity": "low",
+          "category": "supplyChainRisk",
+          "action": "ignore",
+          "props": {
+            "envVars": ""
+          }
+        },
+        {
+          "key": "Q9xLfPVk0FIgu8AM4fzfHgUiLP9uS8yK6Ffch_fTfkWE",
+          "type": "envVars",
+          "severity": "low",
+          "category": "supplyChainRisk",
+          "action": "ignore",
+          "props": {
+            "envVars": "RESEND_API_KEY"
+          }
+        },
+        {
+          "key": "Q9xLfPVk0FIgu8AM4fzfHgUiLP9uS8yK6Ffch_fTfkWE",
+          "type": "envVars",
+          "severity": "low",
+          "category": "supplyChainRisk",
+          "action": "ignore",
+          "props": {
+            "envVars": ""
+          }
+        },
+        {
+          "key": "Q9xLfPVk0FIgu8AM4fzfHgUiLP9uS8yK6Ffch_fTfkWE",
+          "type": "envVars",
+          "severity": "low",
+          "category": "supplyChainRisk",
+          "action": "ignore",
+          "props": {
+            "envVars": "RESEND_BASE_URL"
+          }
+        },
+        {
+          "key": "Q9xLfPVk0FIgu8AM4fzfHgUiLP9uS8yK6Ffch_fTfkWE",
+          "type": "envVars",
+          "severity": "low",
+          "category": "supplyChainRisk",
+          "action": "ignore",
+          "props": {
+            "envVars": ""
+          }
+        },
+        {
+          "key": "Q9xLfPVk0FIgu8AM4fzfHgUiLP9uS8yK6Ffch_fTfkWE",
+          "type": "envVars",
+          "severity": "low",
+          "category": "supplyChainRisk",
+          "action": "ignore",
+          "props": {
+            "envVars": "RESEND_USER_AGENT"
+          }
+        },
+        {
+          "key": "Q9xLfPVk0FIgu8AM4fzfHgUiLP9uS8yK6Ffch_fTfkWE",
+          "type": "envVars",
+          "severity": "low",
+          "category": "supplyChainRisk",
+          "action": "ignore",
+          "props": {
+            "envVars": ""
+          }
+        },
+        {
+          "key": "Q9xLfPVk0FIgu8AM4fzfHgUiLP9uS8yK6Ffch_fTfkWE",
+          "type": "envVars",
+          "severity": "low",
+          "category": "supplyChainRisk",
+          "action": "ignore",
+          "props": {
+            "envVars": "RESEND_API_KEY"
+          }
+        },
+        {
+          "key": "QQq3u7B3z1SyUs6ENpn75fbropoiy5Y1JuSjIXi6o0-A",
+          "type": "networkAccess",
+          "severity": "middle",
+          "category": "supplyChainRisk",
+          "action": "ignore",
+          "props": {
+            "module": "globalThis[\"fetch\"]"
+          }
+        },
+        {
+          "key": "QQq3u7B3z1SyUs6ENpn75fbropoiy5Y1JuSjIXi6o0-A",
+          "type": "networkAccess",
+          "severity": "middle",
+          "category": "supplyChainRisk",
+          "action": "ignore",
+          "props": {
+            "module": "globalThis[\"fetch\"]"
+          }
+        },
+        {
+          "key": "QQq3u7B3z1SyUs6ENpn75fbropoiy5Y1JuSjIXi6o0-A",
+          "type": "networkAccess",
+          "severity": "middle",
+          "category": "supplyChainRisk",
+          "action": "ignore",
+          "props": {
+            "module": "globalThis[\"fetch\"]"
+          }
+        },
+        {
+          "key": "QQq3u7B3z1SyUs6ENpn75fbropoiy5Y1JuSjIXi6o0-A",
+          "type": "networkAccess",
+          "severity": "middle",
+          "category": "supplyChainRisk",
+          "action": "ignore",
+          "props": {
+            "module": "globalThis[\"fetch\"]"
+          }
+        },
+        {
+          "key": "QQq3u7B3z1SyUs6ENpn75fbropoiy5Y1JuSjIXi6o0-A",
+          "type": "networkAccess",
+          "severity": "middle",
+          "category": "supplyChainRisk",
+          "action": "ignore",
+          "props": {
+            "module": "globalThis[\"fetch\"]"
+          }
+        },
+        {
+          "key": "QQq3u7B3z1SyUs6ENpn75fbropoiy5Y1JuSjIXi6o0-A",
+          "type": "networkAccess",
+          "severity": "middle",
+          "category": "supplyChainRisk",
+          "action": "ignore",
+          "props": {
+            "module": "globalThis[\"fetch\"]"
+          }
+        },
+        {
+          "key": "QQq3u7B3z1SyUs6ENpn75fbropoiy5Y1JuSjIXi6o0-A",
+          "type": "networkAccess",
+          "severity": "middle",
+          "category": "supplyChainRisk",
+          "action": "ignore",
+          "props": {
+            "module": "globalThis[\"fetch\"]"
+          }
+        },
+        {
+          "key": "QQq3u7B3z1SyUs6ENpn75fbropoiy5Y1JuSjIXi6o0-A",
+          "type": "networkAccess",
+          "severity": "middle",
+          "category": "supplyChainRisk",
+          "action": "ignore",
+          "props": {
+            "module": "globalThis[\"fetch\"]"
+          }
+        },
+        {
+          "key": "QeVBDiUMk0GCk6rsvMEVWrz-fCeVLAdjzhKD2UCGt3BY",
+          "type": "newAuthor",
+          "severity": "low",
+          "category": "supplyChainRisk",
+          "action": "ignore",
+          "props": {
+            "newAuthor": "dielduarte",
+            "prevAuthor": "gabrielmfern"
+          }
+        },
+        {
+          "key": "QIaqcNPt5BVc3SMC3M8wFjs_WTkxHM2s6Z-socXBpCo0",
+          "type": "unstableOwnership",
+          "severity": "high",
+          "category": "supplyChainRisk",
+          "action": "monitor",
+          "props": {
+            "author": "dielduarte"
+          }
+        },
+        {
+          "key": "QMBehMaO-yM-0CqTE_DXlYC19T2gM12xeqfr27TWLgl8",
+          "type": "urlStrings",
+          "severity": "low",
+          "category": "supplyChainRisk",
+          "action": "ignore",
+          "props": {
+            "urls": [
+              "https://resend.com/docs/api-reference/broadcasts/create#body-parameters",
+              "https://resend.com/docs/api-reference/broadcasts/send#body-parameters",
+              "https://resend.com/docs/api-reference/contacts/delete-contact#body-parameters",
+              "https://resend.com/docs/dashboard/segments/migrating-from-audiences-to-segments",
+              "https://api.resend.com"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "type": "npm",
+      "name": "esbuild",
+      "version": "0.28.0",
+      "alerts": [
+        {
+          "key": "Qrcail9TSudfb-BLtxWhv0a7Baf0dZHiAF8mYVa-sqY4",
+          "type": "dynamicRequire",
+          "severity": "low",
+          "category": "supplyChainRisk",
+          "action": "ignore",
+          "props": null
+        },
+        {
+          "key": "QF-9qUA4q4S4p_rifGIae3uflIRvjwqi72rF7D1AhMlY",
+          "type": "envVars",
+          "severity": "low",
+          "category": "supplyChainRisk",
+          "action": "ignore",
+          "props": {
+            "envVars": "ESBUILD_BINARY_PATH"
+          }
+        },
+        {
+          "key": "QF-9qUA4q4S4p_rifGIae3uflIRvjwqi72rF7D1AhMlY",
+          "type": "envVars",
+          "severity": "low",
+          "category": "supplyChainRisk",
+          "action": "ignore",
+          "props": {
+            "envVars": ""
+          }
+        },
+        {
+          "key": "QF-9qUA4q4S4p_rifGIae3uflIRvjwqi72rF7D1AhMlY",
+          "type": "envVars",
+          "severity": "low",
+          "category": "supplyChainRisk",
+          "action": "ignore",
+          "props": {
+            "envVars": ""
+          }
+        },
+        {
+          "key": "QF-9qUA4q4S4p_rifGIae3uflIRvjwqi72rF7D1AhMlY",
+          "type": "envVars",
+          "severity": "low",
+          "category": "supplyChainRisk",
+          "action": "ignore",
+          "props": {
+            "envVars": "ESBUILD_BINARY_PATH"
+          }
+        },
+        {
+          "key": "QF-9qUA4q4S4p_rifGIae3uflIRvjwqi72rF7D1AhMlY",
+          "type": "envVars",
+          "severity": "low",
+          "category": "supplyChainRisk",
+          "action": "ignore",
+          "props": {
+            "envVars": "ESBUILD_WORKER_THREADS"
+          }
+        },
+        {
+          "key": "QF-9qUA4q4S4p_rifGIae3uflIRvjwqi72rF7D1AhMlY",
+          "type": "envVars",
+          "severity": "low",
+          "category": "supplyChainRisk",
+          "action": "ignore",
+          "props": {
+            "envVars": "ESBUILD_MAX_BUFFER"
+          }
+        },
+        {
+          "key": "Q4Zf-JPzmYgifaLT9MoChHHNRmsae7KSk7qbqa8-I1_g",
+          "type": "filesystemAccess",
+          "severity": "low",
+          "category": "supplyChainRisk",
+          "action": "ignore",
+          "props": {
+            "module": "fs"
+          }
+        },
+        {
+          "key": "Q4Zf-JPzmYgifaLT9MoChHHNRmsae7KSk7qbqa8-I1_g",
+          "type": "filesystemAccess",
+          "severity": "low",
+          "category": "supplyChainRisk",
+          "action": "ignore",
+          "props": {
+            "module": "fs"
+          }
+        },
+        {
+          "key": "Q4Zf-JPzmYgifaLT9MoChHHNRmsae7KSk7qbqa8-I1_g",
+          "type": "filesystemAccess",
+          "severity": "low",
+          "category": "supplyChainRisk",
+          "action": "ignore",
+          "props": {
+            "module": "fs"
+          }
+        },
+        {
+          "key": "Q4Zf-JPzmYgifaLT9MoChHHNRmsae7KSk7qbqa8-I1_g",
+          "type": "filesystemAccess",
+          "severity": "low",
+          "category": "supplyChainRisk",
+          "action": "ignore",
+          "props": {
+            "module": "fs"
+          }
+        },
+        {
+          "key": "QdHIQksqo1rjhZtneQAmmoGEeu_yxMr7sPFD8A7uJVPc",
+          "type": "gptAnomaly",
+          "severity": "low",
+          "category": "supplyChainRisk",
+          "action": "ignore",
+          "props": {
+            "risk": "medium",
+            "notes": "This package runs a local install.js during postinstall, which is typical for esbuild to download/verify platform binaries. The presence of binary hash fingerprints is a positive signal (integrity checks). Still, executing a postinstall script is an elevated action: you should inspect install.js before trusting the package in high-security environments to ensure it only downloads the declared binaries, verifies hashes, and does not perform unexpected actions (exfiltration, arbitrary command execution, persistence, or telemetry). Overall this looks like a standard esbuild installer rather than blatant malware, but it carries a moderate security risk until install.js is reviewed or run in a controlled environment.",
+            "severity": 0.6,
+            "confidence": 1,
+            "detectedAt": "2026-04-02 23:14:00 UTC"
+          }
+        },
+        {
+          "key": "QBIzHC_QUrkK6uxhD9pzoPz3zQVqLj2FWb1q1z4IGKbk",
+          "type": "installScripts",
+          "severity": "middle",
+          "category": "supplyChainRisk",
+          "action": "ignore",
+          "props": {
+            "script": "postinstall",
+            "source": "node install.js"
+          }
+        },
+        {
+          "key": "QE4y6u64MskxEsGbDGgkGGFe-UVIsrPUkzdQrNypfWvA",
+          "type": "networkAccess",
+          "severity": "middle",
+          "category": "supplyChainRisk",
+          "action": "ignore",
+          "props": {
+            "module": "https"
+          }
+        },
+        {
+          "key": "QE4y6u64MskxEsGbDGgkGGFe-UVIsrPUkzdQrNypfWvA",
+          "type": "networkAccess",
+          "severity": "middle",
+          "category": "supplyChainRisk",
+          "action": "ignore",
+          "props": {
+            "module": "globalThis[\"fetch\"]"
+          }
+        },
+        {
+          "key": "QE4y6u64MskxEsGbDGgkGGFe-UVIsrPUkzdQrNypfWvA",
+          "type": "networkAccess",
+          "severity": "middle",
+          "category": "supplyChainRisk",
+          "action": "ignore",
+          "props": {
+            "module": "globalThis[\"fetch\"]"
+          }
+        },
+        {
+          "key": "QE4y6u64MskxEsGbDGgkGGFe-UVIsrPUkzdQrNypfWvA",
+          "type": "networkAccess",
+          "severity": "middle",
+          "category": "supplyChainRisk",
+          "action": "ignore",
+          "props": {
+            "module": "globalThis[\"fetch\"]"
+          }
+        },
+        {
+          "key": "QV-1EVOAjQ77zcngfzgRy-_8f_9SvYEAS4FzBihwsi9c",
+          "type": "shellAccess",
+          "severity": "middle",
+          "category": "supplyChainRisk",
+          "action": "ignore",
+          "props": {
+            "module": "child_process"
+          }
+        },
+        {
+          "key": "QV-1EVOAjQ77zcngfzgRy-_8f_9SvYEAS4FzBihwsi9c",
+          "type": "shellAccess",
+          "severity": "middle",
+          "category": "supplyChainRisk",
+          "action": "ignore",
+          "props": {
+            "module": "child_process"
+          }
+        },
+        {
+          "key": "QAK2QBMQtFO_wc4_kt0jHQqC9CnixcOGlqEQdARjTzHs",
+          "type": "urlStrings",
+          "severity": "low",
+          "category": "supplyChainRisk",
+          "action": "ignore",
+          "props": {
+            "urls": [
+              "https://registry.npmjs.org/",
+              "https://yarnpkg.com/configuration/yarnrc/#supportedArchitectures",
+              "https://nodejs.org/en/download/."
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "type": "npm",
+      "name": "obug",
+      "version": "2.1.1",
+      "alerts": [
+        {
+          "key": "QMktuzK7Pu8kL_OxhluCloMyA7otQ9ej7vpmr4uu1z_c",
+          "type": "envVars",
+          "severity": "low",
+          "category": "supplyChainRisk",
+          "action": "ignore",
+          "props": {
+            "envVars": ""
+          }
+        },
+        {
+          "key": "QMktuzK7Pu8kL_OxhluCloMyA7otQ9ej7vpmr4uu1z_c",
+          "type": "envVars",
+          "severity": "low",
+          "category": "supplyChainRisk",
+          "action": "ignore",
+          "props": {
+            "envVars": ""
+          }
+        },
+        {
+          "key": "QMktuzK7Pu8kL_OxhluCloMyA7otQ9ej7vpmr4uu1z_c",
+          "type": "envVars",
+          "severity": "low",
+          "category": "supplyChainRisk",
+          "action": "ignore",
+          "props": {
+            "envVars": "DEBUG"
+          }
+        },
+        {
+          "key": "QMktuzK7Pu8kL_OxhluCloMyA7otQ9ej7vpmr4uu1z_c",
+          "type": "envVars",
+          "severity": "low",
+          "category": "supplyChainRisk",
+          "action": "ignore",
+          "props": {
+            "envVars": "DEBUG"
+          }
+        },
+        {
+          "key": "QMktuzK7Pu8kL_OxhluCloMyA7otQ9ej7vpmr4uu1z_c",
+          "type": "envVars",
+          "severity": "low",
+          "category": "supplyChainRisk",
+          "action": "ignore",
+          "props": {
+            "envVars": "DEBUG"
+          }
+        },
+        {
+          "key": "QEAMWnj41kE2hvOStDSz9ovJbdXgeDiYEjCcMO3i7gUg",
+          "type": "gptDidYouMean",
+          "severity": "middle",
+          "category": "supplyChainRisk",
+          "action": "ignore",
+          "props": {
+            "detectedAt": "2026-01-17 01:29:41 UTC",
+            "alternatePackage": "dbug"
+          }
+        }
+      ]
+    },
+    {
+      "type": "npm",
+      "name": "strip-ansi",
+      "version": "6.0.1",
+      "alerts": []
+    }
+  ]
+}

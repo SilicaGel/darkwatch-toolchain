@@ -1,0 +1,57 @@
+name: Supply-chain scan
+
+# #723 — scan the dependency tree with the Socket CLI on every PR that changes
+# deps, comment the net-new alerts, and HARD-GATE on net-new blocking findings
+# (Socket policy action error/block, or a malware-floor type). [allow-deps] in
+# the PR title overrides a reviewed false positive; the bot fail-opens on any
+# infrastructure problem (missing secret, Socket/Forgejo failure).
+#
+# ONE-TIME SETUP: a `SOCKET_SECURITY_API_KEY` Actions secret (Socket token with
+# full-scans:create + full-scans:list), and a Socket org Security Policy with
+# the malice tier (malware / typosquat / AI-malware) set to Block. Without the
+# secret the job skips (exit 0); without the policy nothing reaches "error" so
+# the gate comments but doesn't block (the malware-type floor still blocks).
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "**/package.json"
+      - "**/package-lock.json"
+
+jobs:
+  supply-chain:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout head
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          path: head
+
+      - name: Checkout base (main)
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: base
+
+      - name: Use Node 22
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+
+      # The bot has no npm dependencies (node built-ins + a pinned npx Socket
+      # CLI), so there's no `npm ci` step. It scans both trees, comments, gates.
+      - name: Scan + gate
+        working-directory: head
+        env:
+          SOCKET_SECURITY_API_KEY: ${{ secrets.SOCKET_SECURITY_API_KEY }}
+          SOCKET_ORG: darkwatch
+          HEAD_DIR: ${{ github.workspace }}/head
+          BASE_DIR: ${{ github.workspace }}/base
+          FORGEJO_URL: ${{ github.server_url }}
+          FORGEJO_TOKEN: ${{ github.token }}
+          REPO_OWNER: ${{ github.repository_owner }}
+          REPO_NAME: ${{ github.event.repository.name }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: node scripts/supply-chain-comment/run-and-post.mjs
