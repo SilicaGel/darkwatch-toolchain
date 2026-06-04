@@ -118,7 +118,9 @@ function runSocket(args, cwd) {
 
 // Scan one tree: create a scan (-> id), then view it (-> alerts).
 // Returns normalized alerts, [] when the tree has no manifests, null on error.
-function scanTree(label, dir) {
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+async function scanTree(label, dir) {
   const files = MANIFESTS.filter((f) => existsSync(join(dir, f)));
   if (files.length === 0) {
     console.error(`[supply-chain-bot] ${label}: no manifests found`);
@@ -132,13 +134,17 @@ function scanTree(label, dir) {
     console.error(`[supply-chain-bot] ${lastSocketError}`);
     return null;
   }
-  const viewed = runSocket(["scan", "view", "--org", ORG, "--json", id], dir);
-  if (viewed && viewed.ok === false) lastSocketError = `scan view: ${viewed.message ?? "ok:false"}`;
-  if (!viewed?.ok) {
-    if (!lastSocketError) lastSocketError = `${label}: scan view failed`;
+  // The scan is processed server-side asynchronously, so `scan view` can fail
+  // until it's ready. Retry with backoff (5s, 10s, 15s, 20s, 25s ≈ 75s total).
+  let viewed = null;
+  for (let attempt = 1; attempt <= 6; attempt++) {
+    viewed = runSocket(["scan", "view", "--org", ORG, "--json", id], dir);
+    if (viewed?.ok) break;
+    lastSocketError = `${label}: scan view not ready (try ${attempt}/6): ${viewed?.message ?? "ok:false"}`;
     console.error(`[supply-chain-bot] ${lastSocketError}`);
-    return null;
+    if (attempt < 6) await sleep(attempt * 5000);
   }
+  if (!viewed?.ok) return null;
   return parseSocketAlerts(viewed);
 }
 
@@ -204,8 +210,7 @@ async function main() {
   if (!process.env.SOCKET_SECURITY_API_KEY) await skip("`SOCKET_SECURITY_API_KEY` not available to the job");
   if (!BASE_DIR) await skip("BASE_DIR not set");
 
-  const head = scanTree("head", HEAD_DIR);
-  const base = scanTree("base", BASE_DIR);
+  const [head, base] = await Promise.all([scanTree("head", HEAD_DIR), scanTree("base", BASE_DIR)]);
   if (head === null || base === null) await skip(`a Socket scan failed — \`${lastSocketError || "unknown"}\``);
 
   const netNew = diffAlerts(head, base);
