@@ -31,7 +31,11 @@ const BASE_DIR = process.env.BASE_DIR;
 // slowing every other CI job's `npm ci`. SOCKET_BIN overrides with a local
 // binary path for testing. SOCKET_CLI_VERSION pins the release for repeatable
 // runs (bump deliberately; a Renovate regex manager can track it later).
-const SOCKET_CLI_VERSION = process.env.SOCKET_CLI_VERSION || "1.1.112";
+// NOTE: 1.1.102 is the latest published `@socketsecurity/cli` and the version
+// the parse-socket fixture was captured from. The `1.1.11x` numbers belong to
+// the renamed `socket` package (a different name) — pinning those 404s. A
+// migration to the `socket` package is a possible follow-up.
+const SOCKET_CLI_VERSION = process.env.SOCKET_CLI_VERSION || "1.1.102";
 const SOCKET_CMD = process.env.SOCKET_BIN
   ? [process.env.SOCKET_BIN]
   : ["npx", "--yes", `@socketsecurity/cli@${SOCKET_CLI_VERSION}`];
