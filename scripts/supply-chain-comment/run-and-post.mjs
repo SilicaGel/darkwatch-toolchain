@@ -17,7 +17,7 @@
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { parseSocketAlerts } from "./parse-socket.mjs";
+import { parseDiffAdded } from "./parse-socket.mjs";
 import { diffAlerts } from "./diff-alerts.mjs";
 import { shouldFailGate, isBlocking } from "./gate.mjs";
 import { buildComment, MARKER, MARKER_RE, CURRENT_VERSION } from "./build-comment.mjs";
@@ -116,38 +116,39 @@ function runSocket(args, cwd) {
   }
 }
 
-// Scan one tree: create a scan (-> id), then view it (-> alerts).
-// Returns normalized alerts, [] when the tree has no manifests, null on error.
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-async function scanTree(label, dir) {
+// Create a full scan for one tree; returns its scan id (null on error / no
+// manifests). `scan create` returns the id immediately (processing is async).
+function createScan(label, dir) {
   const files = MANIFESTS.filter((f) => existsSync(join(dir, f)));
   if (files.length === 0) {
-    console.error(`[supply-chain-bot] ${label}: no manifests found`);
-    return [];
-  }
-  const created = runSocket(["scan", "create", "--org", ORG, "--json", ...files], dir);
-  if (created && created.ok === false) lastSocketError = `scan create: ${created.message ?? "ok:false"}`;
-  const id = created?.ok ? created?.data?.id : null;
-  if (!id) {
-    if (!lastSocketError) lastSocketError = `${label}: scan create returned no id`;
+    lastSocketError = `${label}: no manifests found at ${dir}`;
     console.error(`[supply-chain-bot] ${lastSocketError}`);
     return null;
   }
-  // The scan is processed server-side asynchronously, so `scan view` can return
-  // ok:true with an EMPTY package list before it's finished — which would make
-  // the base diff subtract nothing (everything looks net-new). Retry until the
-  // package list is populated. Backoff 5/10/15/20/25s (~75s total).
-  let viewed = null;
+  const created = runSocket(["scan", "create", "--org", ORG, "--json", ...files], dir);
+  if (created && created.ok === false) lastSocketError = `${label} scan create: ${created.message ?? "ok:false"}`;
+  const id = created?.ok ? created?.data?.id : null;
+  if (!id && !lastSocketError) lastSocketError = `${label}: scan create returned no id`;
+  if (!id) console.error(`[supply-chain-bot] ${lastSocketError}`);
+  return id;
+}
+
+// Ask Socket to diff two scans SERVER-SIDE (older id first, per the CLI). This
+// replaces the fragile client-side two-scan alert-diff — Socket owns the
+// comparison, so scan-completeness / determinism / stale-base issues go away.
+// Scans process asynchronously, so retry with backoff until the diff is ready.
+async function diffScans(baseId, headId) {
+  let diff = null;
   for (let attempt = 1; attempt <= 6; attempt++) {
-    viewed = runSocket(["scan", "view", "--org", ORG, "--json", id], dir);
-    if (viewed?.ok && Array.isArray(viewed.data) && viewed.data.length > 0) break;
-    lastSocketError = `${label}: scan view not ready (try ${attempt}/6): ${viewed?.message ?? `${viewed?.data?.length ?? "no"} packages`}`;
+    diff = runSocket(["scan", "diff", "--org", ORG, "--json", baseId, headId]);
+    if (diff && diff.ok !== false) return diff;
+    lastSocketError = `scan diff not ready (try ${attempt}/6): ${diff?.message ?? lastSocketError ?? "no output"}`;
     console.error(`[supply-chain-bot] ${lastSocketError}`);
     if (attempt < 6) await sleep(attempt * 5000);
   }
-  if (!viewed?.ok) return null;
-  return parseSocketAlerts(viewed);
+  return null;
 }
 
 async function findBotComments(base, headers, prNumber) {
@@ -212,15 +213,27 @@ async function main() {
   if (!process.env.SOCKET_SECURITY_API_KEY) await skip("`SOCKET_SECURITY_API_KEY` not available to the job");
   if (!BASE_DIR) await skip("BASE_DIR not set");
 
-  const [head, base] = await Promise.all([scanTree("head", HEAD_DIR), scanTree("base", BASE_DIR)]);
-  if (head === null || base === null) await skip(`a Socket scan failed — \`${lastSocketError || "unknown"}\``);
+  // Create a scan for each tree, then diff them SERVER-SIDE (base = older).
+  const headId = createScan("head", HEAD_DIR);
+  const baseId = createScan("base", BASE_DIR);
+  if (!headId || !baseId) await skip(`a Socket scan failed — \`${lastSocketError || "unknown"}\``);
 
-  const netNew = diffAlerts(head, base);
+  const diff = await diffScans(baseId, headId);
+  if (!diff) await skip(`Socket scan diff failed — \`${lastSocketError || "unknown"}\``);
+
+  const parsed = parseDiffAdded(diff);
+  if (!parsed.found) {
+    // Couldn't locate the "added" list — surface the raw shape so the first
+    // real run reveals it (CI logs aren't fetchable on this Forgejo, #1119).
+    await skip(`couldn't parse scan-diff output — top-level keys: \`${parsed.shapeKeys.join(", ") || "none"}\` (needs a parser tweak)`);
+  }
+
+  const netNew = diffAlerts(parsed.alerts, []); // de-dupe by pkg@version:type
   const gate = shouldFailGate({ netNew, prTitle: process.env.PR_TITLE });
   const blocking = netNew.filter(isBlocking);
   const informational = netNew.filter((a) => !isBlocking(a));
-  const counts = { head: head.length, base: base.length, netNew: netNew.length };
-  console.error(`[supply-chain-bot] head=${counts.head} base=${counts.base} net-new=${counts.netNew} (blocking=${blocking.length})`);
+  const counts = { added: parsed.alerts.length, netNew: netNew.length };
+  console.error(`[supply-chain-bot] scan-diff added=${counts.added} net-new=${counts.netNew} (blocking=${blocking.length})`);
   const body = buildComment({ blocking, informational, blocked: gate.fail, counts });
   await upsertComment(apiBaseUrl, headers, env.PR_NUMBER, body);
 

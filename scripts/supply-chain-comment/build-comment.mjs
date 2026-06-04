@@ -16,7 +16,7 @@ function table(alerts) {
 
 function countsText(counts) {
   return counts
-    ? `_Scanned ${counts.head} head / ${counts.base} base alerts → ${counts.netNew} net-new._`
+    ? `_Socket scan-diff: ${counts.added} added alert${counts.added === 1 ? "" : "s"} → ${counts.netNew} net-new (de-duped)._`
     : null;
 }
 

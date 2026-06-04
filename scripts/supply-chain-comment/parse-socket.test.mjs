@@ -1,10 +1,13 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { parseSocketAlerts } from "./parse-socket.mjs";
+import { parseSocketAlerts, parseDiffAdded } from "./parse-socket.mjs";
 
 const raw = JSON.parse(
   readFileSync(new URL("./__fixtures__/socket-scan-sample.json", import.meta.url)),
+);
+const diffRaw = JSON.parse(
+  readFileSync(new URL("./__fixtures__/socket-scan-diff-sample.json", import.meta.url)),
 );
 
 describe("parseSocketAlerts", () => {
@@ -31,5 +34,22 @@ describe("parseSocketAlerts", () => {
     assert.deepEqual(parseSocketAlerts({}), []);
     assert.deepEqual(parseSocketAlerts(null), []);
     assert.deepEqual(parseSocketAlerts({ data: [{ name: "x", version: "1", alerts: [] }] }), []);
+  });
+});
+
+describe("parseDiffAdded", () => {
+  it("flattens data.artifacts.added[] packages into normalized alerts", () => {
+    const { alerts, found } = parseDiffAdded(diffRaw);
+    assert.equal(found, true);
+    assert.ok(alerts.length > 0);
+    for (const al of alerts) {
+      for (const k of ["pkg", "version", "type", "severity", "action"]) assert.ok(al[k] !== undefined, `missing ${k}`);
+    }
+  });
+  it("found=false + surfaces top-level keys when the added list isn't located", () => {
+    const r = parseDiffAdded({ ok: true, data: { somethingElse: 1 } });
+    assert.equal(r.found, false);
+    assert.deepEqual(r.alerts, []);
+    assert.deepEqual(r.shapeKeys, ["ok", "data"]);
   });
 });

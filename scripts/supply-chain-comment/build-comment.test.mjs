@@ -13,10 +13,10 @@ const a = (pkg, type, severity = "high") => ({
 
 describe("buildComment", () => {
   it("renders the clean state with the marker + counts when no net-new alerts", () => {
-    const body = buildComment({ blocking: [], informational: [], blocked: false, counts: { head: 10, base: 10, netNew: 0 } });
+    const body = buildComment({ blocking: [], informational: [], blocked: false, counts: { added: 0, netNew: 0 } });
     assert.match(body, new RegExp(MARKER));
     assert.match(body, /No new supply-chain alerts/i);
-    assert.match(body, /10 head \/ 10 base/);
+    assert.match(body, /scan-diff: 0 added/);
   });
   it("lists blocking findings in a visible table and flags the PR blocked", () => {
     const body = buildComment({ blocking: [a("evil", "malware", "critical")], informational: [], blocked: true });
@@ -31,7 +31,7 @@ describe("buildComment", () => {
       blocking: [],
       informational: [a("x", "envVars", "low"), a("y", "urlStrings", "low")],
       blocked: false,
-      counts: { head: 5, base: 3, netNew: 2 },
+      counts: { added: 2, netNew: 2 },
     });
     assert.match(body, /Informational findings — none block/i);
     assert.match(body, /<details>/);

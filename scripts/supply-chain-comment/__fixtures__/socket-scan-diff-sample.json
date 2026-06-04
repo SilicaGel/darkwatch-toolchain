@@ -1,0 +1,53 @@
+{
+  "ok": true,
+  "data": {
+    "artifacts": {
+      "added": [
+        {
+          "type": "npm",
+          "name": "fast-levenshtein",
+          "version": "2.0.6",
+          "alerts": [
+            {
+              "key": "QQtPp1Wf2ReRYpC1sk2No2i_SmnGbUmTCoOCWmJxYCmM",
+              "type": "unmaintained",
+              "severity": "low",
+              "category": "maintenance",
+              "action": "ignore"
+            }
+          ]
+        },
+        {
+          "type": "npm",
+          "name": "extend",
+          "version": "3.0.2",
+          "alerts": [
+            {
+              "key": "Qoh4YdQlY87O5o1KWbvOIcVQBuUyl14umAg8aYeMfcAs",
+              "type": "gptAnomaly",
+              "severity": "low",
+              "category": "supplyChainRisk",
+              "action": "ignore"
+            },
+            {
+              "key": "Qp53viteyQS_WmRMmvIvq9cOS3GW25ckaHjDrTfpGSG4",
+              "type": "unmaintained",
+              "severity": "low",
+              "category": "maintenance",
+              "action": "ignore"
+            }
+          ]
+        },
+        {
+          "type": "npm",
+          "name": "shebang-regex",
+          "version": "3.0.0",
+          "alerts": []
+        }
+      ],
+      "removed": [],
+      "replaced": [],
+      "unchanged": []
+    }
+  }
+}
