@@ -26,4 +26,8 @@ describe("diffAlerts", () => {
     const base = [a("x", "1.0.0", "malware")];
     assert.deepEqual(diffAlerts(base, base), []);
   });
+  it("de-dupes repeated same-key alerts (same pkg@version:type)", () => {
+    const head = [a("react-is", "17.0.2", "envVars"), a("react-is", "17.0.2", "envVars")];
+    assert.deepEqual(diffAlerts(head, []).map(alertKey), ["react-is@17.0.2:envVars"]);
+  });
 });

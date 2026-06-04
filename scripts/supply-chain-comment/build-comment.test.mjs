@@ -12,22 +12,30 @@ const a = (pkg, type, severity = "high") => ({
 });
 
 describe("buildComment", () => {
-  it("renders the clean state with the marker when no net-new alerts", () => {
-    const body = buildComment({ netNew: [], blocked: false });
+  it("renders the clean state with the marker + counts when no net-new alerts", () => {
+    const body = buildComment({ blocking: [], informational: [], blocked: false, counts: { head: 10, base: 10, netNew: 0 } });
     assert.match(body, new RegExp(MARKER));
     assert.match(body, /No new supply-chain alerts/i);
+    assert.match(body, /10 head \/ 10 base/);
   });
-  it("renders a table row per net-new alert and flags a blocked PR", () => {
-    const body = buildComment({ netNew: [a("evil", "malware", "critical")], blocked: true });
+  it("lists blocking findings in a visible table and flags the PR blocked", () => {
+    const body = buildComment({ blocking: [a("evil", "malware", "critical")], informational: [], blocked: true });
+    assert.match(body, /Blocking/);
     assert.match(body, /evil/);
-    assert.match(body, /malware/);
     assert.match(body, /critical/);
     assert.match(body, /blocked/i);
-    assert.match(body, /\[allow-deps\]/); // documents the escape hatch
+    assert.match(body, /\[allow-deps\]/);
   });
-  it("marks informational findings as non-blocking", () => {
-    const body = buildComment({ netNew: [a("newish", "newAuthor")], blocked: false });
-    assert.match(body, /Informational/i);
+  it("collapses informational findings into a details block with a count", () => {
+    const body = buildComment({
+      blocking: [],
+      informational: [a("x", "envVars", "low"), a("y", "urlStrings", "low")],
+      blocked: false,
+      counts: { head: 5, base: 3, netNew: 2 },
+    });
+    assert.match(body, /Informational findings — none block/i);
+    assert.match(body, /<details>/);
+    assert.match(body, /2 informational findings/);
     assert.doesNotMatch(body, /blocked/i);
   });
 });

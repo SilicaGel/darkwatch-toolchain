@@ -1,30 +1,56 @@
-// Pure: (net-new alerts + gate outcome) -> markdown PR comment body.
+// Pure: (net-new alerts split by blocking/informational + counts) -> markdown.
 // Versioned marker so re-runs update in place (see dead-code-comment).
 
-export const MARKER = "<!-- supply-chain-bot:v1 -->";
+export const MARKER = "<!-- supply-chain-bot:v2 -->";
 export const MARKER_RE = /<!-- supply-chain-bot:v(\d+) -->/;
-export const CURRENT_VERSION = 1;
+export const CURRENT_VERSION = 2;
 
-export function buildComment({ netNew, blocked }) {
-  if (!netNew || netNew.length === 0) {
-    return `${MARKER}\n\n## 🛡️ Supply-chain: clean\n\n✅ No new supply-chain alerts introduced by this PR.\n`;
+function table(alerts) {
+  const rows = ["| Package | Alert | Severity |", "|---|---|---:|"];
+  for (const al of alerts) {
+    const name = al.url ? `[${al.pkg}@${al.version}](${al.url})` : `${al.pkg}@${al.version}`;
+    rows.push(`| ${name} | ${al.title} (\`${al.type}\`) | ${al.severity} |`);
+  }
+  return rows.join("\n");
+}
+
+function countsText(counts) {
+  return counts
+    ? `_Scanned ${counts.head} head / ${counts.base} base alerts → ${counts.netNew} net-new._`
+    : null;
+}
+
+export function buildComment({ blocking = [], informational = [], blocked, counts }) {
+  const ct = countsText(counts);
+  if (blocking.length + informational.length === 0) {
+    return (
+      `${MARKER}\n\n## 🛡️ Supply-chain: clean\n\n` +
+      `✅ No new supply-chain alerts introduced by this PR.` +
+      (ct ? `\n\n${ct}` : "") +
+      `\n`
+    );
   }
   const parts = [MARKER, "", "## 🛡️ Supply-chain alerts (net-new in this PR)", ""];
-  if (blocked) {
+  parts.push(
+    blocked
+      ? "> ❌ **This PR is blocked** by the finding(s) below. Fix the dependency, or — for a reviewed false positive — add `[allow-deps]` to the PR title to override."
+      : "> ℹ️ Informational findings — none block the merge.",
+  );
+  if (ct) parts.push("", ct);
+  if (blocking.length) {
+    parts.push("", "### ❌ Blocking", "", table(blocking));
+  }
+  if (informational.length) {
+    const n = informational.length;
     parts.push(
-      "> ❌ **This PR is blocked** by one or more findings below. Fix the dependency, or — for a reviewed false positive — add `[allow-deps]` to the PR title to override.",
+      "",
+      `<details><summary>ℹ️ ${n} informational finding${n === 1 ? "" : "s"} (none block)</summary>`,
+      "",
+      table(informational),
+      "",
+      "</details>",
     );
-  } else {
-    parts.push("> ℹ️ Informational findings — none block the merge.");
   }
-  parts.push("");
-  parts.push("| Package | Alert | Severity |");
-  parts.push("|---|---|---:|");
-  for (const al of netNew) {
-    const name = al.url ? `[${al.pkg}@${al.version}](${al.url})` : `${al.pkg}@${al.version}`;
-    parts.push(`| ${name} | ${al.title} (\`${al.type}\`) | ${al.severity} |`);
-  }
-  parts.push("");
-  parts.push("_Scanned diff-forward vs `main`; the existing tree is trusted (see #723 baseline)._");
+  parts.push("", "_Scanned diff-forward vs `main`; the existing tree is trusted (see #723 baseline)._");
   return parts.join("\n");
 }

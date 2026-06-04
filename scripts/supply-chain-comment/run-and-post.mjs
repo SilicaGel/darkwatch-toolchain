@@ -19,7 +19,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { parseSocketAlerts } from "./parse-socket.mjs";
 import { diffAlerts } from "./diff-alerts.mjs";
-import { shouldFailGate } from "./gate.mjs";
+import { shouldFailGate, isBlocking } from "./gate.mjs";
 import { buildComment, MARKER, MARKER_RE, CURRENT_VERSION } from "./build-comment.mjs";
 
 const ORG = process.env.SOCKET_ORG || "darkwatch";
@@ -134,13 +134,15 @@ async function scanTree(label, dir) {
     console.error(`[supply-chain-bot] ${lastSocketError}`);
     return null;
   }
-  // The scan is processed server-side asynchronously, so `scan view` can fail
-  // until it's ready. Retry with backoff (5s, 10s, 15s, 20s, 25s ≈ 75s total).
+  // The scan is processed server-side asynchronously, so `scan view` can return
+  // ok:true with an EMPTY package list before it's finished — which would make
+  // the base diff subtract nothing (everything looks net-new). Retry until the
+  // package list is populated. Backoff 5/10/15/20/25s (~75s total).
   let viewed = null;
   for (let attempt = 1; attempt <= 6; attempt++) {
     viewed = runSocket(["scan", "view", "--org", ORG, "--json", id], dir);
-    if (viewed?.ok) break;
-    lastSocketError = `${label}: scan view not ready (try ${attempt}/6): ${viewed?.message ?? "ok:false"}`;
+    if (viewed?.ok && Array.isArray(viewed.data) && viewed.data.length > 0) break;
+    lastSocketError = `${label}: scan view not ready (try ${attempt}/6): ${viewed?.message ?? `${viewed?.data?.length ?? "no"} packages`}`;
     console.error(`[supply-chain-bot] ${lastSocketError}`);
     if (attempt < 6) await sleep(attempt * 5000);
   }
@@ -215,7 +217,11 @@ async function main() {
 
   const netNew = diffAlerts(head, base);
   const gate = shouldFailGate({ netNew, prTitle: process.env.PR_TITLE });
-  const body = buildComment({ netNew, blocked: gate.fail });
+  const blocking = netNew.filter(isBlocking);
+  const informational = netNew.filter((a) => !isBlocking(a));
+  const counts = { head: head.length, base: base.length, netNew: netNew.length };
+  console.error(`[supply-chain-bot] head=${counts.head} base=${counts.base} net-new=${counts.netNew} (blocking=${blocking.length})`);
+  const body = buildComment({ blocking, informational, blocked: gate.fail, counts });
   await upsertComment(apiBaseUrl, headers, env.PR_NUMBER, body);
 
   if (gate.fail) {
