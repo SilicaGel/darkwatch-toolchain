@@ -15,9 +15,12 @@ function table(alerts) {
 }
 
 function countsText(counts) {
-  return counts
-    ? `_Socket scan-diff: ${counts.added} added alert${counts.added === 1 ? "" : "s"} → ${counts.netNew} net-new (de-duped)._`
-    : null;
+  if (!counts) return null;
+  let s = `_Socket scan-diff: ${counts.added} added alert${counts.added === 1 ? "" : "s"} → ${counts.netNew} net-new (de-duped).`;
+  if (counts.headManifests != null) {
+    s += ` Manifests scanned — head: ${counts.headManifests}, base: ${counts.baseManifests}.`;
+  }
+  return `${s}_`;
 }
 
 export function buildComment({ blocking = [], informational = [], blocked, counts }) {

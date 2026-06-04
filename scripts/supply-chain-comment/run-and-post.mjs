@@ -118,21 +118,26 @@ function runSocket(args, cwd) {
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-// Create a full scan for one tree; returns its scan id (null on error / no
-// manifests). `scan create` returns the id immediately (processing is async).
+// Create a full scan for one tree; returns { id, manifests } (id null on error).
+// We scan the DIRECTORY ("." with cwd=dir) so Socket auto-discovers every
+// workspace manifest — passing explicit relative paths was dropping client/*
+// from the base scan (a cwd/path-resolution quirk). A CI checkout has no
+// node_modules, so a directory scan is clean. The on-disk manifest count is
+// surfaced in the comment so a coverage gap can't hide again.
 function createScan(label, dir) {
-  const files = MANIFESTS.filter((f) => existsSync(join(dir, f)));
-  if (files.length === 0) {
+  const manifests = MANIFESTS.filter((f) => existsSync(join(dir, f)));
+  console.error(`[supply-chain-bot] ${label} manifests on disk (${manifests.length}): ${manifests.join(", ") || "NONE"}`);
+  if (manifests.length === 0) {
     lastSocketError = `${label}: no manifests found at ${dir}`;
     console.error(`[supply-chain-bot] ${lastSocketError}`);
-    return null;
+    return { id: null, manifests: 0 };
   }
-  const created = runSocket(["scan", "create", "--org", ORG, "--json", ...files], dir);
+  const created = runSocket(["scan", "create", "--org", ORG, "--json", "."], dir);
   if (created && created.ok === false) lastSocketError = `${label} scan create: ${created.message ?? "ok:false"}`;
   const id = created?.ok ? created?.data?.id : null;
   if (!id && !lastSocketError) lastSocketError = `${label}: scan create returned no id`;
   if (!id) console.error(`[supply-chain-bot] ${lastSocketError}`);
-  return id;
+  return { id, manifests: manifests.length };
 }
 
 // Ask Socket to diff two scans SERVER-SIDE (older id first, per the CLI). This
@@ -214,11 +219,11 @@ async function main() {
   if (!BASE_DIR) await skip("BASE_DIR not set");
 
   // Create a scan for each tree, then diff them SERVER-SIDE (base = older).
-  const headId = createScan("head", HEAD_DIR);
-  const baseId = createScan("base", BASE_DIR);
-  if (!headId || !baseId) await skip(`a Socket scan failed — \`${lastSocketError || "unknown"}\``);
+  const head = createScan("head", HEAD_DIR);
+  const base = createScan("base", BASE_DIR);
+  if (!head.id || !base.id) await skip(`a Socket scan failed — \`${lastSocketError || "unknown"}\``);
 
-  const diff = await diffScans(baseId, headId);
+  const diff = await diffScans(base.id, head.id);
   if (!diff) await skip(`Socket scan diff failed — \`${lastSocketError || "unknown"}\``);
 
   const parsed = parseDiffAdded(diff);
@@ -232,8 +237,15 @@ async function main() {
   const gate = shouldFailGate({ netNew, prTitle: process.env.PR_TITLE });
   const blocking = netNew.filter(isBlocking);
   const informational = netNew.filter((a) => !isBlocking(a));
-  const counts = { added: parsed.alerts.length, netNew: netNew.length };
-  console.error(`[supply-chain-bot] scan-diff added=${counts.added} net-new=${counts.netNew} (blocking=${blocking.length})`);
+  const counts = {
+    added: parsed.alerts.length,
+    netNew: netNew.length,
+    headManifests: head.manifests,
+    baseManifests: base.manifests,
+  };
+  console.error(
+    `[supply-chain-bot] scan-diff added=${counts.added} net-new=${counts.netNew} (blocking=${blocking.length}) manifests head=${head.manifests} base=${base.manifests}`,
+  );
   const body = buildComment({ blocking, informational, blocked: gate.fail, counts });
   await upsertComment(apiBaseUrl, headers, env.PR_NUMBER, body);
 
