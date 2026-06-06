@@ -1,19 +1,30 @@
 name: Nightly Deploy
 
-# Orchestrates the full overnight gate: E2E → smoke walk → deploy.
-# All three jobs must pass; a failure in any blocks the deploy.
+# Orchestrates the full overnight gate: (e2e + e2e-full) → smoke walk → deploy.
+# The deploy gate must pass; a failure in any blocks the deploy.
+#
+# e2e-full runs the ENTIRE Playwright suite (#1141) — every spec, no allow-list.
+# It is a deploy GATE (deploy `needs` it): the nightly deploy must not ship if
+# any covered spec regresses. Specs with known rot are quarantined via
+# `test.fixme` (tracked in #1141) so a clean suite stays green; if a flaky spec
+# ever blocks the deploy, prefer adding retries/quarantine over dropping the gate.
 #
 # Logic lives in the called workflows — this file is intentionally just
-# an orchestrator. Add/remove specs in e2e.yml, not here.
+# an orchestrator. Add/remove curated specs in e2e.yml, not here.
 
 on:
   schedule:
-    - cron: '0 3 * * *'
+    - cron: "0 3 * * *"
   workflow_dispatch:
 
 jobs:
   e2e:
     uses: ./.forgejo/workflows/e2e.yml
+    secrets: inherit
+
+  # Whole suite (no allow-list). Runs in parallel with the curated e2e job.
+  e2e-full:
+    uses: ./.forgejo/workflows/e2e-full.yml
     secrets: inherit
 
   smoke-walk:
@@ -22,6 +33,6 @@ jobs:
     secrets: inherit
 
   deploy:
-    needs: [e2e, smoke-walk]
+    needs: [e2e, e2e-full, smoke-walk]
     uses: ./.forgejo/workflows/deploy.yml
     secrets: inherit

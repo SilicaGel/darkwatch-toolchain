@@ -1,0 +1,270 @@
+name: E2E Full Suite
+
+# Runs the ENTIRE Playwright e2e suite — every spec in tests/e2e, with NO
+# hard-coded allow-list (#1141). The per-PR pipelines (ci.yml, e2e.yml) run a
+# curated, fast subset; this job exists so that specs which aren't on those
+# lists — maps, spells, concurrency, mobile, presence — can't silently rot in
+# the dark. It runs nightly and on demand.
+#
+# DEPLOY GATE: nightly-deploy.yml's deploy job `needs` this, so a regression in
+# any covered spec blocks the nightly deploy. Known-broken specs are quarantined
+# with `test.fixme` (see #1141) so a clean suite stays green; if a flaky spec
+# blocks the deploy, prefer adding retries/quarantine over dropping the gate.
+#
+# Memory: the suite is sharded into 3 with a Vite restart between shards. A
+# single long-lived Vite preview accumulates heap across test contexts and gets
+# OOM-killed mid-suite in the capped CI container (same reason e2e.yml restarts
+# Vite between its batches).
+
+on:
+  workflow_call:
+  workflow_dispatch:
+  pull_request:
+    # Self-test on any PR that touches the full-suite harness or the specs it
+    # guards, so changes here are proven before merge without burdening every PR.
+    paths:
+      - ".forgejo/workflows/e2e-full.yml"
+      - "tests/e2e/**"
+      - "tests/helpers/**"
+      - "tests/playwright.config.ts"
+
+jobs:
+  e2e-full:
+    runs-on: ubuntu-latest
+    # #969 — prebuilt CI image (Node 22 + Chromium + Playwright deps baked).
+    container:
+      image: forge.example.com/aaron/darkwatch-ci-playwright:1.60.0
+    services:
+      mariadb:
+        image: mariadb:11
+        env:
+          MYSQL_ROOT_PASSWORD: ${{ secrets.CI_DB_ROOT_PASSWORD }}
+          MYSQL_DATABASE: ${{ secrets.CI_DB_NAME }}
+          MYSQL_USER: ${{ secrets.CI_DB_USER }}
+          MYSQL_PASSWORD: ${{ secrets.CI_DB_PASSWORD }}
+        options: >-
+          --health-cmd="healthcheck.sh --connect --innodb_initialized"
+          --health-interval=2s
+          --health-timeout=5s
+          --health-retries=30
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Cache npm downloads
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/.npm
+          key: npm-${{ runner.os }}-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: |
+            npm-${{ runner.os }}-
+
+      - name: Install server dependencies
+        run: cd server && npm ci --no-audit --no-fund
+
+      - name: Build server
+        run: cd server && npm run build
+
+      - name: Install client dependencies
+        run: cd client && npm ci --no-audit --no-fund
+
+      - name: Build client
+        run: cd client && npm run build
+
+      - name: Wait for MariaDB
+        run: |
+          for i in $(seq 1 30); do
+            (echo > /dev/tcp/mariadb/3306) 2>/dev/null && echo "MariaDB is ready" && break
+            echo "Waiting for MariaDB... ($i/30)"
+            sleep 2
+            [ "$i" -eq 30 ] && echo "MariaDB never became ready" && exit 1
+          done
+
+      - name: Apply migrations to CI DB
+        env:
+          DB_HOST: mariadb
+          DB_PORT: "3306"
+          DB_USER: ${{ secrets.CI_DB_USER }}
+          DB_PASSWORD: ${{ secrets.CI_DB_PASSWORD }}
+          DB_NAME: ${{ secrets.CI_DB_NAME }}
+        run: cd server && npm run db:migrate
+
+      - name: Seed core + shadowdark content (e2e tests assume seeded DB)
+        env:
+          DB_HOST: mariadb
+          DB_PORT: "3306"
+          DB_USER: ${{ secrets.CI_DB_USER }}
+          DB_PASSWORD: ${{ secrets.CI_DB_PASSWORD }}
+          DB_NAME: ${{ secrets.CI_DB_NAME }}
+        run: cd server && npm run seed:core && npm run seed:shadowdark && npm run seed:shadowdark:demo
+
+      - name: Start E2E app server
+        env:
+          PORT: "3001"
+          DB_HOST: mariadb
+          DB_PORT: "3306"
+          DB_USER: ${{ secrets.CI_DB_USER }}
+          DB_PASSWORD: ${{ secrets.CI_DB_PASSWORD }}
+          DB_NAME: ${{ secrets.CI_DB_NAME }}
+          NODE_ENV: test
+          ALLOW_TEST_HOOKS: "true"
+          TEST_HOOK_SECRET: e2e-test-hook-secret
+          JWT_SECRET: e2e-test-secret
+          CLIENT_URL: http://localhost:5173
+          # Same socket-cap relaxation as e2e.yml (#388): the suite runs as one
+          # DM user; closed-page sockets reap slower than they accumulate.
+          SOCKET_PER_USER_CAP: "1000"
+          SOCKET_PER_IP_CAP: "1000"
+          NODE_OPTIONS: "--max-old-space-size=256"
+        run: |
+          node server/dist/index.js >/tmp/server.log 2>&1 &
+          echo $! > /tmp/server.pid
+          for i in $(seq 1 30); do
+            status=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:3001/api/auth/me 2>/dev/null || true)
+            echo "$status" | grep -qE '^(200|401)$' && break || true
+            echo "Waiting for app server... ($i/30) [got: $status]"
+            sleep 2
+            [ "$i" -eq 30 ] && echo "App server never became ready" && exit 1
+          done
+
+      - name: Start Vite preview server
+        env:
+          API_PROXY_URL: "http://localhost:3001"
+          NODE_OPTIONS: "--max-old-space-size=512"
+        run: |
+          cd client && ./node_modules/.bin/vite preview >/tmp/vite.log 2>&1 &
+          echo $! > /tmp/vite.pid
+          for i in $(seq 1 30); do
+            curl -s -o /dev/null http://localhost:5173 && break || true
+            echo "Waiting for Vite... ($i/30)"
+            sleep 2
+            [ "$i" -eq 30 ] && echo "Vite preview server never became ready" && exit 1
+          done
+
+      - name: Warm up app server (login + auth + campaigns)
+        # The first specs hit cold connection pools, V8 JIT and socket handlers,
+        # exceeding their waits (cold-start flake — e.g. 566-npc-combat's first
+        # test). Priming with a few authed requests lands the first specs on
+        # warm code paths. Mirrors e2e.yml.
+        run: |
+          set -e
+          curl -s -c /tmp/dm-cookies.txt -X POST http://localhost:3001/api/auth/login \
+            -H 'Content-Type: application/json' \
+            -d '{"email":"dm@darkwatch.test","password":"password"}' >/dev/null
+          curl -s -c /tmp/player-cookies.txt -X POST http://localhost:3001/api/auth/login \
+            -H 'Content-Type: application/json' \
+            -d '{"email":"player@darkwatch.test","password":"password"}' >/dev/null
+          for pass in 1 2; do
+            curl -s -b /tmp/dm-cookies.txt http://localhost:3001/api/auth/me >/dev/null
+            curl -s -b /tmp/dm-cookies.txt http://localhost:3001/api/campaigns >/dev/null
+            curl -s -b /tmp/dm-cookies.txt http://localhost:3001/api/dashboard >/dev/null
+            curl -s -b /tmp/player-cookies.txt http://localhost:3001/api/auth/me >/dev/null
+            curl -s -b /tmp/player-cookies.txt http://localhost:3001/api/dashboard >/dev/null
+          done
+          rm -f /tmp/dm-cookies.txt /tmp/player-cookies.txt
+          echo "warmup complete"
+
+      - name: Install tests dependencies (browsers baked in image)
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: /ms-playwright
+        run: cd tests && npm ci --no-audit --no-fund
+
+      - name: Run full suite — shard 1/3
+        env:
+          E2E_SERVER_URL: "http://localhost:3001"
+          TEST_HOOK_SECRET: e2e-test-hook-secret
+          PLAYWRIGHT_BROWSERS_PATH: /ms-playwright
+        run: cd tests && ./node_modules/.bin/playwright test --shard=1/3 --reporter=line
+
+      - name: Restart Vite preview (between shards 1→2)
+        env:
+          API_PROXY_URL: "http://localhost:3001"
+          NODE_OPTIONS: "--max-old-space-size=512"
+        run: |
+          pkill -9 -f "vite preview" 2>/dev/null || true
+          fuser -k 5173/tcp 2>/dev/null || true
+          PIDS=$(lsof -t -i :5173 2>/dev/null || true)
+          [ -n "$PIDS" ] && kill -9 $PIDS 2>/dev/null || true
+          for i in $(seq 1 15); do
+            if ! curl -s -o /dev/null -m 1 http://localhost:5173; then break; fi
+            echo "Waiting for port 5173 to free... ($i/15)"
+            sleep 1
+          done
+          sleep 2
+          cd client && ./node_modules/.bin/vite preview >/tmp/vite.log 2>&1 &
+          echo $! > /tmp/vite.pid
+          for i in $(seq 1 30); do
+            curl -s -o /dev/null http://localhost:5173 && break || true
+            echo "Waiting for new Vite... ($i/30)"
+            sleep 2
+            [ "$i" -eq 30 ] && echo "Vite never came back up" && exit 1
+          done
+
+      - name: Run full suite — shard 2/3
+        env:
+          E2E_SERVER_URL: "http://localhost:3001"
+          TEST_HOOK_SECRET: e2e-test-hook-secret
+          PLAYWRIGHT_BROWSERS_PATH: /ms-playwright
+        run: cd tests && ./node_modules/.bin/playwright test --shard=2/3 --reporter=line
+
+      - name: Restart Vite preview (between shards 2→3)
+        env:
+          API_PROXY_URL: "http://localhost:3001"
+          NODE_OPTIONS: "--max-old-space-size=512"
+        run: |
+          pkill -9 -f "vite preview" 2>/dev/null || true
+          fuser -k 5173/tcp 2>/dev/null || true
+          PIDS=$(lsof -t -i :5173 2>/dev/null || true)
+          [ -n "$PIDS" ] && kill -9 $PIDS 2>/dev/null || true
+          for i in $(seq 1 15); do
+            if ! curl -s -o /dev/null -m 1 http://localhost:5173; then break; fi
+            echo "Waiting for port 5173 to free... ($i/15)"
+            sleep 1
+          done
+          sleep 2
+          cd client && ./node_modules/.bin/vite preview >/tmp/vite.log 2>&1 &
+          echo $! > /tmp/vite.pid
+          for i in $(seq 1 30); do
+            curl -s -o /dev/null http://localhost:5173 && break || true
+            echo "Waiting for new Vite... ($i/30)"
+            sleep 2
+            [ "$i" -eq 30 ] && echo "Vite never came back up" && exit 1
+          done
+
+      - name: Run full suite — shard 3/3
+        env:
+          E2E_SERVER_URL: "http://localhost:3001"
+          TEST_HOOK_SECRET: e2e-test-hook-secret
+          PLAYWRIGHT_BROWSERS_PATH: /ms-playwright
+        run: cd tests && ./node_modules/.bin/playwright test --shard=3/3 --reporter=line
+
+      - name: Collect logs for artifact
+        if: always()
+        run: |
+          mkdir -p /tmp/e2e-full-logs
+          cp /tmp/server.log /tmp/e2e-full-logs/server.log 2>/dev/null || echo "(no server log)" > /tmp/e2e-full-logs/server.log
+          cp /tmp/vite.log /tmp/e2e-full-logs/vite.log 2>/dev/null || echo "(no vite log)" > /tmp/e2e-full-logs/vite.log
+          if [ -d tests/playwright-report ]; then
+            cp -r tests/playwright-report /tmp/e2e-full-logs/playwright-report
+          fi
+          if [ -d tests/test-results ]; then
+            cp -r tests/test-results /tmp/e2e-full-logs/test-results
+          fi
+          echo "Log collection complete. Contents:"
+          find /tmp/e2e-full-logs -type f | head -40
+
+      - name: Upload E2E full-suite logs artifact
+        if: always()
+        # v4 unsupported on Forgejo's actions backend; pin v3 (see e2e.yml).
+        uses: actions/upload-artifact@ff15f0306b3f739f7b6fd43fb5d26cd321bd4de5 # v3.2.1
+        with:
+          name: e2e-full-logs-${{ github.run_id }}
+          path: /tmp/e2e-full-logs/
+          retention-days: 14
+
+      - name: Dump server and vite logs on failure (inline)
+        if: failure()
+        run: |
+          echo "=== server log (last 200 lines) ==="
+          tail -n 200 /tmp/server.log || echo "no server log"
+          echo "=== vite log (last 200 lines) ==="
+          tail -n 200 /tmp/vite.log || echo "no vite log"
