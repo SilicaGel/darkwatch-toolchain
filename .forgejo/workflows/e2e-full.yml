@@ -97,6 +97,34 @@ jobs:
           DB_NAME: ${{ secrets.CI_DB_NAME }}
         run: cd server && npm run seed:core && npm run seed:shadowdark && npm run seed:shadowdark:demo
 
+      - name: Start MinIO + create the images bucket
+        # #1141 — image specs (image-picker) store uploads in object storage.
+        # MinIO can't run as a Forgejo `service` (the image needs the `server
+        # /data` command arg, which services can't set), so run it in-step:
+        # download the static binaries, start the server, create the bucket and
+        # make it anonymously downloadable (mirrors docker-compose's minio-init).
+        env:
+          MINIO_ROOT_USER: darkwatch_admin
+          MINIO_ROOT_PASSWORD: darkwatch_minio_dev
+          MINIO_BUCKET: darkwatch-images
+        run: |
+          curl -sSL https://dl.min.io/server/minio/release/linux-amd64/minio -o /tmp/minio
+          curl -sSL https://dl.min.io/client/mc/release/linux-amd64/mc -o /tmp/mc
+          chmod +x /tmp/minio /tmp/mc
+          mkdir -p /tmp/minio-data
+          /tmp/minio server /tmp/minio-data >/tmp/minio.log 2>&1 &
+          echo $! > /tmp/minio.pid
+          for i in $(seq 1 30); do
+            curl -fsS http://localhost:9000/minio/health/ready >/dev/null 2>&1 && break || true
+            echo "Waiting for MinIO... ($i/30)"
+            sleep 1
+            [ "$i" -eq 30 ] && { echo "MinIO never became ready"; cat /tmp/minio.log; exit 1; }
+          done
+          /tmp/mc alias set local http://localhost:9000 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD"
+          /tmp/mc mb --ignore-existing local/"$MINIO_BUCKET"
+          /tmp/mc anonymous set download local/"$MINIO_BUCKET"
+          echo "MinIO ready with bucket $MINIO_BUCKET (public-download)"
+
       - name: Start E2E app server
         env:
           PORT: "3001"
@@ -115,6 +143,13 @@ jobs:
           SOCKET_PER_USER_CAP: "1000"
           SOCKET_PER_IP_CAP: "1000"
           NODE_OPTIONS: "--max-old-space-size=256"
+          # #1141 — image specs (image-picker) upload to object storage; a MinIO
+          # instance + bucket is brought up in the "Start MinIO" step above.
+          MINIO_ENDPOINT: http://localhost:9000
+          MINIO_ROOT_USER: darkwatch_admin
+          MINIO_ROOT_PASSWORD: darkwatch_minio_dev
+          MINIO_BUCKET: darkwatch-images
+          MINIO_PUBLIC_BASE_URL: http://localhost:9000/darkwatch-images
         run: |
           node server/dist/index.js >/tmp/server.log 2>&1 &
           echo $! > /tmp/server.pid
