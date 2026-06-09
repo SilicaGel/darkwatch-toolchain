@@ -15,7 +15,7 @@ jobs:
       image: forge.example.com/aaron/darkwatch-ci-playwright:1.60.0
     services:
       mariadb:
-        image: mariadb:11
+        image: mariadb:11@sha256:be1ef4fe5f14589325c08a41c76334097ce66c86264b75e1d28342c742782a61
         env:
           # CI DB credentials come from Forgejo repo secrets (Settings → Secrets).
           # Required: CI_DB_ROOT_PASSWORD, CI_DB_NAME, CI_DB_USER, CI_DB_PASSWORD.

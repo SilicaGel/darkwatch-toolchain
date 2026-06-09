@@ -172,7 +172,7 @@ jobs:
     runs-on: ubuntu-latest
     services:
       mariadb:
-        image: mariadb:11
+        image: mariadb:11@sha256:be1ef4fe5f14589325c08a41c76334097ce66c86264b75e1d28342c742782a61
         env:
           # CI DB credentials come from Forgejo repo secrets (Settings → Secrets).
           # Required: CI_DB_ROOT_PASSWORD, CI_DB_NAME, CI_DB_USER, CI_DB_PASSWORD.
@@ -192,7 +192,7 @@ jobs:
         # Forgejo's act_runner supports `cmd:` in service definitions.
         # The image-library int tests create + drop a per-suite bucket against
         # this instance.
-        image: minio/minio:RELEASE.2025-04-08T15-41-24Z
+        image: minio/minio:RELEASE.2025-04-08T15-41-24Z@sha256:8834ae47a2de3509b83e0e70da9369c24bbbc22de42f2a2eddc530eee88acd1b
         cmd:
           - server
           - /data
@@ -352,7 +352,7 @@ jobs:
       image: forge.example.com/aaron/darkwatch-ci-playwright:1.60.0
     services:
       mariadb:
-        image: mariadb:11
+        image: mariadb:11@sha256:be1ef4fe5f14589325c08a41c76334097ce66c86264b75e1d28342c742782a61
         env:
           MYSQL_ROOT_PASSWORD: ${{ secrets.CI_DB_ROOT_PASSWORD }}
           MYSQL_DATABASE: ${{ secrets.CI_DB_NAME }}
