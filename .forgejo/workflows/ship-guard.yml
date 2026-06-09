@@ -1,0 +1,90 @@
+name: Ship guard
+
+# #1116 — blocking guard for PRs that resolve issues but skip the `/ship`
+# housekeeping. If the PR body carries one or more `Ready #N` lines, this
+# requires BOTH a `docs/CHANGELOG.md` change AND a `## Test plans` section with
+# a `### #N` block per Ready line. PRs with no `Ready #N` lines are a no-op
+# pass (pure-chore PRs don't need a changelog). Escape hatch: `[skip-ship-guard]`
+# in the PR title.
+#
+# The logic is a pure, fully-tested module (scripts/ship-guard/check.mjs); this
+# workflow is the thin runner that hands it the PR body/title (from the event
+# payload) and the changed-file list (git diff origin/main...HEAD). It's a dumb
+# presence check, deliberately — it never inspects changelog wording or test
+# plan reachability (that stays a human / qa-check concern).
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  ship-guard:
+    runs-on: ubuntu-latest
+    steps:
+      # fetch-depth: 0 so `git diff origin/main...HEAD` has the history it needs
+      # to compute the merge-base; a shallow clone would make the diff empty.
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          fetch-depth: 0
+
+      - name: Use Node 22
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+
+      # Ensure the base ref is available for the three-dot diff. On Forgejo the
+      # PR base SHA is in the event payload; fetch it so origin/main resolves.
+      - name: Fetch base ref
+        run: git fetch --no-tags --depth=200 origin main || true
+
+      # No npm dependencies — the guard is Node built-ins only. PR body/title
+      # come from the event payload; the script reads the diff from git itself.
+      - name: Check ship housekeeping
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: node scripts/ship-guard/check.mjs
+
+  # #842 — workflow-change hygiene REMINDER. Deliberately a WARNING, never a
+  # hard fail: a hard gate on `.forgejo/workflows/` changes risks wedging
+  # legitimate future workflow PRs (e.g. a one-line YAML fix), which is exactly
+  # the failure mode the issue warns against. This job always passes; it just
+  # prints a conspicuous reminder of the policy (CLAUDE.md / HANDBOOK): any
+  # workflow change must be exercised on a draft PR or workflow_dispatch run on
+  # the branch before merge — no "merge to test in production" for CI YAML.
+  workflow-change-reminder:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          fetch-depth: 0
+
+      - name: Fetch base ref
+        run: git fetch --no-tags --depth=200 origin main || true
+
+      - name: Remind about workflow-change hygiene
+        run: |
+          # Resolve the diff base: prefer origin/main, fall back to local main.
+          if git rev-parse --verify origin/main >/dev/null 2>&1; then
+            BASE=origin/main
+          elif git rev-parse --verify main >/dev/null 2>&1; then
+            BASE=main
+          else
+            echo "::notice::workflow-change-reminder: no main ref to diff against — skipping."
+            exit 0
+          fi
+          CHANGED=$(git diff --name-only "$BASE...HEAD" | grep '^\.forgejo/workflows/' || true)
+          if [ -z "$CHANGED" ]; then
+            echo "No .forgejo/workflows/ changes in this PR — nothing to remind."
+            exit 0
+          fi
+          echo "::warning::This PR changes CI workflow YAML. Per CLAUDE.md / HANDBOOK policy,"
+          echo "::warning::exercise it on a draft PR or a workflow_dispatch run on this branch"
+          echo "::warning::and confirm at least one green run BEFORE merging — no 'merge to test"
+          echo "::warning::in production' for CI YAML. (#842) Changed files:"
+          echo "$CHANGED" | sed 's/^/::warning::  - /'
+          # Intentionally always exit 0 — this is a reminder, not a gate.
+          exit 0
