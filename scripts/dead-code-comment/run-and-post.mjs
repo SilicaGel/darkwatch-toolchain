@@ -286,4 +286,4 @@ if (invokedDirectly) {
   await main();
 }
 
-export { summarise, buildBody, MARKER, MARKER_RE };
+export { runKnip, summarise, buildBody, MARKER, MARKER_RE };

@@ -11,10 +11,15 @@
 #   the single source of truth for "what CI's fast gate runs", so /ship and
 #   manual verification can't drift.
 #
+# ALSO RUNS (beyond ci.yml's fast gate): a diff-aware dead-code check that
+# mirrors dead-code.yml's `knip` gate, but flags only dead code THIS branch
+# introduces (findings in files changed vs main) — local knip over-reports
+# pre-existing items on a clean main, so a straight `knip total > 0` would
+# false-fail. CI's dead-code.yml absolute gate remains the full backstop.
+#
 # WHAT IT DOES NOT COVER (separate workflows / jobs — run them directly):
 #   - ci.yml `smoke` job   → Playwright smoke specs (browser + servers + DB)
 #   - e2e.yml              → full nightly Playwright suite
-#   - dead-code.yml `knip` → `npm run knip` from the repo root
 #   - lighthouse.yml       → Lighthouse CI
 #
 # DRIFT GUARD
@@ -25,6 +30,7 @@
 # USAGE
 #   scripts/preflight.sh              run the full gate
 #   scripts/preflight.sh --skip-int   skip the DB-backed integration step
+#   scripts/preflight.sh --skip-knip  skip the diff-aware dead-code (knip) step
 #                                     (explicit opt-out — never a silent skip)
 #
 # Exit 0 = matches CI's fast gate, safe to open a PR.
@@ -63,10 +69,12 @@ fi
 unset RESEND_API_KEY
 
 SKIP_INT=0
+SKIP_KNIP=0
 for arg in "$@"; do
   case "$arg" in
     --skip-int) SKIP_INT=1 ;;
-    -h|--help) sed -n '2,30p' "$0"; exit 0 ;;
+    --skip-knip) SKIP_KNIP=1 ;;
+    -h|--help) sed -n '2,36p' "$0"; exit 0 ;;
     *) echo "preflight: unknown argument: $arg" >&2; exit 1 ;;
   esac
 done
@@ -105,7 +113,7 @@ run_check() {
 note_skip() { SKIP+=("$1"); printf '  %-34s %sSKIPPED%s — %s\n' "▶ $1" "$YELLOW" "$RESET" "$2"; }
 
 echo
-echo "${BOLD}━━━ Darkwatch preflight ━━━${RESET}  ${DIM}mirrors ci.yml: lint-typecheck + test${RESET}"
+echo "${BOLD}━━━ Darkwatch preflight ━━━${RESET}  ${DIM}ci.yml lint-typecheck + test, plus diff-aware knip${RESET}"
 echo
 
 # --- 0. ci.yml drift guard (hard stop) --------------------------------------
@@ -233,6 +241,19 @@ else
   echo "    Start the DB container and re-run, or pass --skip-int to opt out explicitly."
   echo "    (An explicit --skip-int is fine; a silent skip is the thing we're avoiding.)"
   FAIL+=("integration tests (DB unreachable)")
+fi
+
+# --- 5. dead-code gate (mirrors dead-code.yml's knip, but diff-aware) --------
+# Flags only dead code this branch introduces (findings in files changed vs
+# main) — local knip over-reports pre-existing items, so a straight total>0
+# would false-fail. See scripts/knip-gate.mjs. CI's dead-code.yml is the
+# absolute backstop. Needs all workspaces installed (root/client/server/tests);
+# a knip crash is non-blocking (the gate exits 0).
+echo "${BOLD}dead-code (knip — diff vs main)${RESET}"
+if [ "$SKIP_KNIP" -eq 1 ]; then
+  note_skip "dead-code (knip)" "--skip-knip"
+else
+  run_check "dead-code (knip)" node scripts/knip-gate.mjs
 fi
 
 # --- summary ----------------------------------------------------------------
