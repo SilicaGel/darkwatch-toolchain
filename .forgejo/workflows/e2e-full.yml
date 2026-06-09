@@ -19,14 +19,15 @@ name: E2E Full Suite
 on:
   workflow_call:
   workflow_dispatch:
-  pull_request:
-    # Self-test on any PR that touches the full-suite harness or the specs it
-    # guards, so changes here are proven before merge without burdening every PR.
-    paths:
-      - ".forgejo/workflows/e2e-full.yml"
-      - "tests/e2e/**"
-      - "tests/helpers/**"
-      - "tests/playwright.config.ts"
+  # NOTE: no `pull_request` trigger. The Forgejo runner shares a memory-capped
+  # OrbStack VM with an unrelated container stack, so running this heavy suite
+  # (mariadb service + builds + Chromium × shards) concurrently with ci.yml on
+  # every push starved the VM — the CI MariaDB got killed mid-seed
+  # (PROTOCOL_CONNECTION_LOST) and the RAM-backed /workspace tmpfs hit ENOSPC.
+  # This suite runs nightly (via nightly-deploy.yml's workflow_call deploy gate)
+  # and on demand (workflow_dispatch) when the runner isn't contended. To prove
+  # a harness/spec change before merge, dispatch this workflow manually rather
+  # than relying on a per-PR run. (#1141)
 
 jobs:
   e2e-full:
