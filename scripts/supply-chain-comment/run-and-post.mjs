@@ -19,6 +19,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { parseDiffAdded } from "./parse-socket.mjs";
 import { diffAlerts } from "./diff-alerts.mjs";
+import { collectLockfilePackages, lockfileAddedSet, filterAlertsToAdded } from "./lockfile-packages.mjs";
 import { shouldFailGate, isBlocking } from "./gate.mjs";
 import { buildComment, MARKER, MARKER_RE, CURRENT_VERSION } from "./build-comment.mjs";
 
@@ -233,7 +234,31 @@ async function main() {
     await skip(`couldn't parse scan-diff output — top-level keys: \`${parsed.shapeKeys.join(", ") || "none"}\` (needs a parser tweak)`);
   }
 
-  const netNew = diffAlerts(parsed.alerts, []); // de-dupe by pkg@version:type
+  // #723 follow-up: the Socket scan-diff keys off the package.json *manifests*,
+  // so deps that are UNCHANGED in the lockfile re-resolve (ranges) and surface as
+  // "added" — blocking PRs over pre-existing pins (playwright-core@1.60.0 #1156,
+  // @puppeteer/browsers #1150). Keep only the alerts whose pkg@version the PINNED
+  // LOCKFILES say was genuinely added head-vs-base. FAIL SAFE: if either tree's
+  // lockfiles can't be read, keep ALL alerts (conservative over-block) so a
+  // parser bug can never silently disable the gate.
+  const baseLock = collectLockfilePackages(BASE_DIR);
+  const headLock = collectLockfilePackages(HEAD_DIR);
+  let addedAlerts = parsed.alerts;
+  if (baseLock && headLock) {
+    const lockfileAdded = lockfileAddedSet(baseLock, headLock);
+    addedAlerts = filterAlertsToAdded(parsed.alerts, lockfileAdded);
+    console.error(
+      `[supply-chain-bot] lockfile-added=${lockfileAdded.size}; Socket added-alerts ` +
+        `${parsed.alerts.length} → ${addedAlerts.length} after lockfile filter`,
+    );
+  } else {
+    console.error(
+      `[supply-chain-bot] lockfile parse unavailable (base=${!!baseLock} head=${!!headLock}) — ` +
+        `keeping all Socket alerts (fail-safe, conservative over-block)`,
+    );
+  }
+
+  const netNew = diffAlerts(addedAlerts, []); // de-dupe by pkg@version:type
   const gate = shouldFailGate({ netNew, prTitle: process.env.PR_TITLE });
   const blocking = netNew.filter(isBlocking);
   const informational = netNew.filter((a) => !isBlocking(a));
