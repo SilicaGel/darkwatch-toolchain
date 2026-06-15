@@ -9,11 +9,11 @@ Simulate a group of picky, experienced playtesters: drive the live app through r
 
 ## How it works
 
-A long-running **driver** holds one browser with named sessions (`dm`, `p1`, `p2`, `p3`, `mob`) open for the whole playtest, and executes JS snippets POSTed to `http://127.0.0.1:7777/eval`. State survives between your commands — it's a real table, not one-shot scripts.
+A long-running **driver** holds one browser with named sessions (`dm`, `p1`, `p2`, `p3`, `mob`) open for the whole playtest, and executes JS snippets POSTed to `http://127.0.0.1:9595/eval`. State survives between your commands — it's a real table, not one-shot scripts.
 
 ```bash
 # 1. Fresh servers (use /restart-local-dev), then from the repo's tests/ dir:
-#    If :7777 already answers (driver from an earlier act/run), reuse it — sessions persist —
+#    If :9595 already answers (driver from an earlier act/run), reuse it — sessions persist —
 #    or `pkill -f playtest/driver` first; a blind start EADDRINUSEs with the error only in driver.log.
 npx tsx playtest/driver.ts > /tmp/playtest/driver.log 2>&1 &   # mkdir -p /tmp/playtest first
 
@@ -23,7 +23,7 @@ const sess = await lib.newSession(browser, "dm");
 S.set("dm", sess);
 await lib.snap(sess.page, "01-dashboard");
 EOF
-curl -s -X POST --data-binary @/tmp/step.js http://127.0.0.1:7777/eval
+curl -s -X POST --data-binary @/tmp/step.js http://127.0.0.1:9595/eval
 ```
 
 Snippets get `browser`, `S` (session map), `lib` (login, snap, forceRoll, openCampaignByName — see `tests/playtest/lib.ts`), `log()`. Screenshots land in `/tmp/playtest/`; **Read them after every act** — visual judgment is the point. Watch `driver.log` for pageerrors (every session logs console errors automatically).
