@@ -129,6 +129,20 @@ The tool reports `REACHABLE`, `ORPHANED`, or `PARTIAL` with counts. **Treat `ORP
 
 Any `ORPHANED`/`PARTIAL` result → the issue is **`partial`**, not `verified`: the build is real but the user-visible feature isn't there. This check is cheap and catches the most common QA miss — flag it before it reaches the report.
 
+**Acceptance-coverage check — run this for EVERY code-readable issue, peer to the reachability check above.** Reachability proves "the symbol is wired up"; this proves "**every** acceptance bullet is satisfied." Reachability ≠ coverage — an issue can be fully reachable and still be only half-built.
+
+Procedure, per issue:
+
+1. **Enumerate the issue body's explicit acceptance bullets** (the `## Acceptance` list, or the equivalent "should…" statements when there's no formal section). Note any **coverage quantifier** ("all / every / each") or **multi-surface list** ("monster *and* character cards") inside a bullet — those expand one bullet into a set that must each be checked.
+2. **Tie each bullet to specific code** (`file:line`), or mark it unmet. **An acceptance bullet you cannot tie to code is never `verified`.** One unmet bullet → the whole issue is `partial` (or `missing` if the core isn't there), naming the unmet bullet.
+
+Two traps to call out explicitly — these are the exact ones that produced over-closes in the 2026-05-08 batch (see *Why this design*):
+
+- **Coverage trap (#406).** Acceptance says "validate / handle **every** X." A grep that finds the *mechanism* is necessary but **not sufficient** — confirm coverage across **all** call sites, not one example. (#406 "validate every response with Zod" was closed on *"api-client.ts uses Zod schemas"*; only one call site ever passed a schema, ~67 blind casts remained, and the broad rollout was later reverted.)
+- **Multi-surface trap (#572).** Acceptance names **multiple** surfaces ("dead chip on monster *and* character cards"). Verify **each** named surface independently — finding one (the monster chip) does not imply the other (the character chip). (#572 shipped only the monster half.)
+
+When in doubt, expand the quantifier: "every response" means list the call sites and check them; "all three denominations" means confirm SP and CP, not just GP (the #553 trap — silver/copper fields existed for *storage* but no UI ever set them, so they were dead).
+
 ### Step 4 — Run Playwright checks
 
 Only attempted if there are playwright-runnable issues.
@@ -234,6 +248,16 @@ One message to the user, structured exactly like this:
   - Evidence: <file:line snippet or playwright result>
   - Suggested close comment: "..."
 
+# For a single-criterion issue, the one-line `Evidence:` above is enough.
+# For a MULTI-CRITERION issue (acceptance has ≥2 bullets OR contains
+# "all/every/each"), replace `Evidence:` with a per-bullet checklist —
+# one row per acceptance bullet, each tied to code or marked ✗ unmet:
+- #N — Title
+  - [✓] <acceptance bullet 1> — <file:line>
+  - [✓] <acceptance bullet 2> — <file:line>
+  - [✗] <acceptance bullet 3> — not found  ← if any ✗, this is NOT Verified; move it to Scope decision
+  - Suggested close comment: "..."
+
 ### Needs your eyes (P)
 - #N — Title
   - Reproduction: <steps>
@@ -253,6 +277,8 @@ One message to the user, structured exactly like this:
 
 Skip empty sections. If everything is verified, the report is the Verified section + one walkthrough question. If there's nothing to verify (all true-visual-only), say so plainly — don't pad.
 
+**Multi-criterion issues get a per-bullet checklist, not a one-liner.** Any issue whose acceptance has ≥2 bullets or contains an "all / every / each" quantifier MUST render in Verified as the per-bullet checklist shown above — every acceptance bullet on its own line, each tied to code or marked `✗`. The single-line `Evidence:` form is what let "#406 | api-client.ts uses Zod schemas" sail through; one example is not proof of coverage. Single-criterion issues may keep the one-line form.
+
 **Always `open` any generated contact-sheet HTML files in the user's browser as part of presenting the report.** Don't just print the path:
 
 ```bash
@@ -265,7 +291,7 @@ The skill runs locally on macOS, so `open` works.
 
 After the report, work through the sections in order:
 
-1. **Verified.** Ask: "Close all M with the suggested comments? (Y / pick which / n)." Accept "all", a list of numbers, or "none." For each close: POST the comment → PATCH state to closed → DELETE the `status/qa` label (id 38). All three steps, every time.
+1. **Verified.** Ask: "Close all M with the suggested comments? (Y / pick which / n)." Accept "all", a list of numbers, or "none." For each close: POST the comment → PATCH state to closed → DELETE the `status/qa` label (id 38). All three steps, every time. **Close-gate for multi-criterion issues:** do not batch-close an issue whose acceptance has ≥2 bullets or an "all/every/each" quantifier on a one-line evidence row — its per-bullet checklist (Step 6) must be fully green (`✓` on every bullet) first. A checklist with any `✗` belongs in Scope decision, not Verified, so it should never reach this close prompt.
 2. **Needs your eyes.** Ask one issue at a time. "For #N — does this look right? (y/n/skip). Contact sheet should be open in your browser." On "y" → POST the close comment (user's wording or "Verified visually 2026-MM-DD"), PATCH closed, DELETE `status/qa`. On "n" → leave a comment describing the gap (do not strip the label — still awaiting fix). On "skip" → leave it open, do nothing.
 3. **Scope decision (`partial`).** Recommend a concrete action — usually one of:
    - *Build half done, rest is a real follow-up* → close the original with a done-vs-missing comment, then file the successor via the `issue` skill referencing the original. **Strip `status/qa` on the close, same as the verified path.**
@@ -342,6 +368,12 @@ Copy the relevant template to `tests/qa-check/<N>/spec.ts`, rename the test, upd
 - **Throwaway specs go under `tests/qa-check/<N>/`,** NOT `tests/test-results/`. Playwright clobbers `test-results/` between runs — earlier versions of this skill prescribed that location and the specs disappeared.
 - **State navigation via API,** not card-clicking heuristics. Dashboard cards share text and `.first()` matches lie.
 - **`partial` is a real status.** Many QA issues are "feature shipped, but the issue title was broader." Forcing green/red hides the scope question. **And don't conflate "narrow fix met the literal acceptance phrase" with "the user-visible intent is satisfied"** — walk the surface the reporter would see.
+- **Acceptance-coverage check (Step 3), per-bullet report (Step 6), close-gate (Step 7) — why they exist.** Re-auditing the 2026-05-08 `/qa-check` batch (16 issues closed "code-readable") found **3 over-closed on a one-line grep**, all later reopened:
+  - **#406** "validate **every** response with Zod" — closed on *"api-client.ts uses Zod schemas."* Only one call site (imagesApi) ever passed a schema; the broad rollout was reverted (#501) because the hand-written schemas didn't match server shape. ~67 blind casts remained. (The **coverage trap**.)
+  - **#553** "add silver/copper coin fields (**all three** denominations)" — closed on *"GearStep.tsx:203 — silver/copper coin fields."* Display+storage only; no UI ever sets starting SP/CP, so `sp_rolled`/`cp_rolled` were dead fields. (A coverage-quantifier miss.)
+  - **#572** "dead chip on monster **and** character cards" — closed on *"CharacterDetail.tsx:210 — dead chip."* Only the monster half shipped. (The **multi-surface trap**.)
+
+  Common thread: the acceptance carried a **coverage quantifier** ("every / all") or **multiple named surfaces**, and verification confirmed one instance, not the set. Reachability (added earlier) detects "symbol not wired"; it does **not** force "every acceptance bullet satisfied" — that's the gap these three changes close.
 
 ## Related skills
 
