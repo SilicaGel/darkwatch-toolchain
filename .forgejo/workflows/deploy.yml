@@ -7,7 +7,7 @@ name: Deploy
 # Architecture (post-runner-split): the runner machine (Mac, for speed)
 # does NOT run production containers — the Pi does. This workflow:
 #   1. Builds the client on the runner (vite output → static files).
-#   2. Rsyncs the server source + client dist + brochure to the Pi.
+#   2. Rsyncs the server source + client dist + marketing site (www/) to the Pi.
 #   3. SSHes into the Pi and runs `docker build` + `docker-compose up -d`
 #      against the host's docker daemon, where production runs.
 #
@@ -61,12 +61,6 @@ jobs:
       - name: Build client
         run: cd client && npm run build
 
-      - name: Bake brochure index with cache-busted asset versions
-        run: |
-          mkdir -p site/_dist
-          HASH=$(git rev-parse --short HEAD)
-          sed "s/\.png\"/\.png?v=${HASH}\"/g" site/index.html > site/_dist/index.html
-
       - name: Set up SSH (private key + known_hosts)
         env:
           DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
@@ -102,21 +96,23 @@ jobs:
             -e 'ssh -i ~/.ssh/id_ed25519' \
             client/dist/ "${DEPLOY_USER}@${DEPLOY_HOST}:/var/www/darkwatch/"
 
-      - name: Rsync brochure to webroot on Pi
+      - name: Rsync marketing site (www/) to webroot on Pi
         env:
           DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
         run: |
-          # Deliberately NOT --delete on /var/www/brochure: it may contain
-          # screenshots not in the repo. We push specific files only.
-          rsync -az -e 'ssh -i ~/.ssh/id_ed25519' \
-            site/style.css site/main.js \
-            "${DEPLOY_USER}@${DEPLOY_HOST}:/var/www/brochure/"
-          rsync -az -e 'ssh -i ~/.ssh/id_ed25519' \
-            site/assets/ "${DEPLOY_USER}@${DEPLOY_HOST}:/var/www/brochure/assets/"
-          rsync -az -e 'ssh -i ~/.ssh/id_ed25519' \
-            site/_dist/index.html \
-            "${DEPLOY_USER}@${DEPLOY_HOST}:/var/www/brochure/index.html"
+          # #319/#357 — the public marketing site (example.com) served by Caddy
+          # from /var/www/marketing. No-build static tree pushed verbatim with
+          # --delete so removed pages don't linger on the Pi.
+          # `pitch/` is EXCLUDED: it's the private licensing pitch (names the
+          # game system) and must not be publicly reachable — it lives in the
+          # repo only, to be shared directly when appropriate.
+          rsync -az --delete --delete-excluded \
+            --exclude='.DS_Store' \
+            --exclude='pitch' \
+            --exclude='README.md' \
+            -e 'ssh -i ~/.ssh/id_ed25519' \
+            www/ "${DEPLOY_USER}@${DEPLOY_HOST}:/var/www/marketing/"
 
       - name: Back up current Pi config before it's replaced
         # Keep ONE rolling backup slot per replaced config file (overwritten each
@@ -158,6 +154,8 @@ jobs:
           DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
           JWT_SECRET: ${{ secrets.JWT_SECRET }}
           CLIENT_URL: ${{ secrets.CLIENT_URL }}
+          EXTRA_ALLOWED_ORIGINS: ${{ secrets.EXTRA_ALLOWED_ORIGINS }}
+          WAITLIST_PUBLIC_URL: ${{ secrets.WAITLIST_PUBLIC_URL }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
           EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
@@ -185,6 +183,8 @@ jobs:
             printf 'DB_PASSWORD=%s\n' "$DB_PASSWORD"
             printf 'JWT_SECRET=%s\n' "$JWT_SECRET"
             printf 'CLIENT_URL=%s\n' "$CLIENT_URL"
+            printf 'EXTRA_ALLOWED_ORIGINS=%s\n' "$EXTRA_ALLOWED_ORIGINS"
+            printf 'WAITLIST_PUBLIC_URL=%s\n' "$WAITLIST_PUBLIC_URL"
             printf 'ANTHROPIC_API_KEY=%s\n' "$ANTHROPIC_API_KEY"
             printf 'RESEND_API_KEY=%s\n' "$RESEND_API_KEY"
             printf 'EMAIL_FROM=%s\n' "$EMAIL_FROM"
