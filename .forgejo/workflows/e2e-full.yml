@@ -89,21 +89,19 @@ jobs:
           DB_NAME: ${{ secrets.CI_DB_NAME }}
         run: cd server && npm run db:migrate
 
-      - name: Seed core + shadowdark content (e2e tests assume seeded DB)
-        env:
-          DB_HOST: mariadb
-          DB_PORT: "3306"
-          DB_USER: ${{ secrets.CI_DB_USER }}
-          DB_PASSWORD: ${{ secrets.CI_DB_PASSWORD }}
-          DB_NAME: ${{ secrets.CI_DB_NAME }}
-        run: cd server && npm run seed:core && npm run seed:shadowdark && npm run seed:shadowdark:demo
-
       - name: Start MinIO + create the images bucket
         # #1141 — image specs (image-picker) store uploads in object storage.
         # MinIO can't run as a Forgejo `service` (the image needs the `server
         # /data` command arg, which services can't set), so run it in-step:
         # download the static binaries, start the server, create the bucket and
         # make it anonymously downloadable (mirrors docker-compose's minio-init).
+        #
+        # Runs BEFORE the seed step on purpose: the shadowdark-qa fixture (#1238)
+        # stages its map + handout images through the image service and, when
+        # MinIO isn't configured, SKIPS creating the active map entirely
+        # (qa-fixture.ts) — which left map-viewport-persistence.spec.ts with no
+        # map to render. MinIO must be up (and the seed step must get MINIO_*
+        # env) for the fixture's map to exist.
         env:
           MINIO_ROOT_USER: darkwatch_admin
           MINIO_ROOT_PASSWORD: darkwatch_minio_dev
@@ -125,6 +123,33 @@ jobs:
           /tmp/mc mb --ignore-existing local/"$MINIO_BUCKET"
           /tmp/mc anonymous set download local/"$MINIO_BUCKET"
           echo "MinIO ready with bucket $MINIO_BUCKET (public-download)"
+
+      - name: Seed all tiers (full suite assumes a fully seeded DB)
+        # SEED_MODE=all (= `npm run seed`) rather than the granular
+        # core+shadowdark+demo list. The full suite runs EVERY spec, including
+        # ones that depend on tiers the granular list forgot — e.g.
+        # map-viewport-persistence.spec.ts needs the QA Fixture campaign from the
+        # `shadowdark-qa` tier (#1238), which the old list omitted, so the spec
+        # failed its seed precondition on every nightly. `all` seeds core →
+        # shadowdark → demo → qa-fixture, so a newly-added seed tier can't
+        # silently drift out of CI again.
+        #
+        # MINIO_* env (+ MinIO running, started above) is required so the qa
+        # fixture stages its map image and creates the active map; without it the
+        # fixture skips the map and map-viewport-persistence.spec.ts has nothing
+        # to render.
+        env:
+          DB_HOST: mariadb
+          DB_PORT: "3306"
+          DB_USER: ${{ secrets.CI_DB_USER }}
+          DB_PASSWORD: ${{ secrets.CI_DB_PASSWORD }}
+          DB_NAME: ${{ secrets.CI_DB_NAME }}
+          MINIO_ENDPOINT: http://localhost:9000
+          MINIO_ROOT_USER: darkwatch_admin
+          MINIO_ROOT_PASSWORD: darkwatch_minio_dev
+          MINIO_BUCKET: darkwatch-images
+          MINIO_PUBLIC_BASE_URL: http://localhost:9000/darkwatch-images
+        run: cd server && npm run seed
 
       - name: Start E2E app server
         env:
