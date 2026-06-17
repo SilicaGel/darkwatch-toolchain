@@ -29,6 +29,7 @@ on:
 jobs:
   lighthouse-authenticated:
     runs-on: ubuntu-latest
+    timeout-minutes: 25  # #1263 — build + DB seed + full server stack + lhci; ~12-18 min typical
     container:
       image: forge.example.com/aaron/darkwatch-ci-playwright:1.60.0
     services:

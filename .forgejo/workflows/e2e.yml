@@ -10,6 +10,7 @@ on:
 jobs:
   e2e:
     runs-on: ubuntu-latest
+    timeout-minutes: 45  # #1263 — full curated suite (4 batches, 3 Vite restarts); ~25-35 min typical
     # #969 — prebuilt CI image (Node 22 + Chromium + Playwright deps baked).
     container:
       image: forge.example.com/aaron/darkwatch-ci-playwright:1.60.0

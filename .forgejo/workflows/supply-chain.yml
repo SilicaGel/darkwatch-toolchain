@@ -22,6 +22,7 @@ on:
 jobs:
   supply-chain:
     runs-on: ubuntu-latest
+    timeout-minutes: 10  # #1263 — Socket.dev API scan can idle-wait; kill hung jobs fast
     steps:
       - name: Checkout head
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1

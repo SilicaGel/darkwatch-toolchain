@@ -9,6 +9,7 @@ jobs:
   label-issues:
     if: github.event.pull_request.merged == true
     runs-on: ubuntu-latest
+    timeout-minutes: 5  # #1263 — shell + curl only; ~<1 min typical
     steps:
       - name: Add 'status/qa' label to referenced issues
         env:
