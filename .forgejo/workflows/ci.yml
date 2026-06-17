@@ -83,6 +83,13 @@ jobs:
           fi
           echo "OK — no bare 'npx <bin>' in workflows"
 
+      - name: Enforce e2e specs are in a declared test tier (#1270)
+        # Drift guard: every tests/e2e/*.spec.ts must be in the per-PR smoke list
+        # (below) OR in tests/e2e/nightly-only.txt. A spec in neither runs in no
+        # pre-merge tier and only surfaces in the nightly full suite — how
+        # theme-contrast broke the deploy. No deps needed (pure node + repo files).
+        run: node scripts/check-e2e-tiers.mjs
+
       - name: Install server dependencies
         run: |
           cd server && npm ci --no-audit --no-fund

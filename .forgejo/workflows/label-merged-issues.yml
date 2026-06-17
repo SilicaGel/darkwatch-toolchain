@@ -18,11 +18,15 @@ jobs:
           REPO: ${{ github.repository }}
           API_URL: ${{ github.api_url }}
         run: |
-          # Match `Ready #N` (preferred — avoids Forgejo auto-close),
-          # `Refs #N` (also common), and `Closes #N` (legacy).
-          ISSUES=$(echo "$PR_BODY" | grep -oiE '(Ready|Refs|Closes) #[0-9]+' | grep -oE '[0-9]+' | sort -u || true)
+          # Only `Ready #N` (preferred — avoids Forgejo auto-close) and the
+          # legacy `Closes #N` mean "this PR resolves #N → move to QA". `Refs #N`
+          # is a *related* pointer (the PR mentions/builds-on #N but does NOT
+          # resolve it), so it must NOT trigger status/qa — doing so wrongly
+          # queued referenced-but-unresolved issues for QA (#1270; e.g. #1272's
+          # "Refs #1270" mislabelled #1270).
+          ISSUES=$(echo "$PR_BODY" | grep -oiE '(Ready|Closes) #[0-9]+' | grep -oE '[0-9]+' | sort -u || true)
           if [ -z "$ISSUES" ]; then
-            echo "No Ready/Refs/Closes references found in PR body — nothing to label."
+            echo "No Ready/Closes references found in PR body — nothing to label."
             exit 0
           fi
           echo "$ISSUES" | while read issue; do
