@@ -1,10 +1,13 @@
 name: E2E Full Suite
 
 # Runs the ENTIRE Playwright e2e suite — every spec in tests/e2e, with NO
-# hard-coded allow-list (#1141). The per-PR pipelines (ci.yml, e2e.yml) run a
-# curated, fast subset; this job exists so that specs which aren't on those
-# lists — maps, spells, concurrency, mobile, presence — can't silently rot in
-# the dark. It runs nightly and on demand.
+# hard-coded allow-list (#1141). The per-PR pipeline (ci.yml's `smoke` job) runs
+# a curated, fast subset; the nightly `e2e.yml` runs its own curated batches.
+# Neither has a `pull_request` trigger except ci.yml — `e2e.yml` is nightly-only
+# (born as nightly-e2e.yml, #129) and is NOT a per-PR pipeline. This full job
+# exists so that specs which aren't on those curated lists — maps, spells,
+# concurrency, mobile, presence — can't silently rot in the dark. It runs nightly
+# and on demand. (Topology cleanup + drift-proofing tracked in #1270.)
 #
 # DEPLOY GATE: nightly-deploy.yml's deploy job `needs` this, so a regression in
 # any covered spec blocks the nightly deploy. Known-broken specs are quarantined

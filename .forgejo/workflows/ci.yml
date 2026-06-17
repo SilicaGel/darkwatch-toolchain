@@ -540,6 +540,7 @@ jobs:
             e2e/combat-damage.spec.ts \
             e2e/rest-button.spec.ts \
             e2e/spell-exhaustion.spec.ts \
+            e2e/theme-contrast.spec.ts \
             --reporter=line
 
       - name: Dump server and vite logs on failure
