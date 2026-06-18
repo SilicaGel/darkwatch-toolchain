@@ -105,6 +105,12 @@ jobs:
       - name: Install client dependencies
         run: cd client && npm ci --no-audit --no-fund
 
+      # ESLint lives at the repo root (flat config + plugins are root devDeps).
+      # The current rule set is NOT type-aware, so client/server node_modules
+      # aren't required to lint them — only the root install is.
+      - name: Install root dependencies (ESLint)
+        run: npm ci --no-audit --no-fund
+
       # #413 — Fail PRs that introduce high/critical vulnerabilities.
       # Moderate findings are tracked but not gating (uuid<14 via svix/resend
       # is a known moderate; --audit-level=high skips moderates).
@@ -178,6 +184,16 @@ jobs:
         env:
           PR_TITLE: ${{ github.event.pull_request.title }}
         run: node scripts/check-record-type-budget.mjs
+
+      # #1290 — ESLint as a real gate. Until now lint only ran in the
+      # bypassable lint-staged pre-commit hook (eslint --fix on staged files),
+      # so rules-of-hooks / e2e-click-discipline were never enforced
+      # server-side. Fails the build on any ESLint *error*. The rule set is
+      # still minimal (react-hooks + e2e-click-discipline); tightening it
+      # (exhaustive-deps→error, typed promise rules, import/no-cycle) and a
+      # repo-wide Prettier pass are tracked as follow-ups to #1290.
+      - name: Lint (ESLint)
+        run: npm run lint
 
       - name: Type check server
         run: cd server && npm run build

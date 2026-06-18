@@ -42,7 +42,7 @@ set -uo pipefail
 # To update: review `git diff` of .forgejo/workflows/ci.yml, confirm this
 # script still mirrors the `lint-typecheck` + `test` jobs (update the checks
 # below if they changed), then set this to the value preflight prints.
-EXPECTED_CI_HASH="1861ad9513dd9f6ae798a64fbc334c3d5ad610c47115a453729325948ea82290"
+EXPECTED_CI_HASH="c1899f2c079fdf49afadb29a8924f388aa498803e98c4bb3c9f6db66abc776bf"
 
 # --- setup ------------------------------------------------------------------
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || {
@@ -198,6 +198,11 @@ run_check "no numeric ID patterns" check_numeric_ids
 
 # #761 — ratchet: fail if `Record<string, unknown>` count climbs above baseline.
 run_check "Record<string,unknown> budget" node scripts/check-record-type-budget.mjs
+
+# #1290 — ESLint gate (mirrors ci.yml's `Lint (ESLint)` step). Fails on any
+# ESLint error. Until #1290 this only ran in the bypassable lint-staged
+# pre-commit hook; now it's part of the gate too.
+run_check "eslint" npm run lint
 
 # --- 2. typecheck + build (lint-typecheck job) ------------------------------
 echo "${BOLD}typecheck + build${RESET}"
