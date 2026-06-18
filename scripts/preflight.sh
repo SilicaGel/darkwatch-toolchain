@@ -19,7 +19,7 @@
 #
 # WHAT IT DOES NOT COVER (separate workflows / jobs — run them directly):
 #   - ci.yml `smoke` job   → Playwright smoke specs (browser + servers + DB)
-#   - e2e.yml              → full nightly Playwright suite
+#   - e2e-full.yml         → full nightly Playwright suite (whole tests/e2e)
 #   - lighthouse.yml       → Lighthouse CI
 #
 # DRIFT GUARD
@@ -42,7 +42,7 @@ set -uo pipefail
 # To update: review `git diff` of .forgejo/workflows/ci.yml, confirm this
 # script still mirrors the `lint-typecheck` + `test` jobs (update the checks
 # below if they changed), then set this to the value preflight prints.
-EXPECTED_CI_HASH="d24c3068946e3d027eba226dbeab5c6b89cbfb3db483d1c3fd8812710f83157f"
+EXPECTED_CI_HASH="1861ad9513dd9f6ae798a64fbc334c3d5ad610c47115a453729325948ea82290"
 
 # --- setup ------------------------------------------------------------------
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || {

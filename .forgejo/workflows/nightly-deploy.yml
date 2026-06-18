@@ -1,7 +1,7 @@
 name: Nightly Deploy
 
-# Orchestrates the full overnight gate: (e2e + e2e-full) → smoke walk → deploy.
-# The deploy gate must pass; a failure in any blocks the deploy.
+# Orchestrates the overnight gate: (e2e-full ‖ smoke-walk) → deploy.
+# The deploy gate must pass; a failure in either blocks the deploy.
 #
 # e2e-full runs the ENTIRE Playwright suite (#1141) — every spec, no allow-list.
 # It is a deploy GATE (deploy `needs` it): the nightly deploy must not ship if
@@ -9,8 +9,15 @@ name: Nightly Deploy
 # `test.fixme` (tracked in #1141) so a clean suite stays green; if a flaky spec
 # ever blocks the deploy, prefer adding retries/quarantine over dropping the gate.
 #
-# Logic lives in the called workflows — this file is intentionally just
-# an orchestrator. Add/remove curated specs in e2e.yml, not here.
+# #1270 — the curated `e2e.yml` job was removed. It was a strict subset of
+# e2e-full and added nothing to the deploy gate (e2e-full already covers it);
+# keeping it only meant a second hand-maintained allow-list that could drift.
+# smoke-walk (the exploratory crawler) now runs in parallel with e2e-full rather
+# than gating on e2e, so the nightly wall-clock is max(e2e-full, smoke-walk).
+#
+# Logic lives in the called workflows — this file is intentionally just an
+# orchestrator. Curate the per-PR spec set in ci.yml's `smoke` job (guarded by
+# scripts/check-e2e-tiers.mjs); the nightly runs everything via e2e-full.
 
 on:
   schedule:
@@ -18,21 +25,17 @@ on:
   workflow_dispatch:
 
 jobs:
-  e2e:
-    uses: ./.forgejo/workflows/e2e.yml
-    secrets: inherit
-
-  # Whole suite (no allow-list). Runs in parallel with the curated e2e job.
+  # Whole suite (no allow-list), sharded 3×.
   e2e-full:
     uses: ./.forgejo/workflows/e2e-full.yml
     secrets: inherit
 
+  # Exploratory crawler — independent of e2e-full; both gate the deploy.
   smoke-walk:
-    needs: e2e
     uses: ./.forgejo/workflows/smoke-walk.yml
     secrets: inherit
 
   deploy:
-    needs: [e2e, e2e-full, smoke-walk]
+    needs: [e2e-full, smoke-walk]
     uses: ./.forgejo/workflows/deploy.yml
     secrets: inherit

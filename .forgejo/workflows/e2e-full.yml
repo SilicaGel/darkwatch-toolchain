@@ -2,12 +2,15 @@ name: E2E Full Suite
 
 # Runs the ENTIRE Playwright e2e suite — every spec in tests/e2e, with NO
 # hard-coded allow-list (#1141). The per-PR pipeline (ci.yml's `smoke` job) runs
-# a curated, fast subset; the nightly `e2e.yml` runs its own curated batches.
-# Neither has a `pull_request` trigger except ci.yml — `e2e.yml` is nightly-only
-# (born as nightly-e2e.yml, #129) and is NOT a per-PR pipeline. This full job
-# exists so that specs which aren't on those curated lists — maps, spells,
+# a curated, fast subset (guarded by scripts/check-e2e-tiers.mjs so no spec is
+# silently left out of every pre-merge tier). This full job is the nightly
+# backstop + deploy gate, so specs not on the smoke list — maps, spells,
 # concurrency, mobile, presence — can't silently rot in the dark. It runs nightly
-# and on demand. (Topology cleanup + drift-proofing tracked in #1270.)
+# (via nightly-deploy.yml) and on demand (workflow_dispatch).
+#
+# #1270 — the old curated nightly `e2e.yml` was removed: it was a strict subset
+# of this suite and added nothing to the deploy gate, just a second drift-prone
+# allow-list. This full suite is now the only nightly Playwright gate.
 #
 # DEPLOY GATE: nightly-deploy.yml's deploy job `needs` this, so a regression in
 # any covered spec blocks the nightly deploy. Known-broken specs are quarantined
@@ -16,8 +19,7 @@ name: E2E Full Suite
 #
 # Memory: the suite is sharded into 3 with a Vite restart between shards. A
 # single long-lived Vite preview accumulates heap across test contexts and gets
-# OOM-killed mid-suite in the capped CI container (same reason e2e.yml restarts
-# Vite between its batches).
+# OOM-killed mid-suite in the capped CI container, so we restart it between shards.
 
 on:
   workflow_call:
@@ -168,7 +170,7 @@ jobs:
           TEST_HOOK_SECRET: e2e-test-hook-secret
           JWT_SECRET: e2e-test-secret
           CLIENT_URL: http://localhost:5173
-          # Same socket-cap relaxation as e2e.yml (#388): the suite runs as one
+          # Same socket-cap relaxation as ci.yml's smoke job (#388): the suite runs as one
           # DM user; closed-page sockets reap slower than they accumulate.
           SOCKET_PER_USER_CAP: "1000"
           SOCKET_PER_IP_CAP: "1000"
@@ -209,7 +211,7 @@ jobs:
         # The first specs hit cold connection pools, V8 JIT and socket handlers,
         # exceeding their waits (cold-start flake — e.g. 566-npc-combat's first
         # test). Priming with a few authed requests lands the first specs on
-        # warm code paths. Mirrors e2e.yml.
+        # warm code paths. Mirrors ci.yml's smoke job.
         run: |
           set -e
           curl -s -c /tmp/dm-cookies.txt -X POST http://localhost:3001/api/auth/login \
@@ -319,7 +321,7 @@ jobs:
 
       - name: Upload E2E full-suite logs artifact
         if: always()
-        # v4 unsupported on Forgejo's actions backend; pin v3 (see e2e.yml).
+        # v4 unsupported on Forgejo's actions backend; pin v3 (see ci.yml's smoke job).
         uses: actions/upload-artifact@ff15f0306b3f739f7b6fd43fb5d26cd321bd4de5 # v3.2.1
         with:
           name: e2e-full-logs-${{ github.run_id }}

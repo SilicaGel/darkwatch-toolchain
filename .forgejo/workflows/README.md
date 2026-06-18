@@ -7,7 +7,7 @@ This directory contains the CI and nightly E2E pipelines for Darkwatch.
 The workflows depend on the following secrets, configured in
 **Forgejo → Repo Settings → Secrets**.
 
-### CI database (`ci.yml`, `nightly-e2e.yml`)
+### CI database (`ci.yml`, `e2e-full.yml`)
 
 The ephemeral MariaDB service containers that back the `test` and `smoke`
 jobs pull their credentials from these secrets. They only exist for the
@@ -56,9 +56,11 @@ production MariaDB and are **separate** from the CI secrets above.
 
   The Forgejo runner's `capacity` is set to 3 so the three primary jobs run
   concurrently rather than serialising on one slot.
-- **`nightly-e2e.yml`** — runs nightly at 03:00 UTC. Brings up the full
-  app stack and runs the complete Playwright E2E suite. Heavier than CI;
-  isolated to off-hours so the Pi4 runner isn't competing with daytime PR work.
+- **`e2e-full.yml`** — runs nightly at 03:00 UTC (via `nightly-deploy.yml`) and
+  on manual dispatch. Brings up the full app stack and runs the **entire**
+  Playwright E2E suite (no allow-list, sharded 3×). Heavier than CI; isolated to
+  off-hours so the Pi4 runner isn't competing with daytime PR work. (#1270 removed
+  the old curated `e2e.yml`; e2e-full is the sole nightly Playwright gate.)
 - **`smoke-walk.yml`** — runs on every push to `main` (non-blocking,
   `continue-on-error: true`). Starts the app in Vite dev mode and runs
   `npm run smoke-walk` — an exploratory SPA walker that catches console errors,
