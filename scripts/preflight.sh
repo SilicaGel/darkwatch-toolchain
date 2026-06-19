@@ -265,6 +265,12 @@ else
   run_check "dead-code (knip)" node scripts/knip-gate.mjs
 fi
 
+# --- 6. import-cycle gate (mirrors import-cycles.yml's madge check) ----------
+# Hard gate, baseline zero. Uses the madge binary from the server workspace
+# (installed by the server build step above), so no extra install. See
+# scripts/check-import-cycles.mjs for why madge (not ESLint) is the detector.
+run_check "import cycles (madge)" npm run cycles
+
 # --- summary ----------------------------------------------------------------
 echo
 echo "${BOLD}━━━ Summary ━━━${RESET}"

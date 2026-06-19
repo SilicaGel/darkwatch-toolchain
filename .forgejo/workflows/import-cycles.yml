@@ -1,0 +1,40 @@
+name: Import cycles (madge)
+
+# #1303 — hard gate against circular imports. ESLint's import/no-cycle has no
+# ESLint-10 support and import-x under-reports through our re-export barrels, so
+# madge is the detector (see scripts/check-import-cycles.mjs). Baseline is zero
+# (server cleared in #1303, client in #1302/#1304).
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  cycles:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Use Node 22
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: |
+            server/package-lock.json
+
+      # madge lives in the server workspace (its typescript ^5 dep matches
+      # server's; adding it to root would downgrade root TS 6 → 5 and break
+      # type-aware ESLint). Installing server deps gives us the madge binary.
+      # No other workspace deps are needed — madge parses source text + tsconfig
+      # and treats node_modules imports as leaves, so client/src is analysed
+      # without client deps installed.
+      - name: Install server dependencies
+        run: cd server && npm ci --no-audit --no-fund
+
+      - name: Check import cycles (server/src + client/src)
+        run: npm run cycles
