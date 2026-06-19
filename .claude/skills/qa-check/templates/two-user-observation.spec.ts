@@ -110,6 +110,8 @@ test("#NNN — short description of what's being verified", async ({ browser }) 
   // execFileSync (not exec) — no shell, no injection risk on the path.
   try {
     execFileSync("open", [resolve(OUT, "contact-sheet.html")]);
-  } catch { /* noop */ }
+  } catch {
+    /* noop */
+  }
   console.log(`\n  → tests/qa-check/<N>/contact-sheet.html\n`);
 });

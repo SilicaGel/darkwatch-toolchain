@@ -71,7 +71,7 @@ export function parseTestPlanNumbers(body) {
 
 /** Did the PR add/modify the changelog? */
 export function changelogTouched(changedFiles) {
-  const list = changedFiles instanceof Set ? [...changedFiles] : changedFiles ?? [];
+  const list = changedFiles instanceof Set ? [...changedFiles] : (changedFiles ?? []);
   return list.some((f) => typeof f === "string" && f.trim() === CHANGELOG_PATH);
 }
 
@@ -136,7 +136,10 @@ function gitChangedFiles() {
   if (!base) return null;
   const out = tryGit(["diff", "--name-only", `${base}...HEAD`]);
   if (out === null) return null;
-  return out.split("\n").map((s) => s.trim()).filter(Boolean);
+  return out
+    .split("\n")
+    .map((s) => s.trim())
+    .filter(Boolean);
 }
 
 function main() {

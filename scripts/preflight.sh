@@ -42,7 +42,7 @@ set -uo pipefail
 # To update: review `git diff` of .forgejo/workflows/ci.yml, confirm this
 # script still mirrors the `lint-typecheck` + `test` jobs (update the checks
 # below if they changed), then set this to the value preflight prints.
-EXPECTED_CI_HASH="c1899f2c079fdf49afadb29a8924f388aa498803e98c4bb3c9f6db66abc776bf"
+EXPECTED_CI_HASH="10f7a6e06e6fe73110c3ead0d7383df5c588be3fa5750f082b910aad66209c17"
 
 # --- setup ------------------------------------------------------------------
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || {
@@ -203,6 +203,10 @@ run_check "Record<string,unknown> budget" node scripts/check-record-type-budget.
 # ESLint error. Until #1290 this only ran in the bypassable lint-staged
 # pre-commit hook; now it's part of the gate too.
 run_check "eslint" npm run lint
+
+# #1292 — Prettier format gate (mirrors ci.yml's `Format check (Prettier)`
+# step). Code-only scope; *.md and .forgejo/ are excluded in .prettierignore.
+run_check "prettier format" npm run format:check
 
 # --- 2. typecheck + build (lint-typecheck job) ------------------------------
 echo "${BOLD}typecheck + build${RESET}"

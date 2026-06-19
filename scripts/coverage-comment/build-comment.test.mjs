@@ -51,14 +51,14 @@ describe("parseDiff", () => {
       "+line 21",
     ].join("\n");
     const result = parseDiff(diff);
-    assert.deepEqual([...result.get("src/foo.ts")].sort((a, b) => a - b), [11, 12, 13, 21]);
+    assert.deepEqual(
+      [...result.get("src/foo.ts")].sort((a, b) => a - b),
+      [11, 12, 13, 21],
+    );
   });
 
   it("omits pure-deletion hunks (+N,0)", () => {
-    const diff = [
-      "+++ b/src/foo.ts",
-      "@@ -10,5 +10,0 @@",
-    ].join("\n");
+    const diff = ["+++ b/src/foo.ts", "@@ -10,5 +10,0 @@"].join("\n");
     const result = parseDiff(diff);
     // File appears in the diff header but has no added lines → dropped.
     assert.equal(result.has("src/foo.ts"), false);
@@ -70,12 +70,7 @@ describe("parseDiff", () => {
   });
 
   it("handles multiple files", () => {
-    const diff = [
-      "+++ b/a.ts",
-      "@@ -0,0 +1,2 @@",
-      "+++ b/b.ts",
-      "@@ -0,0 +5,1 @@",
-    ].join("\n");
+    const diff = ["+++ b/a.ts", "@@ -0,0 +1,2 @@", "+++ b/b.ts", "@@ -0,0 +5,1 @@"].join("\n");
     const result = parseDiff(diff);
     assert.deepEqual([...result.get("a.ts")], [1, 2]);
     assert.deepEqual([...result.get("b.ts")], [5]);
@@ -207,8 +202,14 @@ describe("classifyFileDual", () => {
   });
 
   it("populates coveredUnit / totalUnit / coveredInt / totalInt", () => {
-    const unitEntry = entry([[stmt(1, 0, 1, 10), 1], [stmt(2, 0, 2, 10), 0]]);
-    const intEntry = entry([[stmt(1, 0, 1, 10), 0], [stmt(2, 0, 2, 10), 1]]);
+    const unitEntry = entry([
+      [stmt(1, 0, 1, 10), 1],
+      [stmt(2, 0, 2, 10), 0],
+    ]);
+    const intEntry = entry([
+      [stmt(1, 0, 1, 10), 0],
+      [stmt(2, 0, 2, 10), 1],
+    ]);
     const r = classifyFileDual(unitEntry, intEntry, [1, 2]);
     assert.equal(r.coveredUnit, 1);
     assert.equal(r.totalUnit, 2);
@@ -220,14 +221,16 @@ describe("classifyFileDual", () => {
 // ── renderSplitTable ──────────────────────────────────────────────────────
 describe("renderSplitTable", () => {
   it("renders unit / integration / combined rows", () => {
-    const files = [{
-      covered: [1, 2],
-      uncovered: [],
-      coveredUnit: 1,
-      totalUnit: 2,
-      coveredInt: 2,
-      totalInt: 2,
-    }];
+    const files = [
+      {
+        covered: [1, 2],
+        uncovered: [],
+        coveredUnit: 1,
+        totalUnit: 2,
+        coveredInt: 2,
+        totalInt: 2,
+      },
+    ];
     const t = renderSplitTable(files);
     assert.match(t, /Unit/);
     assert.match(t, /Integration/);
@@ -237,7 +240,9 @@ describe("renderSplitTable", () => {
   });
 
   it("shows — for zero-total rows", () => {
-    const files = [{ covered: [], uncovered: [], coveredUnit: 0, totalUnit: 0, coveredInt: 0, totalInt: 0 }];
+    const files = [
+      { covered: [], uncovered: [], coveredUnit: 0, totalUnit: 0, coveredInt: 0, totalInt: 0 },
+    ];
     const t = renderSplitTable(files);
     assert.match(t, /—/);
   });
@@ -263,7 +268,10 @@ describe("renderSnippet", () => {
 
   it("shows muted bar on covered context lines when coverageEntry provided", () => {
     const src = ["ctx", "changed", "ctx2"];
-    const e = entry([[stmt(1, 0, 1, 10), 3], [stmt(3, 0, 3, 10), 0]]);
+    const e = entry([
+      [stmt(1, 0, 1, 10), 3],
+      [stmt(3, 0, 3, 10), 0],
+    ]);
     const out = renderSnippet(src, [2], [], null, e);
     // Line 1 (context, covered) — muted green bar
     assert.match(out, /aceebb/);
@@ -280,9 +288,7 @@ describe("buildComment", () => {
 
   it("reports 100% when every changed line is covered", () => {
     const diff = ["+++ b/src/a.ts", "@@ -0,0 +1,1 @@"].join("\n");
-    const coverage = new Map([
-      ["src/a.ts", entry([[stmt(1, 0, 1, 10), 5]])],
-    ]);
+    const coverage = new Map([["src/a.ts", entry([[stmt(1, 0, 1, 10), 5]])]]);
     const md = buildComment({
       diffText: diff,
       coverageByPath: coverage,
@@ -402,18 +408,24 @@ describe("buildComment", () => {
     const diff = ["+++ b/src/a.ts", "@@ -0,0 +1,3 @@"].join("\n");
     // Unit covers line 1, integration covers line 2, both cover line 3.
     const unitCoverage = new Map([
-      ["src/a.ts", entry([
-        [stmt(1, 0, 1, 10), 1],
-        [stmt(2, 0, 2, 10), 0],
-        [stmt(3, 0, 3, 10), 1],
-      ])],
+      [
+        "src/a.ts",
+        entry([
+          [stmt(1, 0, 1, 10), 1],
+          [stmt(2, 0, 2, 10), 0],
+          [stmt(3, 0, 3, 10), 1],
+        ]),
+      ],
     ]);
     const intCoverage = new Map([
-      ["src/a.ts", entry([
-        [stmt(1, 0, 1, 10), 0],
-        [stmt(2, 0, 2, 10), 1],
-        [stmt(3, 0, 3, 10), 1],
-      ])],
+      [
+        "src/a.ts",
+        entry([
+          [stmt(1, 0, 1, 10), 0],
+          [stmt(2, 0, 2, 10), 1],
+          [stmt(3, 0, 3, 10), 1],
+        ]),
+      ],
     ]);
     const md = buildComment({
       diffText: diff,

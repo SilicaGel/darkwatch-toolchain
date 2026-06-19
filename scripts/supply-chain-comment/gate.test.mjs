@@ -41,14 +41,18 @@ describe("shouldFailGate", () => {
     });
   });
   it("fails on a net-new error-action alert", () => {
-    assert.equal(shouldFailGate({ netNew: [a("installScripts", "error")], prTitle: "x" }).fail, true);
+    assert.equal(
+      shouldFailGate({ netNew: [a("installScripts", "error")], prTitle: "x" }).fail,
+      true,
+    );
   });
   it("fails on a net-new malware-floor alert even at action:ignore", () => {
     assert.equal(shouldFailGate({ netNew: [a("malware", "ignore")], prTitle: "x" }).fail, true);
   });
   it("escape hatch in PR title skips the gate", () => {
     assert.equal(
-      shouldFailGate({ netNew: [a("malware", "ignore")], prTitle: `fix stuff ${ALLOW_MARKER}` }).fail,
+      shouldFailGate({ netNew: [a("malware", "ignore")], prTitle: `fix stuff ${ALLOW_MARKER}` })
+        .fail,
       false,
     );
   });

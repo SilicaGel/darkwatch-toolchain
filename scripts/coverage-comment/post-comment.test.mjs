@@ -27,10 +27,7 @@ describe("isOptedOut", () => {
   });
 
   it("returns true when the PR has a 'no-coverage' label", () => {
-    assert.equal(
-      isOptedOut({ title: "fix", labels: [{ name: "no-coverage" }] }),
-      true,
-    );
+    assert.equal(isOptedOut({ title: "fix", labels: [{ name: "no-coverage" }] }), true);
   });
 
   it("returns false for normal PRs", () => {

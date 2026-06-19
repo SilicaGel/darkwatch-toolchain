@@ -20,7 +20,14 @@
 import { execFileSync } from "node:child_process";
 import { runKnip, summarise } from "./dead-code-comment/run-and-post.mjs";
 
-const CATEGORIES = ["dependencies", "devDependencies", "unlisted", "exports", "types", "duplicates"];
+const CATEGORIES = [
+  "dependencies",
+  "devDependencies",
+  "unlisted",
+  "exports",
+  "types",
+  "duplicates",
+];
 
 // Pure: given knip's summarised output + the set of files the branch changed,
 // return the offender strings located in changed files. Exported for testing.

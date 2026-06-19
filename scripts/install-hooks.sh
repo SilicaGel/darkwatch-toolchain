@@ -67,4 +67,15 @@ echo "Installing Darkwatch git hooks into $HOOKS_DIR"
 # pre-commit is a composite that chains pre-commit-no-main + lint-staged (#389).
 install_one pre-commit scripts/hooks/pre-commit
 install_one pre-push   scripts/hooks/pre-push-no-main-ahead
+
+# #1292 — make local `git blame` skip the bulk, mechanical commits listed in
+# .git-blame-ignore-revs (e.g. the repo-wide Prettier pass), so blame shows the
+# real author of each line. Forgejo's web blame honours the file on its own;
+# this does the same for the CLI. Idempotent; writes the shared repo config so
+# it applies across all worktrees.
+if [ -f "$REPO_ROOT/.git-blame-ignore-revs" ]; then
+  git config blame.ignoreRevsFile .git-blame-ignore-revs
+  echo "  • configured blame.ignoreRevsFile → .git-blame-ignore-revs"
+fi
+
 echo "Done. Bypass an individual hook with --no-verify when truly needed."

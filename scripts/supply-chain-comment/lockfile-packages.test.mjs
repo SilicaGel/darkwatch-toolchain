@@ -117,5 +117,8 @@ test("a NEW VERSION of an existing dep counts as added (bumps are scanned)", () 
   const head = new Set(["lodash@4.17.21"]); // patch bump = new pkg@version
   const added = lockfileAddedSet(base, head);
   const alerts = [{ pkg: "lodash", version: "4.17.21", type: "gptAnomaly" }];
-  assert.deepEqual(filterAlertsToAdded(alerts, added).map((a) => a.pkg), ["lodash"]);
+  assert.deepEqual(
+    filterAlertsToAdded(alerts, added).map((a) => a.pkg),
+    ["lodash"],
+  );
 });

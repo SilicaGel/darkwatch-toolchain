@@ -170,7 +170,9 @@ function buildBody(data, assertions) {
       // Assertion results carry the URL they came from — surface the page
       // path so a failure is attributable when several pages are audited.
       const where = f.url ? `\`${urlPath(f.url)}\` ` : "";
-      parts.push(`- ${where}\`${f.auditId ?? f.assertion}\` — ${f.actual} (expected ${f.operator} ${f.expected})`);
+      parts.push(
+        `- ${where}\`${f.auditId ?? f.assertion}\` — ${f.actual} (expected ${f.operator} ${f.expected})`,
+      );
     }
     if (failures.length > 15) parts.push(`- …and ${failures.length - 15} more`);
     parts.push("");

@@ -2,7 +2,14 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { alertKey, diffAlerts } from "./diff-alerts.mjs";
 
-const a = (pkg, version, type, severity = "high") => ({ pkg, version, type, severity, title: type, url: "" });
+const a = (pkg, version, type, severity = "high") => ({
+  pkg,
+  version,
+  type,
+  severity,
+  title: type,
+  url: "",
+});
 
 describe("alertKey", () => {
   it("keys by pkg@version:type", () => {

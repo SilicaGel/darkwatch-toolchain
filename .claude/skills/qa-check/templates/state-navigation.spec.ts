@@ -73,7 +73,7 @@ test("#NNN — short description of what's being verified", async ({ browser }) 
   // CharacterDetail's pencil edit toggle is `button[title="Edit character"]`.
   // Wait for the menu/state to render before locating downstream elements.
   const target = page.getByText(/Background/i).first();
-  if (await target.count() > 0) {
+  if ((await target.count()) > 0) {
     const bbox = await target.boundingBox();
     if (bbox) {
       await page.screenshot({
@@ -87,7 +87,9 @@ test("#NNN — short description of what's being verified", async ({ browser }) 
       });
     }
   } else {
-    console.log("  · target not found — feature may not have rendered, or seed data is missing required fields");
+    console.log(
+      "  · target not found — feature may not have rendered, or seed data is missing required fields",
+    );
   }
 
   await ctx.close();
@@ -117,6 +119,8 @@ test("#NNN — short description of what's being verified", async ({ browser }) 
   // execFileSync (not exec) — no shell, no injection risk on the path.
   try {
     execFileSync("open", [resolve(OUT, "contact-sheet.html")]);
-  } catch { /* noop */ }
+  } catch {
+    /* noop */
+  }
   console.log(`\n  → tests/qa-check/<N>/contact-sheet.html\n`);
 });

@@ -19,7 +19,11 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { parseDiffAdded } from "./parse-socket.mjs";
 import { diffAlerts } from "./diff-alerts.mjs";
-import { collectLockfilePackages, lockfileAddedSet, filterAlertsToAdded } from "./lockfile-packages.mjs";
+import {
+  collectLockfilePackages,
+  lockfileAddedSet,
+  filterAlertsToAdded,
+} from "./lockfile-packages.mjs";
 import { shouldFailGate, isBlocking } from "./gate.mjs";
 import { buildComment, MARKER, MARKER_RE, CURRENT_VERSION } from "./build-comment.mjs";
 
@@ -127,14 +131,17 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 // surfaced in the comment so a coverage gap can't hide again.
 function createScan(label, dir) {
   const manifests = MANIFESTS.filter((f) => existsSync(join(dir, f)));
-  console.error(`[supply-chain-bot] ${label} manifests on disk (${manifests.length}): ${manifests.join(", ") || "NONE"}`);
+  console.error(
+    `[supply-chain-bot] ${label} manifests on disk (${manifests.length}): ${manifests.join(", ") || "NONE"}`,
+  );
   if (manifests.length === 0) {
     lastSocketError = `${label}: no manifests found at ${dir}`;
     console.error(`[supply-chain-bot] ${lastSocketError}`);
     return { id: null, manifests: 0 };
   }
   const created = runSocket(["scan", "create", "--org", ORG, "--json", "."], dir);
-  if (created && created.ok === false) lastSocketError = `${label} scan create: ${created.message ?? "ok:false"}`;
+  if (created && created.ok === false)
+    lastSocketError = `${label} scan create: ${created.message ?? "ok:false"}`;
   const id = created?.ok ? created?.data?.id : null;
   if (!id && !lastSocketError) lastSocketError = `${label}: scan create returned no id`;
   if (!id) console.error(`[supply-chain-bot] ${lastSocketError}`);
@@ -161,7 +168,9 @@ async function findBotComments(base, headers, prNumber) {
   const matches = [];
   const limit = 50;
   for (let page = 1; page <= 50; page++) {
-    const res = await fetch(`${base}/issues/${prNumber}/comments?page=${page}&limit=${limit}`, { headers });
+    const res = await fetch(`${base}/issues/${prNumber}/comments?page=${page}&limit=${limit}`, {
+      headers,
+    });
     if (!res.ok) {
       console.error(`[supply-chain-bot] list comments failed: ${res.status}`);
       return matches;
@@ -178,23 +187,33 @@ async function findBotComments(base, headers, prNumber) {
 }
 
 async function patchComment(base, headers, id, body) {
-  const res = await fetch(`${base}/issues/comments/${id}`, { method: "PATCH", headers, body: JSON.stringify({ body }) });
+  const res = await fetch(`${base}/issues/comments/${id}`, {
+    method: "PATCH",
+    headers,
+    body: JSON.stringify({ body }),
+  });
   if (!res.ok) console.error(`[supply-chain-bot] patch ${id} failed: ${res.status}`);
 }
 async function createComment(base, headers, prNumber, body) {
-  const res = await fetch(`${base}/issues/${prNumber}/comments`, { method: "POST", headers, body: JSON.stringify({ body }) });
+  const res = await fetch(`${base}/issues/${prNumber}/comments`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ body }),
+  });
   if (!res.ok) console.error(`[supply-chain-bot] create failed: ${res.status}`);
 }
 async function deleteComment(base, headers, id) {
   const res = await fetch(`${base}/issues/comments/${id}`, { method: "DELETE", headers });
-  if (!res.ok && res.status !== 404) console.error(`[supply-chain-bot] delete ${id} failed: ${res.status}`);
+  if (!res.ok && res.status !== 404)
+    console.error(`[supply-chain-bot] delete ${id} failed: ${res.status}`);
 }
 
 // Find-or-create the bot's single comment (deletes stale older-version copies).
 async function upsertComment(base, headers, prNumber, body) {
   const found = await findBotComments(base, headers, prNumber);
   const same = found.find((c) => c.version === CURRENT_VERSION);
-  for (const c of found.filter((c) => c.version !== CURRENT_VERSION)) await deleteComment(base, headers, c.id);
+  for (const c of found.filter((c) => c.version !== CURRENT_VERSION))
+    await deleteComment(base, headers, c.id);
   if (same) await patchComment(base, headers, same.id, body);
   else await createComment(base, headers, prNumber, body);
 }
@@ -216,13 +235,15 @@ async function main() {
     process.exit(0);
   }
 
-  if (!process.env.SOCKET_SECURITY_API_KEY) await skip("`SOCKET_SECURITY_API_KEY` not available to the job");
+  if (!process.env.SOCKET_SECURITY_API_KEY)
+    await skip("`SOCKET_SECURITY_API_KEY` not available to the job");
   if (!BASE_DIR) await skip("BASE_DIR not set");
 
   // Create a scan for each tree, then diff them SERVER-SIDE (base = older).
   const head = createScan("head", HEAD_DIR);
   const base = createScan("base", BASE_DIR);
-  if (!head.id || !base.id) await skip(`a Socket scan failed — \`${lastSocketError || "unknown"}\``);
+  if (!head.id || !base.id)
+    await skip(`a Socket scan failed — \`${lastSocketError || "unknown"}\``);
 
   const diff = await diffScans(base.id, head.id);
   if (!diff) await skip(`Socket scan diff failed — \`${lastSocketError || "unknown"}\``);
@@ -231,7 +252,9 @@ async function main() {
   if (!parsed.found) {
     // Couldn't locate the "added" list — surface the raw shape so the first
     // real run reveals it (CI logs aren't fetchable on this Forgejo, #1119).
-    await skip(`couldn't parse scan-diff output — top-level keys: \`${parsed.shapeKeys.join(", ") || "none"}\` (needs a parser tweak)`);
+    await skip(
+      `couldn't parse scan-diff output — top-level keys: \`${parsed.shapeKeys.join(", ") || "none"}\` (needs a parser tweak)`,
+    );
   }
 
   // #723 follow-up: the Socket scan-diff keys off the package.json *manifests*,

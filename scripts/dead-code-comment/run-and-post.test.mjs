@@ -35,7 +35,10 @@ describe("shouldFailGate (#845 gate decision)", () => {
   });
 
   it("treats the escape-hatch marker as a plain substring (anywhere in the title)", () => {
-    assert.equal(shouldFailGate({ total: 2, prTitle: "[allow-dead-code] generated types" }).fail, false);
+    assert.equal(
+      shouldFailGate({ total: 2, prTitle: "[allow-dead-code] generated types" }).fail,
+      false,
+    );
     assert.equal(shouldFailGate({ total: 2, prTitle: "mid [allow-dead-code] title" }).fail, false);
   });
 
@@ -56,7 +59,12 @@ describe("summarise", () => {
       files: ["a.ts", "b.ts"],
       issues: [
         { file: "x.ts", exports: [{ name: "foo" }], types: [{ name: "T" }] },
-        { file: "y.ts", dependencies: [{ name: "left-pad" }], unlisted: [{ name: "hast" }], duplicates: [{}] },
+        {
+          file: "y.ts",
+          dependencies: [{ name: "left-pad" }],
+          unlisted: [{ name: "hast" }],
+          duplicates: [{}],
+        },
       ],
     };
     const { counts } = summarise(report);

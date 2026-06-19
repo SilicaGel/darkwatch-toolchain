@@ -24,11 +24,14 @@ describe("selectNewOffenders", () => {
       "server/src/repositories/mapWallsRepository.ts",
     ]);
     const offenders = selectNewOffenders({ files, issues, changedFiles });
-    assert.deepEqual(offenders.sort(), [
-      "types: client/src/lib/splitWallForDoor.ts: WallKind",
-      "types: client/src/lib/splitWallForDoor.ts: WallSegment",
-      "types: server/src/repositories/mapWallsRepository.ts: SplitSegment",
-    ].sort());
+    assert.deepEqual(
+      offenders.sort(),
+      [
+        "types: client/src/lib/splitWallForDoor.ts: WallKind",
+        "types: client/src/lib/splitWallForDoor.ts: WallSegment",
+        "types: server/src/repositories/mapWallsRepository.ts: SplitSegment",
+      ].sort(),
+    );
   });
 
   it("returns [] when none of the findings are in changed files", () => {

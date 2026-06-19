@@ -85,10 +85,9 @@ async function findBotComments(base, headers, prNumber) {
   const matches = [];
   const limit = 50;
   for (let page = 1; page <= 50; page++) {
-    const res = await fetch(
-      `${base}/issues/${prNumber}/comments?page=${page}&limit=${limit}`,
-      { headers },
-    );
+    const res = await fetch(`${base}/issues/${prNumber}/comments?page=${page}&limit=${limit}`, {
+      headers,
+    });
     if (!res.ok) {
       throw new Error(`list comments: ${res.status} ${await res.text()}`);
     }
@@ -220,8 +219,7 @@ async function main() {
 // Run only when invoked directly, not when imported by tests.
 const invokedDirectly =
   process.argv[1] &&
-  (process.argv[1].endsWith("post-comment.mjs") ||
-    process.argv[1].endsWith("post-comment"));
+  (process.argv[1].endsWith("post-comment.mjs") || process.argv[1].endsWith("post-comment"));
 if (invokedDirectly) {
   await main();
 }

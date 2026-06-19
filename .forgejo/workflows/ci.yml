@@ -195,6 +195,12 @@ jobs:
       - name: Lint (ESLint)
         run: npm run lint
 
+      # #1292 — Prettier as a gate, after the one-time code format pass. Scope
+      # is code only: *.md and .forgejo/ are excluded in .prettierignore (prose
+      # and CI YAML stay hand-formatted). Fails on any unformatted code file.
+      - name: Format check (Prettier)
+        run: npm run format:check
+
       - name: Type check server
         run: cd server && npm run build
 

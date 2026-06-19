@@ -54,6 +54,9 @@ export function buildComment({ blocking = [], informational = [], blocked, count
       "</details>",
     );
   }
-  parts.push("", "_Scanned diff-forward vs `main`; the existing tree is trusted (see #723 baseline)._");
+  parts.push(
+    "",
+    "_Scanned diff-forward vs `main`; the existing tree is trusted (see #723 baseline)._",
+  );
   return parts.join("\n");
 }

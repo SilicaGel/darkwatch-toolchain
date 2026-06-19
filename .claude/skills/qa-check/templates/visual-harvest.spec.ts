@@ -94,7 +94,11 @@ test("#NNN — short description of what's being verified", async ({ browser }) 
 
     // Close the open UI state before next iteration.
     await trigger.click();
-    await page.locator('[role="menu"]').first().waitFor({ state: "hidden", timeout: 2000 }).catch(() => {});
+    await page
+      .locator('[role="menu"]')
+      .first()
+      .waitFor({ state: "hidden", timeout: 2000 })
+      .catch(() => {});
   }
 
   // ADAPT: contact-sheet copy — title, description, fix summary.

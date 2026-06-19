@@ -21,7 +21,9 @@ describe("parseSocketAlerts", () => {
     }
   });
   it("carries severity + action through from the Socket alert (resend high/monitor)", () => {
-    const r = parseSocketAlerts(raw).find((a) => a.pkg === "resend" && a.type === "unstableOwnership");
+    const r = parseSocketAlerts(raw).find(
+      (a) => a.pkg === "resend" && a.type === "unstableOwnership",
+    );
     assert.ok(r, "expected resend unstableOwnership alert in fixture");
     assert.equal(r.severity, "high");
     assert.equal(r.action, "monitor");
@@ -43,7 +45,8 @@ describe("parseDiffAdded", () => {
     assert.equal(found, true);
     assert.ok(alerts.length > 0);
     for (const al of alerts) {
-      for (const k of ["pkg", "version", "type", "severity", "action"]) assert.ok(al[k] !== undefined, `missing ${k}`);
+      for (const k of ["pkg", "version", "type", "severity", "action"])
+        assert.ok(al[k] !== undefined, `missing ${k}`);
     }
   });
   it("found=false + surfaces top-level keys when the added list isn't located", () => {

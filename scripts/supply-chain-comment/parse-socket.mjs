@@ -63,6 +63,8 @@ export function parseDiffAdded(raw) {
   const looksLikePackages = added.some((x) => x && Array.isArray(x.alerts));
   const alerts = looksLikePackages
     ? packagesToAlerts(added)
-    : packagesToAlerts(added.map((a) => ({ name: a.pkg ?? a.name, version: a.version, alerts: [a] })));
+    : packagesToAlerts(
+        added.map((a) => ({ name: a.pkg ?? a.name, version: a.version, alerts: [a] })),
+      );
   return { alerts, found: true, shapeKeys };
 }

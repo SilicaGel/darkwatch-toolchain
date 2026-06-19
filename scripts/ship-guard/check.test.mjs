@@ -173,7 +173,10 @@ Ready #3`;
     assert.equal(r.ok, false);
     // one reason for changelog, one for the missing #2/#3 blocks
     assert.equal(r.reasons.length, 2);
-    assert.match(r.reasons.find((x) => /Missing/.test(x)), /#2, #3/);
+    assert.match(
+      r.reasons.find((x) => /Missing/.test(x)),
+      /#2, #3/,
+    );
   });
 
   it("does not count a ### #N block that lives outside the Test plans section", () => {
