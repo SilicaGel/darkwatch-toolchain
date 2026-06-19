@@ -31,15 +31,15 @@ jobs:
   # ---------------------------------------------------------------------------
   lint-typecheck:
     runs-on: ubuntu-latest
-    timeout-minutes: 15  # #1263 — npm install + static checks + tsc + build; ~5-8 min typical
+    timeout-minutes: 15 # #1263 — npm install + static checks + tsc + build; ~5-8 min typical
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
 
       - name: Setup Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: '22'
-          cache: 'npm'
+          node-version: "22"
+          cache: "npm"
           cache-dependency-path: |
             package-lock.json
             server/package-lock.json
@@ -215,7 +215,7 @@ jobs:
   # ---------------------------------------------------------------------------
   test:
     runs-on: ubuntu-latest
-    timeout-minutes: 25  # #1263 — unit + int tests, DB, MinIO, coverage bot; ~10-15 min typical
+    timeout-minutes: 25 # #1263 — unit + int tests, DB, MinIO, coverage bot; ~10-15 min typical
     services:
       mariadb:
         image: mariadb:11@sha256:be1ef4fe5f14589325c08a41c76334097ce66c86264b75e1d28342c742782a61
@@ -261,8 +261,8 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: '22'
-          cache: 'npm'
+          node-version: "22"
+          cache: "npm"
           cache-dependency-path: |
             package-lock.json
             server/package-lock.json
@@ -390,7 +390,7 @@ jobs:
   # ---------------------------------------------------------------------------
   smoke:
     runs-on: ubuntu-latest
-    timeout-minutes: 30  # #1263 — build + 13 Playwright specs + DB seed; ~15-20 min typical
+    timeout-minutes: 30 # #1263 — build + 13 Playwright specs + DB seed; ~15-20 min typical
     # #969 — run inside the prebuilt CI image (Node 22 + Chromium + Playwright
     # system deps baked). No apt install-deps, no browser download, no
     # actions/setup-node. Pinned to the @playwright/test version; rebuilt by
@@ -605,7 +605,7 @@ jobs:
   # ---------------------------------------------------------------------------
   badges:
     runs-on: ubuntu-latest
-    timeout-minutes: 10  # #1263 — SSH + badge JSON gen + MinIO upload; ~2-5 min typical
+    timeout-minutes: 10 # #1263 — SSH + badge JSON gen + MinIO upload; ~2-5 min typical
     needs: [lint-typecheck, test, smoke]
     if: always() && github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
@@ -614,7 +614,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: '22'
+          node-version: "22"
 
       - name: Download coverage summaries
         # Restores server/coverage/coverage-summary.json + client/coverage/...

@@ -24,18 +24,18 @@ name: Deploy
 #   via a temp .env file used with --env-file at compose-up time).
 
 on:
-  workflow_call:    # called by nightly-deploy.yml
+  workflow_call: # called by nightly-deploy.yml
   workflow_dispatch:
     inputs:
       branch:
-        description: 'Branch to deploy (default: main)'
+        description: "Branch to deploy (default: main)"
         required: false
-        default: 'main'
+        default: "main"
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    timeout-minutes: 30  # #1263 — rsync + docker build on Pi + Caddy reload; ~15-20 min typical
+    timeout-minutes: 30 # #1263 — rsync + docker build on Pi + Caddy reload; ~15-20 min typical
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
@@ -51,8 +51,8 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: '22'
-          cache: 'npm'
+          node-version: "22"
+          cache: "npm"
           cache-dependency-path: |
             client/package-lock.json
 

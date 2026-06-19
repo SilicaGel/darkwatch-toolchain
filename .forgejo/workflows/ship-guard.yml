@@ -23,7 +23,7 @@ permissions:
 jobs:
   ship-guard:
     runs-on: ubuntu-latest
-    timeout-minutes: 10  # #1263 — checkout + git diff + node script; ~2-3 min typical
+    timeout-minutes: 10 # #1263 — checkout + git diff + node script; ~2-3 min typical
     steps:
       # fetch-depth: 0 so `git diff origin/main...HEAD` has the history it needs
       # to compute the merge-base; a shallow clone would make the diff empty.
@@ -34,7 +34,7 @@ jobs:
       - name: Use Node 22
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: '22'
+          node-version: "22"
 
       # Ensure the base ref is available for the three-dot diff. On Forgejo the
       # PR base SHA is in the event payload; fetch it so origin/main resolves.
@@ -58,7 +58,7 @@ jobs:
   # the branch before merge — no "merge to test in production" for CI YAML.
   workflow-change-reminder:
     runs-on: ubuntu-latest
-    timeout-minutes: 5  # #1263 — checkout + git diff only; ~1-2 min typical
+    timeout-minutes: 5 # #1263 — checkout + git diff only; ~1-2 min typical
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:

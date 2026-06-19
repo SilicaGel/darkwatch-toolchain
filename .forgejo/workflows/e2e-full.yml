@@ -37,7 +37,7 @@ on:
 jobs:
   e2e-full:
     runs-on: ubuntu-latest
-    timeout-minutes: 75  # #1263 — entire suite (3 shards, 2 Vite restarts); ~40-60 min typical
+    timeout-minutes: 75 # #1263 — entire suite (3 shards, 2 Vite restarts); ~40-60 min typical
     # #969 — prebuilt CI image (Node 22 + Chromium + Playwright deps baked).
     container:
       image: forge.example.com/aaron/darkwatch-ci-playwright:1.60.0

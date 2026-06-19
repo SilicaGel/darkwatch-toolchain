@@ -10,13 +10,13 @@ name: Smoke Walk
 # See tests/README.md for the full two-tier testing strategy.
 
 on:
-  workflow_call:    # called by nightly-deploy.yml
+  workflow_call: # called by nightly-deploy.yml
   workflow_dispatch:
 
 jobs:
   smoke-walk:
     runs-on: ubuntu-latest
-    timeout-minutes: 30  # #1263 — build + DB seed + exploratory Playwright crawler; ~15-20 min typical
+    timeout-minutes: 30 # #1263 — build + DB seed + exploratory Playwright crawler; ~15-20 min typical
     # #969 — prebuilt CI image (Node 22 + Chromium + Playwright deps baked).
     container:
       image: forge.example.com/aaron/darkwatch-ci-playwright:1.60.0

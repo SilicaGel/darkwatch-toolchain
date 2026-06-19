@@ -22,7 +22,7 @@ on:
 jobs:
   supply-chain:
     runs-on: ubuntu-latest
-    timeout-minutes: 10  # #1263 — Socket.dev API scan can idle-wait; kill hung jobs fast
+    timeout-minutes: 10 # #1263 — Socket.dev API scan can idle-wait; kill hung jobs fast
     steps:
       - name: Checkout head
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
@@ -38,7 +38,7 @@ jobs:
       - name: Use Node 22
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: '22'
+          node-version: "22"
 
       # The bot has no npm dependencies (node built-ins + a pinned npx Socket
       # CLI), so there's no `npm ci` step. It scans both trees, comments, gates.
