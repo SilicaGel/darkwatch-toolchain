@@ -343,6 +343,22 @@ jobs:
           MINIO_ROOT_PASSWORD: darkwatch_minio_dev
         run: cd server && npm run test:int:coverage
 
+      - name: Combine server unit + integration coverage (for the badge)
+        # #1323 — the server-coverage badge should reflect unit ∪ integration,
+        # not unit-only (~37% → ~77%). The two suites emit separate
+        # coverage-final.json files; merge them into one summary the badges job
+        # reads. Runs on PRs too (writes a local file, logs the combined %) so
+        # the merge is exercised in CI; only the main run uploads/uses it.
+        # Cosmetic — never fail the build over it.
+        if: always()
+        continue-on-error: true
+        run: |
+          mkdir -p server/coverage-combined
+          node scripts/coverage-badge/combined-summary.mjs \
+            server/coverage/coverage-final.json \
+            server/coverage-int/coverage-final.json \
+            server/coverage-combined/coverage-summary.json
+
       - name: Test client (unit)
         # Always emit coverage — PR uses it for the diff-coverage comment;
         # main uses it to write the client-coverage badge.
@@ -379,6 +395,7 @@ jobs:
           name: coverage-summaries
           path: |
             server/coverage/coverage-summary.json
+            server/coverage-combined/coverage-summary.json
             client/coverage/coverage-summary.json
           retention-days: 3
 
@@ -682,18 +699,23 @@ jobs:
               message: e2eOk ? 'passing' : 'failing',
               color: e2eOk ? 'brightgreen' : 'red'
             }));
-            function cov(label, p) {
-              try {
-                const s = JSON.parse(fs.readFileSync(p));
-                const pct = s.total.lines.pct;
-                const color = pct >= 80 ? 'brightgreen' : pct >= 60 ? 'yellow' : pct >= 40 ? 'orange' : 'red';
-                return { schemaVersion: 1, label, message: pct + '%', color };
-              } catch (e) {
-                return { schemaVersion: 1, label, message: 'n/a', color: 'lightgrey' };
+            // #1323 — accept multiple candidate summaries; use the first that
+            // reads (combined unit∪int preferred, unit-only as fallback).
+            function cov(label, ...paths) {
+              for (const p of paths) {
+                try {
+                  const s = JSON.parse(fs.readFileSync(p));
+                  const pct = s.total.lines.pct;
+                  const color = pct >= 80 ? 'brightgreen' : pct >= 60 ? 'yellow' : pct >= 40 ? 'orange' : 'red';
+                  return { schemaVersion: 1, label, message: pct + '%', color };
+                } catch (e) { /* try next candidate */ }
               }
+              return { schemaVersion: 1, label, message: 'n/a', color: 'lightgrey' };
             }
             fs.writeFileSync(out + '/server-coverage.json',
-              JSON.stringify(cov('server coverage', './server/coverage/coverage-summary.json')));
+              JSON.stringify(cov('server coverage',
+                './server/coverage-combined/coverage-summary.json',
+                './server/coverage/coverage-summary.json')));
             fs.writeFileSync(out + '/client-coverage.json',
               JSON.stringify(cov('client coverage', './client/coverage/coverage-summary.json')));
             const version = process.env.BADGE_VERSION || '0.0.0';
