@@ -32,7 +32,7 @@ jobs:
     timeout-minutes: 20 # #1263 — npm install + vite build + 3 lhci passes; ~8-12 min typical
     # #969 — prebuilt CI image (Node 22 + Chromium + Playwright deps baked).
     container:
-      image: forge.example.com/aaron/darkwatch-ci-playwright:1.60.0
+      image: forge.example.com/aaron/darkwatch-ci-playwright:1.61.0
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
 
