@@ -215,7 +215,7 @@ jobs:
   # ---------------------------------------------------------------------------
   test:
     runs-on: ubuntu-latest
-    timeout-minutes: 25 # #1263 — unit + int tests, DB, MinIO, coverage bot; ~10-15 min typical
+    timeout-minutes: 18 # #1355 — healthy ~4-9 min (worst legit ~14); trimmed from 25 (#1263) to backstop a hang below the ~20-min OOM-runaway range
     services:
       mariadb:
         image: mariadb:11@sha256:be1ef4fe5f14589325c08a41c76334097ce66c86264b75e1d28342c742782a61
@@ -362,6 +362,12 @@ jobs:
       - name: Test client (unit)
         # Always emit coverage — PR uses it for the diff-coverage comment;
         # main uses it to write the client-coverage badge.
+        # #1355 — pin the worker heap. Node otherwise auto-sizes old-space from
+        # the runner's free RAM (~2 GB when the host is busy), which made this
+        # step flaky-OOM under memory pressure. The suite needs <1 GB; 4 GB is
+        # deterministic headroom regardless of runner load.
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
         run: cd client && npm run test:coverage
 
       - name: Test coverage-bot scripts
