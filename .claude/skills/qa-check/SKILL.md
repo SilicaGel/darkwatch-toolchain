@@ -78,6 +78,14 @@ Classify the extracted block:
 - **No-user-surface escape hatch** — single bullet of the form `- no user surface — verify via <grep / file>`. Run the cited grep / read the cited file; that's the whole verification. Skip Step 4.
 - **Malformed** (heading present but neither shape) — note in the report and fall back to Step 2's heuristics.
 
+**The `Verify:` tag is authoritative — obey it.** Test plans written by `ship` after the Verify-tag protocol carry a `Verify: <playwright | device | eyes> — <how>` line. When present, it is the author's explicit instruction for *how to check this*, and it overrides your own cheapest-mode instinct:
+
+- **`Verify: playwright …`** → you MUST drive it with a real spec (Step 4), using the named shape (`two-user-observation` / `state-navigation` / `single-context`). **Do not** downgrade to a code-read because grep looks faster — the author already decided this needs a browser. If the line scopes an `eyes-only:` residue, drive everything before it and flag only the residue for the human.
+- **`Verify: device …`** → can't be driven headlessly; route to **Needs your eyes** with the stated reason (and drive any reproducible sub-part the line calls out, e.g. a backdrop-discard guard in a short viewport).
+- **`Verify: eyes …`** → genuinely visual; route to **Needs your eyes** with the "what to look at" note. Still capture a contact sheet if the `visual-harvest` template fits.
+
+A `Verify: playwright` plan that you closed on a grep is the exact miss this tag exists to prevent (#994: a fully two-context-automatable pointer feature was code-read and called done).
+
 For issues with no test plan found, continue to Step 2 as before. The protocol is additive — pre-#766 issues use the legacy classification + reachability check.
 
 ### Step 2 — Classify each issue (fallback when no test plan was found)
@@ -95,7 +103,20 @@ For each issue, decide one mode:
    ```
 5. **Visual-only** — animation, layout, timing without a concrete asset to screenshot.
 
-Hints beat heuristics. When in doubt, prefer code-readable over Playwright (faster, no dev server needed), backend issues over visual-only (`qa api` gives a real signal), and Playwright over visual-only (gives the user a contact sheet to glance at).
+Hints beat heuristics. When in doubt, prefer code-readable over Playwright **for greppable facts** (a column, an endpoint shape, a refactor, a cited symbol) — but NOT for functional behavior across a user flow. There, a code-read proves "wired," not "works," and you must run the Step 2.5 gate before settling on it. Backend issues beat visual-only (`qa api` gives a real signal); Playwright beats visual-only (gives the user a contact sheet to glance at).
+
+### Step 2.5 — Playwright-worthiness gate (when nothing told you to)
+
+The `Verify:` tag and body hints are explicit instructions — obey them (Step 1.5). This gate is for the **silent** case: a user-visible issue with **no** `Verify:` tag and **no** spec-path hint, where your cheapest-mode instinct is about to settle on **code-readable** (or **visual-only**). That instinct is exactly what under-verified #994 — a code-read confirmed the `map:pointer` handler was wired and unit-tested, and called a real-time two-browser feature "done" without ever watching a pointer cross between two clients.
+
+Before you accept a code-read for a user-visible issue, ask one question:
+
+> **Does the acceptance describe functional behavior across a user flow that a code-read can't actually confirm?** — multi-user / real-time broadcast (one client acts, another observes), an interactive drag/click sequence, state that mutates and propagates, a permission gate that must *fire* (not just *exist*). If a passing grep would still leave "but does the flow actually work end-to-end?" unanswered, the answer is yes.
+
+- **Yes → do NOT silently code-read. Propose the Playwright check to the user and wait for a y/n.** One short paragraph: (1) what you'd assert with a spec (the observable DOM/DB/socket facts, e.g. *"the observer context renders the broadcast dot + sender name; the gate disables the button for the non-owner"*), (2) **why a code-read under-verifies it** (wired ≠ works; the flow is the thing under test), (3) the rough cost (a throwaway `two-user-observation` / `state-navigation` spec, a few minutes; dev server must be up). If they say yes → Step 4. If they decline → code-read, and **say so in the report** ("verified wired, live flow not driven — user opted out") rather than presenting it as a clean pass.
+- **No → code-read is correct.** The change really is greppable (a column read, an endpoint field, a static layout, a type tightening). Proceed to Step 3. Don't propose a spec for something a grep fully answers — the gate cuts both ways.
+
+This is a proposal, not an autonomous spec-write: the user is part of QA and may know a code-read is enough, or may want the deeper check. Give them the call **with** the reasoning, instead of defaulting to the cheap path and hoping.
 
 ### Step 3 — Run code checks inline (do NOT dispatch a sub-agent)
 

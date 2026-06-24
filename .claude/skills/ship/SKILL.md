@@ -256,6 +256,7 @@ For each `Ready #N` identified in Step 1:
 2. <user action>
 3. <user action>
 Expected: <observable outcome — what success looks like to a human watching>
+Verify: <playwright | device | eyes> — <how / which part>
 ```
 
 - **Role doesn't matter** — use a `Setup: …` preamble line if any prep is needed (e.g. *"Setup: log in as `Adventurer`; open the demo campaign."*), then numbered steps in second-person imperative. Use this only when the plan would read the same regardless of who's logged in (e.g. pure UI polish, layout fixes).
@@ -266,6 +267,12 @@ Expected: <observable outcome — what success looks like to a human watching>
   Maps directly to the `two-user-observation.spec.ts` Playwright template that `qa-check` can drive. When in doubt, use `[Role]` — it's slightly more verbose but never wrong.
 - **Dev seed accounts** named explicitly: `DungeonMaster` (DM), `Adventurer` / `Rook` / `Sylva` (players). Password is `password`. No "log in as a player" ambiguity.
 - The `Expected:` line is **required** for every user-visible plan — without it, qa-check has nothing to assert against and you risk a "verified-by-vibes" close (the #694 lesson).
+- The `Verify:` line is **required** too — it declares **who checks this and how**, so qa-check drives whatever it can instead of dumping the whole plan on the human. Pick one tag:
+  - **`playwright`** — qa-check can drive and assert this headlessly. **This is the default.** Name the shape so qa-check knows the template: `two-user-observation` (one role acts, another observes), `state-navigation` (single user, navigate + assert), or `single-context`. Example: `Verify: playwright (two-user-observation) — assert the observer DOM receives the broadcast.`
+  - **`device`** — needs a real phone/tablet that headless can't fake: on-screen-keyboard occlusion, `visualViewport` resize, native touch/long-press, PWA install. Say why. Example: `Verify: device — keyboard-occlusion can't be reproduced headlessly (#1278).`
+  - **`eyes`** — a human must look because there's no DOM/DB/socket/aria signal: animation timing/smoothness, glow, colour feel. Say what to look at.
+- **Default to `playwright`. The test for `playwright` is mechanical:** is the `Expected:` outcome observable in the **DOM, DB row, socket payload, or a button/`aria-*` state**? If yes → `playwright`, full stop. Multi-user and DM-vs-player are *not* reasons to fall back — that's exactly what `two-user-observation` drives.
+- **Split, don't downgrade.** A mostly-automatable plan with a sliver of true polish is still `playwright` — tag it `playwright` and append the residue: `Verify: playwright (two-user-observation) — assert dot appears/labelled/cleared + tool mutual-exclusion; eyes-only: the glow/comet-trail aesthetic.` Tagging the whole thing `eyes` because one bit is visual is the failure this slot exists to stop (the #994 miss: a fully two-context-automatable pointer feature got hand-verified because the plan never said it was drivable).
 
 **No user surface** (tech-debt, infra, pure refactor, type tightening) — single bullet, no checklist:
 
@@ -287,6 +294,7 @@ The escape hatch is load-bearing; don't write a contrived UI plan for a `Record<
 3. [Player] Attempt a roll from the attack row.
 4. [DM] In a second browser, log in as `DungeonMaster`; open the same campaign and `BRAN`'s sheet; roll an attack.
 Expected: step 3 either disables the button or rejects with a visible message and produces no game-log entry. Step 4 succeeds; the resulting game-log row attributes the roll to BRAN with no misattribution.
+Verify: playwright (two-user-observation) — assert the attack button is disabled for the non-owner + no roll_log row; DM roll writes a row attributed to BRAN.
 
 ### #758 — Equipping gear gives no immediate feedback
 Setup: log in as `Adventurer`; open your character sheet; navigate to Gear.
@@ -294,6 +302,23 @@ Setup: log in as `Adventurer`; open your character sheet; navigate to Gear.
 2. Observe the item's state and your AC without reloading.
 3. Reload the page.
 Expected: step 2 shows the item as equipped and AC updated immediately. Step 3 shows the same state — no change on reload.
+Verify: playwright (state-navigation) — assert the equipped state + AC value update without reload and persist after reload.
+
+### #994 — Add live pointer tool to the map — DM + player cursor broadcast
+1. [DM] Log in as `DungeonMaster`, open a campaign with an active map; arm **Pointer** and move over the map.
+2. [Player] In a second browser as `Adventurer`, observe the DM's labelled dot appear and track in real time.
+3. [DM] With Pointer armed, click **Ruler** — Pointer disarms (mutually exclusive).
+4. [Player] Arm Pointer and move; [DM] observe the player's pointer (player→DM direction).
+Expected: each user's own pointer renders immediately; the other context receives a labelled dot in the sender's colour; arming Pointer disarms Ruler/Walls and vice-versa; the dot clears on tool-off / mouse-leave.
+Verify: playwright (two-user-observation) — assert the observer context renders the pointer dot + sender's name, the dot clears on lift, and the toolbar mutual-exclusion (button/aria state); eyes-only: the glow + comet-trail aesthetic.
+
+### #1278 — Feedback modal not keyboard/mobile-safe (Send occluded; backdrop discards draft)
+Setup: on a real phone (or the ngrok device recipe), open a campaign and the feedback modal.
+1. Tap into the message field so the on-screen keyboard appears; type a few sentences.
+2. With the keyboard up, reach for **Send feedback**.
+3. Tap the dark backdrop outside the dialog.
+Expected: step 2 — Send is reachable (the dialog scrolls; it isn't buried under the keyboard). Step 3 — with a non-empty draft the dialog stays open and the text is preserved; only Cancel closes.
+Verify: device — keyboard-occlusion + visualViewport resize can't be reproduced headlessly; confirm on a real device. The backdrop-discard guard alone IS reproducible in a short viewport: playwright (state-navigation) — assert a non-empty draft survives a backdrop tap.
 
 ### #761 — Inventory remaining Record<string, unknown> instances
 - no user surface — verify via `grep -rc "Record<string, unknown>" server/src/ client/src/` returns the cleaned-up count documented in the PR body.
