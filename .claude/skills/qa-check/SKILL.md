@@ -5,17 +5,21 @@ description: Verify open Forgejo issues with the `status/qa` label by reading co
 
 # QA Check
 
-Walks the open `status/qa` issues on the Darkwatch Forgejo repo, verifies each one the cheapest reliable way, and helps the user decide what to close. The user is part of the QA process — present a report, then walk closes one section at a time.
+Walks the open `status/qa` issues on the Darkwatch Forgejo repo, verifies each one with the **strongest signal the behavior warrants**, and helps the user decide what to close. The user is part of the QA process — present a report, then walk closes one section at a time.
 
 ## What this skill is for
 
 QA on Darkwatch is "implementation done, awaiting verification before closing." Each issue lives in one of three verification modes:
 
-- **Code-readable** — the implementation is greppable. Body cites files/functions/tables, the resolution is "yes, that symbol exists and behaves as described."
-- **Playwright-runnable** — the issue describes a user flow that can be driven in a browser, either via an existing spec or a short throwaway one.
-- **Visual-only** — animation, layout, timing, "looks right." Even these are usually capturable with the contact-sheet pattern below.
+- **Playwright-runnable** — the issue describes a user flow that can be driven in a browser, either via an existing spec or a short falsifiable throwaway. **This is the default for anything a user can see or do.**
+- **Code-readable** — the implementation is greppable AND the behavior is already pinned by a falsifiable unit/int test (or has no user surface). Body cites files/functions/tables.
+- **Visual-only** — pure animation, layout, timing, "looks right" with no isolable assertion. Capture it anyway: a **video** (`motion-capture`) for motion, a contact sheet for static — so the user reviews an artifact, not a paragraph of repro steps.
 
-Pick the cheapest mode that gives a real signal. Don't run Playwright when grep would do; don't claim visual-only when the body explicitly cites file paths.
+**Default to exercising the played surface — Darkwatch is a visual, real-time, interactive app, and "wired ≠ works."** The strongest signal for user-facing behavior is driving the real UI, not reading code. So:
+
+- **If an issue has a user-visible / interactive / real-time surface, the default is Playwright** — run the durable e2e if one exists (Step 4.0), otherwise a falsifiable throwaway for the genuine gap. Don't settle for a code-read because it's cheaper; slower-but-accurate is the trade we want (catches real breakage sooner).
+- **Drop to code-readable ONLY when you can name why a browser adds nothing:** (1) **no user surface** — pure infra / CI / migration / log-only; or (2) **the behavior is already pinned by a falsifiable unit/int test that drives the actual user-observable output** (clicks the real control, asserts the real DOM/DB row) — so a browser run would only re-test the same logic slower. *"A unit test exists" is not the exemption — "a falsifiable test pins the user-facing behavior" is.* (The #1345 recenter unit tests click the real button and assert the real transform → sufficient. #1342's unit test only covers the geometry resolver; the drag-in-canvas + role gating is only proven by the e2e → run the e2e.)
+- **When unsure, run the browser check.** The cost of a slow spec is minutes; the cost of a code-read false-pass is a broken feature shipped to a live game.
 
 ## Inputs
 
@@ -90,18 +94,18 @@ For issues with no test plan found, continue to Step 2 as before. The protocol i
 
 ### Step 2 — Classify each issue (fallback when no test plan was found)
 
-For each issue, decide one mode:
+For each issue, decide one mode. **Ask the questions in this order — the default is Playwright for anything with a user surface, and you only fall through to a cheaper mode by passing an explicit gate:**
 
-1. **Hint check first.** If the body cites a Playwright spec path (e.g. `tests/e2e/<name>.spec.ts`) or directly says "verify with E2E," route to **playwright-runnable**.
-2. **Code-readable** if the body cites concrete server/client paths, function names, table/column names, route paths, or migration filenames.
-3. **Playwright-runnable** by overlap if the issue keywords match a spec name in `tests/e2e/`, OR if the fix is user-visible and a contact-sheet would let the user sign off in 10 seconds.
+1. **Hint check.** If the body cites a Playwright spec path (e.g. `tests/e2e/<name>.spec.ts`) or says "verify with E2E," route to **playwright-runnable**.
+2. **User-surface check — the default gate.** Can a user *see or do* this (a screen, a click, a drag, a real-time update, a role-gated view)? → **playwright-runnable.** Run the durable spec if one exists (Step 4.0), else a falsifiable throwaway. The issue citing file paths does NOT downgrade it — almost every UI fix cites the files it changed; that's not a reason to code-read a thing a user can see.
+3. **Code-readable** only if it clears the exemption: **no user surface** (pure infra/refactor/type-tightening), OR the user-facing behavior is **already pinned by a falsifiable unit/int test** (drives the real output, not just an internal function — confirm by reading the test, then RUN it). Body cites concrete paths/functions/tables/migrations.
 4. **Backend / headless** if the issue is a pure server-side or migration change with no UI surface (e.g. a new endpoint, a column, a data-migration). Don't classify these as visual-only — use `qa api` to hit the endpoint as a seed user and assert with `--expect`:
    ```bash
    cd tests && npx tsx qa-check/tools/qa.ts api DungeonMaster GET /api/campaigns
    cd tests && npx tsx qa-check/tools/qa.ts api DungeonMaster PATCH /api/characters/<id> \
      '{"name":"x"}' --expect name=x
    ```
-5. **Visual-only** — animation, layout, timing without a concrete asset to screenshot.
+5. **Visual-only** — animation, layout, timing. Still capture an artifact (video for motion, contact sheet for static) per Step 5 — "visual-only" means a human makes the call, not that you generate nothing.
 
 Hints beat heuristics. When in doubt, prefer code-readable over Playwright **for greppable facts** (a column, an endpoint shape, a refactor, a cited symbol) — but NOT for functional behavior across a user flow. There, a code-read proves "wired," not "works," and you must run the Step 2.5 gate before settling on it. Backend issues beat visual-only (`qa api` gives a real signal); Playwright beats visual-only (gives the user a contact sheet to glance at).
 
@@ -168,6 +172,23 @@ When in doubt, expand the quantifier: "every response" means list the call sites
 
 Only attempted if there are playwright-runnable issues.
 
+**0. Run the spec that already exists BEFORE you write one. A throwaway is a last resort, never the easy path.** Writing a fresh `tests/qa-check/<N>/spec.ts` feels faster, but you author it — so you pick the assertions, and a spec you wrote to pass proves little. Before copying any template:
+
+   1. **Hunt for existing coverage and run it.** Check the test plan for a named spec, then grep the durable suite for this issue/feature:
+      ```bash
+      grep -rln "<issue#>\|<feature keyword>" tests/e2e/ server/src/**/*.int.test.ts client/src/**/*.test.tsx
+      ```
+      If a durable spec or int/unit test covers the behavior, **RUN it** — that is your primary signal. (#1342 ships `tests/e2e/maps-1342-wall-collision.spec.ts`; running it is the verification, not a code-read of the diff. One RED rep missed it entirely and reasoned its way out of the browser check — don't.)
+   2. **A throwaway is only for a genuine gap** the durable specs don't cover — and say which acceptance claim it covers that they don't (e.g. #1342's existing spec covers block + DM-bypass but not toggle-OFF → drag-through; that third claim is the only thing a throwaway should add).
+   3. **Never write a throwaway that re-asserts a deliberately `.fixme`/skipped durable spec.** That hides a known-deferred gap behind a green you authored. Flag the skipped spec in the report instead (e.g. `maps-m5` fog-growth is `.fixme` pending deterministic drag helpers — #1344's e2e round-trip is *not* "verified" by routing around it).
+
+   **Whatever spec you run or write MUST be falsifiable — it has to be able to fail.** Assert the real acceptance including the **negative / before-state**, not just the happy path:
+   - the *blocked* case AND the *allowed* case (token must NOT cross with collision ON; token MUST cross with it OFF);
+   - the value *before* vs *after* the action (token `x` moved / didn't), not merely "an element is visible";
+   - the role that should NOT see it, alongside the one that should.
+
+   State in one line what regression the spec would catch. A spec that can only pass — happy-path render, `toBeVisible` with no negative, an assertion on a value the setup guarantees — is verification theater: don't write it, and don't count it as a pass. If you can't make it falsifiable (e.g. needs a `window.__mapSocket` that may not exist), say so and fall back to the existing int/unit coverage rather than shipping a spec that can't really run.
+
 1. **Dev server up AND on the right version?** Probe `http://localhost:5173/` (expect 200). Then capture the displayed `app-version` and compare to `git rev-parse --short HEAD` on the worktree. **If they mismatch the dev server is running pre-merge code** — invoke the `restart-local-dev` skill, then re-probe.
 2. **Artifact location:** `tests/qa-check/<N>/` (NOT `tests/test-results/qa-check-<N>/` — Playwright clobbers `test-results/` between runs, so any spec or contact sheet you write there disappears on the next run).
 3. **Playwright config:** specs under `tests/qa-check/` aren't discovered by the main `tests/playwright.config.ts` (which has `testDir: "./e2e"`). Use the dedicated `tests/qa-check.config.ts` (committed to the repo):
@@ -183,6 +204,11 @@ Only attempted if there are playwright-runnable issues.
 
 ### Critical Playwright-side gotchas (learned the hard way)
 
+- **Map / video captures: use the SEEDED map, the actor's own view, a render gate, and verify by eye.** A working laser-pointer (#994) video took ~6 trials; the lessons (full detail in `motion-capture.spec.ts`):
+  - **Reliable local map.** Activate the seeded **"QA Dungeon"** map in the `QA Fixture (Shadowdark)` campaign (`POST /api/campaigns/:cid/maps/:mid/activate`) — its image is served locally from MinIO. Do **not** create a map with the external wikimedia `MAP_IMAGE_URL` the e2e specs use: it gets blocked → "Couldn't load map image" → blank canvas → empty capture (#1369). The create-map API rejects non-`https` `image_url`, so you can't pass the local MinIO URL to it — use the seeded map.
+  - **Match the captured view to the QA question.** For an **aesthetic** check ("does the effect look right?") capture the actor's own view (in-frame by construction). For a **broadcast / multi-user** feature ("does it render on the OTHER client?") the propagation IS the thing under test — capture **both clients**: record each context as its **own video** (`recordVideo` on both contexts — Playwright records them independently) and show the two clips **side by side** (+ paired stills); capturing two live windows into one frame is fiddly, two clips is cleaner. For sync, **create both contexts up front** (before the asymmetric per-client setup) so both videos start together and the action lands at the same offset in each — else the later one starts seconds behind; annotate the action's offset (~Xs into both). Clients pan/zoom independently (an observer element can land ~400k px off in the DOM), so align by aiming the actor's cursor at a **token the observer can see** (both auto-fit the same seeded map; the broadcast is map-normalised). Don't fall back to the actor's view to dodge the harder capture — for #994 that shows the glow but never proves it reaches the player, so it isn't really QA.
+  - **Verify by eye on a frame.** `toBeVisible()`/`boundingBox()` lie for SVG/canvas overlays (boundingBox returns SVG-internal coords). Read a `frame.png` and look.
+  - **Render gate:** `await expect(page.getByText(/Couldn't load map image/i)).toHaveCount(0)` before capturing, so a blank map fails loud.
 - **Seed recon before locator choices.** Before writing assertions, run `qa seed all` to learn what's in the seed database — campaigns, characters with class, owner username, equipped_gear count:
   ```bash
   cd tests && npx tsx qa-check/tools/qa.ts seed all
@@ -255,7 +281,9 @@ Split these two ways before reaching for a contact sheet:
 
 **Behavior/interaction/state (clicks, turn order, death-save counts) → Playwright** (Step 4 specs). The harness shows layout; the specs assert behavior — they complement, not replace, each other. Use the right one for what the issue actually changed.
 
-**True visual-only** (animation, timing, multi-user real-time feel with no isolable component) → don't run anything. List them in the report with concrete reproduction steps lifted from the issue body, e.g. "open two browsers as DM + player, cast a spell that nat-1s, watch the d12 land before the resulting damage roll." Most of these can still be captured with the `visual-harvest` template — when in doubt, try the contact sheet first.
+**Motion / animation / timing / real-time feel → record a VIDEO (`motion-capture` template). Do NOT punt it to the user as repro steps.** This is the case where a still is the *wrong medium* — the fog veil painting along a path (#1318), a die landing before the damage roll, the laser-pointer glow (#994), a spell animation. A screenshot can't show "appears progressively as it moves"; a 5-second clip lets the user confirm it in one glance instead of setting up two browsers themselves. Copy `motion-capture.spec.ts`, drive the motion with **real intermediate steps** (a multi-step `mouse.move` loop / the actual roll), and it records `motion.webm` + a mid-motion still strip into `contact-sheet.html`. Video is recorded via `recordVideo: { dir, size }` on `newContext()` (the config's `use.video` does not apply to manually-made contexts).
+
+**Every "Needs your eyes" item ships an artifact — that is the default, not "if any."** Stills/contact-sheet for static comparisons; **video for motion**; the live preview URL for a single component. The only time you hand the user bare reproduction steps with no artifact is when it genuinely can't be captured headlessly — a **`device`** case (real-phone keyboard occlusion, native touch). Even then, capture the reproducible sub-part (e.g. the short-viewport layout) and flag only the true device residue. "Capturing animation is fiddly" is not a reason to skip the video — it's the reason the user is stuck reviewing by hand, which is exactly what this skill exists to prevent.
 
 ### Step 6 — Present the report
 
@@ -281,8 +309,8 @@ One message to the user, structured exactly like this:
 
 ### Needs your eyes (P)
 - #N — Title
-  - Reproduction: <steps>
-  - Local artifact: tests/qa-check/<N>/contact-sheet.html  ← if any
+  - Local artifact: tests/qa-check/<N>/contact-sheet.html (+ motion.webm for motion)  ← REQUIRED unless it's a `device`-only case
+  - Reproduction: <steps>  ← the fallback, not the primary; only the sole content for a true `device` residue
 
 ### Scope decision (Q)
 - #N — partial: [what shipped] vs [what didn't]
@@ -313,7 +341,7 @@ The skill runs locally on macOS, so `open` works.
 After the report, work through the sections in order:
 
 1. **Verified.** Ask: "Close all M with the suggested comments? (Y / pick which / n)." Accept "all", a list of numbers, or "none." For each close: POST the comment → PATCH state to closed → DELETE the `status/qa` label (id 38). All three steps, every time. **Close-gate for multi-criterion issues:** do not batch-close an issue whose acceptance has ≥2 bullets or an "all/every/each" quantifier on a one-line evidence row — its per-bullet checklist (Step 6) must be fully green (`✓` on every bullet) first. A checklist with any `✗` belongs in Scope decision, not Verified, so it should never reach this close prompt.
-2. **Needs your eyes.** Ask one issue at a time. "For #N — does this look right? (y/n/skip). Contact sheet should be open in your browser." On "y" → POST the close comment (user's wording or "Verified visually 2026-MM-DD"), PATCH closed, DELETE `status/qa`. On "n" → leave a comment describing the gap (do not strip the label — still awaiting fix). On "skip" → leave it open, do nothing.
+2. **Needs your eyes.** Ask one issue at a time. "For #N — does this look right? (y/n/skip). The contact sheet / video should be open in your browser." On "y" → POST the close comment (user's wording or "Verified visually 2026-MM-DD"), PATCH closed, DELETE `status/qa`. On "n" → leave a comment describing the gap (do not strip the label — still awaiting fix). On "skip" → leave it open, do nothing.
 3. **Scope decision (`partial`).** Recommend a concrete action — usually one of:
    - *Build half done, rest is a real follow-up* → close the original with a done-vs-missing comment, then file the successor via the `issue` skill referencing the original. **Strip `status/qa` on the close, same as the verified path.**
    - *Feature not usably done* (e.g. shipped but unreachable) → do **not** close: comment the QA finding, **drop the `status/qa` label** (→ `status/todo` if it's queued work), and file a successor for the split-out part.
@@ -363,13 +391,14 @@ All commands run as `cd tests && npx tsx qa-check/tools/qa.ts <cmd>`.
 
 ## Templates
 
-`.claude/skills/qa-check/templates/` ships three reference specs:
+`.claude/skills/qa-check/templates/` ships four reference specs:
 
 | Template | Use for |
 |---|---|
 | `visual-harvest.spec.ts` | Iterate over a list (e.g. themes, viewports, states), capture a tight crop or full screenshot for each, generate `contact-sheet.html`. Example use case: "is X readable on every theme?" |
 | `state-navigation.spec.ts` | Single user, log in, navigate to a specific surface via API, screenshot full page + tight crop of the feature in question. Example: "is the new Background row visible on the character sheet?" |
 | `two-user-observation.spec.ts` | DM + Player browser contexts, both opened to a shared surface, optionally drive a state change in one and observe the other. Example: "do alignment fixes apply consistently across DM and player views?" |
+| `motion-capture.spec.ts` | **Records a VIDEO** (`motion.webm`) + a mid-motion still strip of an animated / real-time behaviour, for anything a still can't show. Example: "does the fog veil paint along the whole path as the token moves?" (#1318), a dice roll landing, the laser-pointer glow. |
 
 Copy the relevant template to `tests/qa-check/<N>/spec.ts`, rename the test, update the OUT dir comment, swap the iteration list / state / interactions, and run with `--config qa-check.config.ts`. Each template includes an auto-`open` of its contact sheet at the end.
 
@@ -383,7 +412,7 @@ Copy the relevant template to `tests/qa-check/<N>/spec.ts`, rename the test, upd
 ## Why this design
 
 - **Interactive, not autonomous.** The user said "I should be part of the QA process." Closing in batch loses that. Each section gets its own ack.
-- **Code-readable first.** Most QA issues on this repo cite specific files; grep is faster, cheaper, and less brittle than spinning up a browser.
+- **Strongest signal, not cheapest.** Darkwatch is played visually and in real time, so "wired ≠ works" — a grep that confirms a symbol exists is the weakest possible signal for user-facing behavior. The default is to exercise the played surface (run the durable spec; falsifiable throwaway for a real gap). Code-readable is the *exception*, justified only when there's no user surface or a falsifiable unit/int test already pins the user-facing output. The earlier "cheapest mode / code-readable first" framing is what produced the #994/#1342 under-verifications — accuracy beats speed here; catching breakage sooner is the efficiency that matters.
 - **No foreground sub-agents.** The earlier Haiku-sub-agent dispatch pattern (Step 3) was removed because a stuck sub-agent can wedge the session — same lesson the `issue` skill learned the hard way.
 - **Playwright artifacts stay local.** This skill runs on the user's machine, not in CI. Uploading screenshots to Forgejo is friction with no audience.
 - **Throwaway specs go under `tests/qa-check/<N>/`,** NOT `tests/test-results/`. Playwright clobbers `test-results/` between runs — earlier versions of this skill prescribed that location and the specs disappeared.
