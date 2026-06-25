@@ -108,10 +108,11 @@ Run these in order. **Tell each sub-skill to skip its commit step** — ship han
      | grep -v '^+++' || true)
 
    # (c) Inventory rows whose referenced files were edited by this PR — catches
-   #     evolution of an EXISTING feature row (icon change, drifted line refs,
-   #     new captured context, etc.). Load-bearing because once a feature is
-   #     in the inventory, this is the signal that keeps the row honest.
-   #     Strips trailing `:LINE` before matching paths.
+   #     evolution of an EXISTING feature row (icon change, renamed/removed
+   #     symbol, new captured context, etc.). Load-bearing because once a feature
+   #     is in the inventory, this is the signal that keeps the row honest.
+   #     Rows anchor on file + symbol/test-id/event (no line numbers, by design);
+   #     the `:LINE` strip below is just defensive against a stray legacy ref.
    INVENTORY_ROWS_TOUCHED=$(
      grep -oE '`[^`]+\.(tsx?|jsx?|ts|js|css)(:[0-9]+)?`' docs/feature-inventory.md 2>/dev/null \
        | sed -E 's/`//g; s/:[0-9]+$//' \
@@ -158,11 +159,10 @@ Run these in order. **Tell each sub-skill to skip its commit step** — ship han
       expansions like bash does. `for f in $multiline_var` only iterates once
       in zsh, on the whole blob.)
 
-      Common reasons a row needs touching: drifted `file:LINE` refs after a
-      refactor, stale description (icon swap, new captured context, success
-      state added), removal of a referenced symbol (delete or re-target the
-      row). On **y**, open the file and amend the relevant row(s); on **n**,
-      proceed.
+      Common reasons a row needs touching: stale description (icon swap, new
+      captured context, success state added), or removal/rename of a referenced
+      symbol (delete or re-target the row). On **y**, open the file and amend the
+      relevant row(s); on **n**, proceed.
 
    - **n on either gate** — proceed. Acceptable when the detection is wrong
      (pure refactor that added a file but no new surface, an inventory-listed
