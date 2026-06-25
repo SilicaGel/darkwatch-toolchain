@@ -1,6 +1,6 @@
 ---
 name: back-to-main
-description: Use when a PR has been merged and the branch/worktree need cleanup — pulls main, removes the feat/ worktree and local branch, clears CI status files, stops any active monitors, and marks all queue-batch tasks deleted.
+description: Use when a PR has been merged and the branch/worktree need cleanup — pulls main, re-installs deps + applies migrations so main doesn't drift, removes the feat/ worktree and local branch, clears CI status files, stops any active monitors, and marks all queue-batch tasks deleted.
 ---
 
 # back-to-main
@@ -20,18 +20,61 @@ If there are untracked files blocking the pull (e.g. new screenshot PNGs), remov
 git clean -f site/assets/screenshots/
 ```
 
+## Step 1.5: Sync local deps + DB to main
+
+A pull brings whatever merged while you were away — which often includes
+lockfile bumps and new DB migrations. If you don't re-install / re-migrate,
+main's `node_modules` drifts from its lockfile (breaks builds — and since a
+fresh worktree CoW-clones main's `node_modules`, a stale main propagates the
+breakage to every new worktree, #1373) and the dev DB drifts from main's schema
+(#769, the "green CI + red local" trap). Refresh both. Each is a **no-op when
+nothing changed**, so this is cheap on the common path.
+
+```bash
+# Re-install only workspaces whose node_modules is stale vs its lockfile. A pull
+# that changed package-lock.json leaves it NEWER than the last install — the same
+# freshness signal worktree-init.sh uses.
+for ws in . client server tests; do
+  lock="$ws/package-lock.json"; inst="$ws/node_modules/.package-lock.json"
+  [ -f "$lock" ] || continue
+  if [ ! -f "$inst" ] || [ "$lock" -nt "$inst" ]; then
+    echo "back-to-main: deps stale in ${ws} — reinstalling"
+    # mv-aside before npm ci: on macOS, npm's own clean of a large node_modules
+    # intermittently fails with ENOTEMPTY (Spotlight indexing fresh files). An
+    # atomic move-out + background delete sidesteps it; npm ci then installs clean.
+    if [ -d "$ws/node_modules" ]; then
+      trash=$(mktemp -d) && mv "$ws/node_modules" "$trash/nm" && rm -rf "$trash" &
+    fi
+    ( cd "$ws" && npm ci )
+  fi
+done
+
+# Apply any new migrations to the shared dev DB (additive + idempotent; the
+# runner tracks what's applied, so re-running is safe and a no-op when current).
+( cd server && npm run db:migrate )
+```
+
 ## Step 2: Remove worktree(s)
 
-List all feat/ worktrees and remove them:
+List worktrees and remove each merged one (they live under `.claude/worktrees/`):
 
 ```bash
 git worktree list
-git worktree remove .worktrees/<batch-name>
+git worktree remove --force .claude/worktrees/<name>
 ```
 
-If the worktree remove fails because the branch isn't fully merged (squash-merge), force it:
+`--force` covers the squash-merge case (the branch reads as "not fully merged").
+
+On macOS, `git worktree remove` can still fail with **`Directory not empty`**
+while deleting the worktree's `node_modules` — a Spotlight-indexing race on
+large trees (the same friction that bites `npm ci`), and more common now that
+fresh worktrees always carry CoW-cloned `node_modules` (#1373). When that
+happens, move the dir aside and let git drop the registration — an atomic
+rename always succeeds where the in-place delete races:
+
 ```bash
-git worktree remove --force .worktrees/<batch-name>
+trash=$(mktemp -d) && mv .claude/worktrees/<name> "$trash/dead" && rm -rf "$trash" &
+git worktree prune
 ```
 
 ## Step 3: Delete local branch(es)
