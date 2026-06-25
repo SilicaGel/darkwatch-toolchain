@@ -199,6 +199,10 @@ run_check "no numeric ID patterns" check_numeric_ids
 # #761 — ratchet: fail if `Record<string, unknown>` count climbs above baseline.
 run_check "Record<string,unknown> budget" node scripts/check-record-type-budget.mjs
 
+# #1380 — flag weakened test assertions (deleted expect / matcher downgrade) in
+# changed test files — the "broke prod, softened the test" masking pattern.
+run_check "test-assertion loosening" node scripts/check-test-assertion-loosening.mjs
+
 # #1290 — ESLint gate (mirrors ci.yml's `Lint (ESLint)` step). Fails on any
 # ESLint error. Until #1290 this only ran in the bypassable lint-staged
 # pre-commit hook; now it's part of the gate too.
