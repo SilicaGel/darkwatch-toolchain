@@ -42,7 +42,7 @@ set -uo pipefail
 # To update: review `git diff` of .forgejo/workflows/ci.yml, confirm this
 # script still mirrors the `lint-typecheck` + `test` jobs (update the checks
 # below if they changed), then set this to the value preflight prints.
-EXPECTED_CI_HASH="641deae5b4a703565263fe615759a80af003ca630cb8f93347c89f957483366c"
+EXPECTED_CI_HASH="32185d64d3af32865dca7bf8abe4eadbd2f0d2ceeb2ef0bff5e15a52493e485f"
 
 # --- setup ------------------------------------------------------------------
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || {
