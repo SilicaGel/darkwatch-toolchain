@@ -64,10 +64,42 @@ The authoritative list of existing captures lives in `site/screenshots.js` (`run
 | `LevelUp*` | `level-up` |
 | `CreatureGallery*` | `creature-gallery` |
 | `QuickInspect*` | `quick-inspect` |
+| `MapTab*` / `MapCanvas*` / token layer | `map` |
+| `MapAddForm*` (UVTT import) | `map-uvtt-import` *(coverage gap — see below)* |
+| `WallEditorOverlay*` / Walls·Doors toolbar | `map-walls-doors` *(coverage gap)* |
+| `MapToolbar*` reveal-all / preview-player-view / ambient toggles | `map-dm-view-toggles` *(coverage gap)* |
+| `LightSourceEditorOverlay*` / `MapLightSourceLayer*` / drop-torch | `map-placed-lights` *(coverage gap)* |
+| Laser pointer (`MapToolbar*` Pointer, pointer hooks) | `map-laser-pointer` *(coverage gap)* |
+| Grid editor (`MapToolbar*` grid) | `map-grid-editor` *(coverage gap)* |
+| Area-spell overlay (`AreaSpell*` / AoE shape) | `aoe-spell-overlay` *(coverage gap)* |
+| `StabilizeButton*` / `DyingControls*` | `death-timer` (extend) *(coverage gap)* |
 
 **Global changes** (`index.css`, theme files, shared layout components) affect **every** capture — plan a full refresh.
 
 **Unmapped changes** usually indicate a **new feature row** — dispatch to the "Feature added" process in `reference/processes.md`.
+
+### B.1 Coverage gaps — areas the brochure does NOT yet capture (2026-06-25 audit, #1381)
+
+The maps subsystem has grown far past its single `map` capture. A `--full-audit`
+should **create** the rows + capture functions below (they don't exist in
+`site/screenshots.js` `run()` yet). Each is a real, shipped, user-facing surface
+per `docs/feature-inventory.md`; slugs are suggestions.
+
+| Suggested slug | Feature area (inventory ref) | Primary component(s) to frame |
+|---|---|---|
+| `map-uvtt-import` | Import UVTT map — walls/doors/lights auto-load (#833) | `client/src/components/map/MapAddForm.tsx` |
+| `map-walls-doors` | Walls & doors editor — trace, snap, carve doors, block-movement toggle (#866/#883/#1342) | `MapToolbar` Walls/Doors modes, `WallEditorOverlay` |
+| `map-vision-fog` | Fog of war + vision memory + unexplored darkness (#929/#1276/#1318) | `MapTab` fog/vision layers |
+| `map-dm-view-toggles` | DM segmented toggles — ambient ☀/🌙, reveal-all 👁, preview-player-view (#1259/#1283/#1284) | `client/src/components/map/MapToolbar.tsx` (`SegmentedToggle`) |
+| `map-placed-lights` | DM Light tool + drop-lit-torch — standalone map lights (#935) | `LightSourceEditorOverlay`, `MapLightSourceLayer`, card drop-pip |
+| `map-laser-pointer` | Laser pointer — broadcast dot, comet trail, hold-to-draw stroke (#994) | `MapToolbar` Pointer + pointer overlay |
+| `map-grid-editor` | Grid editor — cell size, origin, snap (#300–303) | `MapToolbar` grid controls |
+| `aoe-spell-overlay` | Area-spell targeting overlay — circle/cone/line/cube (#903/#944) | AoE shape overlay on the map |
+| `combat-stabilize` *(or extend `death-timer`)* | Dying chain — death-timer roll + 🚑 Stabilize picker (#1287) | `StabilizeButton`, `DyingControls` |
+
+This is the **manifest** the `--full-audit` should reconcile against; #130
+tracks automating this drift-detection. Until then, run a `--full-audit` to
+generate the missing captures + rows above so the brochure shows the whole app.
 
 ### C. Use the changelog entry as a second signal
 

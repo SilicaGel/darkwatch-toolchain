@@ -20,6 +20,7 @@ branch=$(git -C "$dir" rev-parse --abbrev-ref HEAD 2>/dev/null)
 
 used_pct=$(printf '%s' "$input" | jq -r '.context_window.used_percentage // empty' 2>/dev/null)
 five_hr=$(printf '%s' "$input"  | jq -r '.rate_limits.five_hour.used_percentage // empty' 2>/dev/null)
+five_hr_reset=$(printf '%s' "$input" | jq -r '.rate_limits.five_hour.resets_at // empty' 2>/dev/null)
 
 CYAN=$'\033[36m'
 YELLOW=$'\033[33m'
@@ -59,6 +60,17 @@ if [[ -n "$five_hr" ]]; then
   else                            fh_color="$GREEN"
   fi
   line1="${line1}${SEP}${DIM}5h:${RESET}${fh_color}${fh_int}%${RESET}"
+
+  # Time until the 5-hour window resets
+  if [[ -n "$five_hr_reset" ]]; then
+    now=$(date +%s)
+    secs_left=$(( five_hr_reset - now ))
+    if [[ $secs_left -gt 0 ]]; then
+      hrs=$(( secs_left / 3600 ))
+      mins=$(( (secs_left % 3600) / 60 ))
+      line1="${line1}${DIM} (${hrs}h${mins}m left)${RESET}"
+    fi
+  fi
 fi
 
 # ── Line 2: queue-batches status (today only, auto-clearing)

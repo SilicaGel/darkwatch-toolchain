@@ -46,38 +46,45 @@ Light a torch from card AND sheet. Verify stack decrement (UI + `character_gear`
 
 ## Act 4 — Maps, vision & fog [fresh campaign]
 
-Generate or reuse a gridded dungeon image (canvas-draw trick in `tests/playtest/act0-recon.ts` history, or `tests/fixtures/sample-map.png`). Upload from device, name it. Test 🌙 Dark vs ☀ Lit toggle. Move tokens (owner, DM, and a *forbidden* cross-player drag). Verify union vision, fog memory, DM sightline overlay. Right-click empty map → Clear fog of war. Set a per-token vision radius. Second map: add, activate, switch back (positions preserved?), Clear scene.
+Generate or reuse a gridded dungeon image (canvas-draw trick in `tests/playtest/act0-recon.ts` history, or `tests/fixtures/sample-map.png`). Upload from device, name it. Also **import a UVTT map** (Import UVTT… on the add-map form; `.uvtt`/`.dd2vtt`/`.df2vtt` — walls/doors/lights auto-load). Test 🌙 Dark vs ☀ Lit toggle. Move tokens (owner, DM, and a *forbidden* cross-player drag). Verify union vision, fog memory, DM sightline overlay. Toggle 👁 **Revealed** (reveal-all) and DM **preview player view**. Right-click empty map → Clear fog of war. Set a per-token vision radius. Second map: add, activate, switch back (positions preserved?), Clear scene.
 
 - ☐ Upload → map active for everyone; party auto-places (spawn point if set)
+- ☐ UVTT import (#833): walls/doors/lights load onto the new map; DM-only
 - ☐ Players on a Dark map with no light see pure black; lighting a torch reveals a radius bounded by walls
 - ☐ Union vision: a torchless player sees by an ally's light
 - ☐ ☀ Lit: no torch needed but radius+walls still mask
 - ☐ Fog memory persists where a PC has been (shared across party, survives reload); Clear fog resets
 - ☐ DM sightline overlay tracks live token/torch changes
+- ☐ Reveal-all 👁 (#1259): whole map shown to players — no fog/vision math, monster-hiding off
+- ☐ Preview player view (#1283): DM map flips to the merged party view (read-only, hidden monsters gone); resets on map switch
 - ☐ Live drag visible on other clients (~30 Hz); drag-lock at 50% opacity for observers
 - ☐ Server rejects cross-player token moves (token doesn't move, no error spam)
 - ☐ Vision radius override recomputes immediately
 
 ## Act 5 — Walls & doors [fresh campaign]
 
-Walls mode: trace a room (Esc commits), endpoint snap (start a new wall from an existing endpoint), drag an endpoint to move it. Doors mode: carve a door mid-wall (two clicks, same segment); right-click → Mark as door on a whole segment. Toggle the door open/closed several times watching a *player's* vision. Delete a wall both ways (right-click → Delete; select + Delete key).
+Walls mode: trace a room (Esc commits), endpoint snap (start a new wall from an existing endpoint), drag an endpoint to move it. Doors mode: carve a door mid-wall (two clicks, same segment); right-click → Mark as door on a whole segment. Toggle the door open/closed several times watching a *player's* vision. Toggle 🧱 **Blocked** (walls-block-movement) and drag a player token into a wall. Delete a wall both ways (right-click → Delete; select + Delete key).
 
 - ☐ Committed walls clip player vision in realtime; players never see the wall lines themselves
 - ☐ Carved door splits wall → wall·door·wall; door must lie within one segment
 - ☐ Closed door blocks vision (renders red to DM); open renders green dashed and vision spills through — verify the light cone on a player client
 - ☐ Open/close updates every viewer without reload, repeatedly
+- ☐ Walls-block-movement toggle (#1342): 🚶 Free / 🧱 Blocked (default ON; disabled until walls exist); closed door blocks, open door passes
+- ☐ Player token drag stops at walls (radius-aware slide-along); DM bypasses
 - ☐ Regression (2026-06-12 §A.14): right-click near token+wall must open ONE context menu
 
 ## Act 6 — Map tools [fresh campaign]
 
-Ruler (distance + Near/Close/Far/Distant bands; private per user). Pointer (broadcast dot with name; auto-fade). Grid editor (cell size + origin; tokens must not shift). Spawn point (set; activate a *new* map; party clusters there). Focus mode (Expand/Esc). Token right-click: Rotate, Resize (presets + drag handle), Remove. Custom token: upload an image, place, verify palette persistence across maps.
+Ruler (distance + Near/Close/Far/Distant bands; private per user). Pointer (broadcast dot with name; auto-fade) — also hold-to-draw a stroke that fades. Grid editor (cell size + origin; tokens must not shift). Spawn point (set; activate a *new* map; party clusters there). Focus mode (Expand/Esc). Token right-click: Rotate, Resize (presets + drag handle), Remove. Custom token: upload an image, place, verify palette persistence across maps. **DM Light tool**: place/drag/remove a standalone map light (torch / continual-flame, adjustable radius). **Drop lit torch**: a player drops a carried lit torch from their card → light lands on the map at the token.
 
 - ☐ Ruler bands correct (≤1 Near, ≤3 Close, ≤10 Far); not visible to others
-- ☐ Pointer dot appears on all clients with the pointer's name, fades ~2 s after stillness
+- ☐ Pointer dot appears on all clients with the pointer's name, fades ~2 s after stillness; hold-to-draw stroke broadcasts + fades (#994)
 - ☐ Grid changes broadcast (~200 ms debounce) and never move tokens
 - ☐ Spawn affects first-arrival only; revisits restore prior positions
 - ☐ Resize updates visual + hit area + vision origin together
 - ☐ Custom tokens render unclipped, no HP bar, persist in the campaign palette
+- ☐ DM Light tool (#935): place/move/remove standalone lights; finite torch burns down; illuminates the whole party + DM overlay
+- ☐ Drop lit torch (#935): carried torch transfers onto the map at the token, preserving remaining burn
 
 ## Act 7 — Combat core [fresh campaign]
 
