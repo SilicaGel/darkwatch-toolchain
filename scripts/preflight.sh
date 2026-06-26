@@ -42,7 +42,7 @@ set -uo pipefail
 # To update: review `git diff` of .forgejo/workflows/ci.yml, confirm this
 # script still mirrors the `lint-typecheck` + `test` jobs (update the checks
 # below if they changed), then set this to the value preflight prints.
-EXPECTED_CI_HASH="32185d64d3af32865dca7bf8abe4eadbd2f0d2ceeb2ef0bff5e15a52493e485f"
+EXPECTED_CI_HASH="42d38848267fe28b33040977692d979489991217725a112e6e8b973b56e20452"
 
 # --- setup ------------------------------------------------------------------
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || {
@@ -202,6 +202,10 @@ run_check "Record<string,unknown> budget" node scripts/check-record-type-budget.
 # #1380 — flag weakened test assertions (deleted expect / matcher downgrade) in
 # changed test files — the "broke prod, softened the test" masking pattern.
 run_check "test-assertion loosening" node scripts/check-test-assertion-loosening.mjs
+
+# #856 — feature-inventory drift: dangling file/event refs (gate) + new
+# high-confidence surfaces missing a row (gate) / new components (advisory).
+run_check "feature-inventory drift" node scripts/check-feature-inventory.mjs
 
 # #1290 — ESLint gate (mirrors ci.yml's `Lint (ESLint)` step). Fails on any
 # ESLint error. Until #1290 this only ran in the bypassable lint-staged

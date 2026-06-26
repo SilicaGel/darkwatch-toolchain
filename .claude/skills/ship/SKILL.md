@@ -90,89 +90,36 @@ Run these in order. **Tell each sub-skill to skip its commit step** — ship han
    The `/update-brochure` skill will spin up its own isolated server/client on dedicated ports (see its SKILL.md), so this step is safe to run alongside other dev servers. Skip its commit — ship handles the coordinated commit.
 6. **Roadmap** — do NOT update by default. `ROADMAP.md` is now thematic, not a ticket tracker — it tracks strategic direction only. Only invoke `update-roadmap` if a theme has meaningfully shifted (new milestone starting / closing, longer-term idea promoted to active, strategic pivot). Per-ticket progress lives in Forgejo and the changelog.
 
-7. **Update the feature inventory** — until issue #856 lands a static-analysis script that regenerates `docs/feature-inventory.md` automatically, manually append/amend rows whenever a PR adds, removes, or renames user-facing surface. Detection is heuristic and soft — false positives are expected, you can decline:
+7. **Update the feature inventory** — the drift guard (`#856`,
+   `scripts/check-feature-inventory.mjs`) is now the source of truth; this step
+   reacts to it and adds the one thing it can't check (row honesty).
 
    ```bash
-   CHANGED_FILES=$(git diff main...HEAD --name-only)
-
-   # (a) New entry-point files in feature-bearing directories — catches a brand-new feature
-   NEW_SURFACE_FILES=$(git diff main...HEAD --name-only --diff-filter=A \
-     | grep -E '^(client/src/(components|pages|features)/.+\.(tsx|jsx)$|server/src/(routes|socket)/.+\.ts$)' || true)
-
-   # (b) New socket event literals introduced in this diff (.emit('x') / .on('x'))
-   #     Pathspec-bounded to source dirs so the detector doesn't match its own
-   #     documentation in SKILL.md / docs (false positive caught while shipping
-   #     #864 — the regex matched a comment line describing the regex itself).
-   NEW_SOCKET_EVENTS=$(git diff main...HEAD --unified=0 -- 'client/src/' 'server/src/' \
-     | grep -E "^\+.*\.(emit|on)\([\"'\`][a-z]" \
-     | grep -v '^+++' || true)
-
-   # (c) Inventory rows whose referenced files were edited by this PR — catches
-   #     evolution of an EXISTING feature row (icon change, renamed/removed
-   #     symbol, new captured context, etc.). Load-bearing because once a feature
-   #     is in the inventory, this is the signal that keeps the row honest.
-   #     Rows anchor on file + symbol/test-id/event (no line numbers, by design);
-   #     the `:LINE` strip below is just defensive against a stray legacy ref.
-   INVENTORY_ROWS_TOUCHED=$(
-     grep -oE '`[^`]+\.(tsx?|jsx?|ts|js|css)(:[0-9]+)?`' docs/feature-inventory.md 2>/dev/null \
-       | sed -E 's/`//g; s/:[0-9]+$//' \
-       | sort -u \
-       | while read path; do
-           echo "$CHANGED_FILES" | grep -qx "$path" && echo "$path"
-         done
-   )
-
-   INVENTORY_TOUCHED=$(echo "$CHANGED_FILES" | grep -c '^docs/feature-inventory.md$' || true)
+   node scripts/check-feature-inventory.mjs; echo "exit=$?"
    ```
 
-   Then evaluate two separate gates (both fire when applicable; both prompts are
-   soft — y/n both proceed):
+   - **Blocking findings (`exit=1`)** — `missing-file`/`missing-event` (a row's
+     ref is gone) or `missing-row-page`/`missing-row-route`/`missing-row-event`
+     (a new high-confidence surface has no row). Fix `docs/feature-inventory.md`:
+     restore/retarget the ref, or append the row(s). Row format is fixed:
+     `| Feature | Where | test-id | Socket? | Time-based | Flag |`; use `needed`
+     when no stable `data-testid` exists. CI will block this PR otherwise. Only
+     fall back to `[allow-inventory-drift]` in the PR title for a genuinely
+     intended drift the script misreads — and say why in the PR body.
+   - **Advisory findings (`maybe-missing-component`)** — a new component with no
+     row. Soft: add a row if it's a real user-facing surface, else proceed
+     (sub-component of an existing feature). Don't argue with a false positive.
 
-   1. **New-surface gate** — if `NEW_SURFACE_FILES` or `NEW_SOCKET_EVENTS` is
-      non-empty **and** `INVENTORY_TOUCHED` is `0`, prompt:
+   **Check 3 — row honesty (LLM, diff-scoped).** The script proves anchors
+   resolve; it can't tell whether a row's *description* is still true. For each
+   inventory row whose anchored file(s) appear in this branch's diff
+   (`git diff main...HEAD --name-only`), read the row's claim against the changed
+   code and confirm it still honestly describes the behavior (item added/removed,
+   count changed, DM-only constraint, success state). Surface any suspect rows to
+   the user to confirm/fix. Touched rows only — do not re-audit all 423.
 
-      > *"This PR looks like it adds user-facing surface (`<short summary of what was detected>`) but `docs/feature-inventory.md` wasn't updated. Append rows for the new features? (y/n)"*
-
-      On **y**, add rows under the matching group(s). Format is fixed:
-      `| Feature | Where | test-id | Socket? | Time-based | Flag |`. Use
-      `needed` if no stable `data-testid` exists yet — don't backfill testids
-      prophylactically (the tour can use role/text selectors).
-
-   2. **Inventory-row-touched gate** (#864) — if `INVENTORY_ROWS_TOUCHED` is
-      non-empty **and** `INVENTORY_TOUCHED` is `0`, prompt:
-
-      > *"This PR edits `<file>` which is referenced by `docs/feature-inventory.md`. Review the matching row(s) for staleness? (y/n)"*
-
-      Show the user the matching rows inline so they can decide in place rather
-      than grep themselves:
-
-      ```bash
-      printf '%s\n' "$INVENTORY_ROWS_TOUCHED" | while read -r f; do
-        [ -z "$f" ] && continue
-        echo "--- $f ---"
-        grep -n -F "$f" docs/feature-inventory.md
-      done
-      ```
-
-      (Use `printf | while read` rather than `for f in $VAR` — the Bash tool
-      on macOS runs `zsh`, which doesn't word-split unquoted variable
-      expansions like bash does. `for f in $multiline_var` only iterates once
-      in zsh, on the whole blob.)
-
-      Common reasons a row needs touching: stale description (icon swap, new
-      captured context, success state added), or removal/rename of a referenced
-      symbol (delete or re-target the row). On **y**, open the file and amend the
-      relevant row(s); on **n**, proceed.
-
-   - **n on either gate** — proceed. Acceptable when the detection is wrong
-     (pure refactor that added a file but no new surface, an inventory-listed
-     file edited in a way that doesn't affect the row's accuracy, renamed
-     event that was already inventoried, etc.). Don't argue — both gates are
-     guides.
-
-   Removals / renames: if a feature was deleted or moved, edit the
-   corresponding row(s) in the same pass. Diff hygiene matters more than
-   completeness — the inventory is a living artifact, not a contract.
+   Removals/renames: if a feature was deleted or moved, edit the corresponding
+   row(s) in the same pass. The inventory is a living artifact, not a contract.
 
 ## Step 2.5: Merge latest main into the branch
 

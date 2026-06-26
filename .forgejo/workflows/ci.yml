@@ -46,6 +46,9 @@ jobs:
             client/package-lock.json
             tests/package-lock.json
 
+      - name: Fetch base ref (inventory drift Check 2 needs origin/main)
+        run: git fetch --no-tags --depth=200 origin main || true
+
       - name: Assert workflow Node.js versions are consistent
         run: |
           set -e
@@ -184,6 +187,11 @@ jobs:
         env:
           PR_TITLE: ${{ github.event.pull_request.title }}
         run: node scripts/check-record-type-budget.mjs
+
+      - name: Feature-inventory drift guard (#856)
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: node scripts/check-feature-inventory.mjs
 
       # #1290 — ESLint as a real gate. Until now lint only ran in the
       # bypassable lint-staged pre-commit hook (eslint --fix on staged files),
