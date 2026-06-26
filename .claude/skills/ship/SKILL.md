@@ -273,6 +273,7 @@ Verify: <playwright | device | eyes> — <how / which part>
   - **`eyes`** — a human must look because there's no DOM/DB/socket/aria signal: animation timing/smoothness, glow, colour feel. Say what to look at.
 - **Default to `playwright`. The test for `playwright` is mechanical:** is the `Expected:` outcome observable in the **DOM, DB row, socket payload, or a button/`aria-*` state**? If yes → `playwright`, full stop. Multi-user and DM-vs-player are *not* reasons to fall back — that's exactly what `two-user-observation` drives.
 - **Split, don't downgrade.** A mostly-automatable plan with a sliver of true polish is still `playwright` — tag it `playwright` and append the residue: `Verify: playwright (two-user-observation) — assert dot appears/labelled/cleared + tool mutual-exclusion; eyes-only: the glow/comet-trail aesthetic.` Tagging the whole thing `eyes` because one bit is visual is the failure this slot exists to stop (the #994 miss: a fully two-context-automatable pointer feature got hand-verified because the plan never said it was drivable).
+- **Recommend a durability flag — `@durable`.** Append `@durable` to a `playwright` Verify line when the feature is **critical + regression-prone**, so qa-check promotes the spec it writes into the durable suite (#1057) instead of filing a dangling follow-up. **Ship recommends; the user overrides** — surface the recommendation, don't decide silently. Derive it from signals already in front of you: issue labels (`critical` / `high-value` / `security` / `gameplay` / `regression`) or the diff (combat/initiative, auth/permissions, real-time broadcast, server-authoritative state like HP/damage/money) → recommend `@durable`; pure refactor / tech-debt / infra / cosmetic → don't. **Ship NEVER writes the e2e itself** — the flag only routes. qa-check authors the spec independently and falsify-first, so verification stays an independent check, not the author grading their own homework. Example: `Verify: playwright (two-user-observation) @durable — assert the observer HP delta matches the sheet weapon.`
 
 **No user surface** (tech-debt, infra, pure refactor, type tightening) — single bullet, no checklist:
 
@@ -282,6 +283,8 @@ Verify: <playwright | device | eyes> — <how / which part>
 ```
 
 The escape hatch is load-bearing; don't write a contrived UI plan for a `Record<string, unknown>` audit. But also don't reach for it when there genuinely is a user surface — if the user can see the change, there's a plan to write.
+
+**"No *reachable* surface today" is NOT this hatch.** The hatch is for the *inherent* absence of UI (infra / migration / refactor / type-tightening / log-only). If the surface exists but can't be reached from the default seed/state — "no seeded X", "needs an active session/combat/map that isn't running", "no monster with this property is seeded" — that is an **obstructed** surface, not an absent one. Write the real user-visible plan anyway (qa-check seeds/sets up the precondition via the test hooks and drives it), and file a successor for the durable fixture. Writing `- no reachable user surface — verify via <unit test>` for something a user can see is the **#1265 miss**: a monster-AoE-overlay feature shipped with a code-read plan because no seeded monster had an AoE spell — the surface existed; only the seed didn't.
 
 ### Worked examples
 

@@ -21,6 +21,23 @@ QA on Darkwatch is "implementation done, awaiting verification before closing." 
 - **Drop to code-readable ONLY when you can name why a browser adds nothing:** (1) **no user surface** — pure infra / CI / migration / log-only; or (2) **the behavior is already pinned by a falsifiable unit/int test that drives the actual user-observable output** (clicks the real control, asserts the real DOM/DB row) — so a browser run would only re-test the same logic slower. *"A unit test exists" is not the exemption — "a falsifiable test pins the user-facing behavior" is.* (The #1345 recenter unit tests click the real button and assert the real transform → sufficient. #1342's unit test only covers the geometry resolver; the drag-in-canvas + role gating is only proven by the e2e → run the e2e.)
 - **When unsure, run the browser check.** The cost of a slow spec is minutes; the cost of a code-read false-pass is a broken feature shipped to a live game.
 
+### Obstructed surface ≠ no surface
+
+The "no user surface" exemption is for the **inherent** absence of UI — pure infra / CI / migration / refactor / type-tightening / log-only. It is **NOT** for a *temporary obstacle* between you and a surface that exists. When a test plan, or your own instinct, says "can't test this in a browser," name the reason. If the reason is any row below, the surface is real and **you clear the obstacle and drive it** — you do not downgrade to a code-read:
+
+| "Can't reach it" reason (NOT a code-read excuse) | Clear the obstacle instead |
+|---|---|
+| missing seed / fixture — "no seeded X", "no reachable surface today" | inline-seed via the `start-combat` test hook (`monsters[].spells` / `attacks[]`) or activate a seeded map, then drive — **and file a durable-seed issue** |
+| no precondition state — "needs an active session/combat/map, none running" | set it up via API / test hook (start session, `start-combat`, activate map), then drive |
+| dev server down / wrong version | `restart-local-dev`, then drive — **never** "code-only mode" while it's fixable |
+| need a specific actor / role | seed or select the right one (a Fighter with an equipped weapon; DM vs player) |
+| needs forced / deterministic dice | `forceRoll` test hook |
+| two-client / real-time broadcast | two contexts — the propagation IS the thing under test (#994) |
+| external dep won't load (#1369 wikimedia URL) | use the seeded local map |
+| **real device only** — keyboard occlusion, native touch | the ONE legitimate non-headless exemption — but still capture the reproducible sub-part |
+
+Only the last row is a true exemption. **A unit test does not become sufficient just because the surface is currently hard to reach** — that is the #1265 miss: a monster-AoE-overlay feature was nearly closed on a unit test because no seeded monster had an AoE spell. The surface existed; only the seed didn't. If clearing an obstacle genuinely needs durable infra you lack, **still do the best reachable verification now, file the fixture issue, and say in the report what you couldn't reach** — never present a code-read of an *obstructed* surface as a clean pass.
+
 ## Inputs
 
 - No args → verify all open `status/qa` issues.
@@ -79,7 +96,7 @@ awk -v n="$N" '
 Classify the extracted block:
 
 - **User-visible plan** — has numbered steps and an `Expected:` line. **Use this as the verification target** — go straight to Step 4 (Playwright) using the steps. Skip the reachability grep in Step 3; the plan's existence + the author's confidence in writing it IS the reachability proof.
-- **No-user-surface escape hatch** — single bullet of the form `- no user surface — verify via <grep / file>`. Run the cited grep / read the cited file; that's the whole verification. Skip Step 4.
+- **No-user-surface escape hatch** — single bullet of the form `- no user surface — verify via <grep / file>`. **Gate it first (see "Obstructed surface ≠ no surface" above):** the hatch is valid ONLY for the *inherent* absence of UI. If the bullet's reason is a *temporary obstacle* — "no **reachable** surface today", "no seeded X", "not **readily** testable", "needs an active session/combat/map" — it is **not** the hatch: the surface exists, so clear the obstacle and drive it (Step 4), then file the durable-fixture issue. Only when the absence is genuinely inherent: run the cited grep / read the cited file; that's the whole verification, skip Step 4.
 - **Malformed** (heading present but neither shape) — note in the report and fall back to Step 2's heuristics.
 
 **The `Verify:` tag is authoritative — obey it.** Test plans written by `ship` after the Verify-tag protocol carry a `Verify: <playwright | device | eyes> — <how>` line. When present, it is the author's explicit instruction for *how to check this*, and it overrides your own cheapest-mode instinct:
@@ -361,20 +378,24 @@ Write a short markdown log to `tests/qa-check/session-<YYYY-MM-DD-HHMM>.md` (NOT
 
 Useful audit trail. Brief — don't restate the report.
 
-### Step 9 — Promotion recommendation (when warranted)
+### Step 9 — Promotion + capture (don't make QA do the work twice)
 
-After the session log, for any issue whose behavior is **critical and regression-prone**, recommend promoting its QA spec to a durable test. This is a recommendation only — the durable-suite wiring is tracked as a separate follow-up issue.
+After the session log, capture the durable artifacts this pass produced — don't discard a spec you already watched pass, or re-derive a seed you already wrote.
 
-Decide the layer:
+**A. `@durable`-flagged specs → promote in-pass, not a dangling follow-up.** If the closing plan's `Verify:` line carried the **`@durable`** flag (ship recommends it for critical, regression-prone features; the user confirmed it at ship) AND you authored a falsifiable spec this pass, **promote it as part of the pass**, offering the move to the user:
 
-- **Pure logic** (e.g. damage math, stat calculations, permission predicates with no browser dependency) → recommend an **int/unit test** alongside the server code.
-- **Client-path behavior** (clicks, drags, real-time flows) → recommend moving `tests/qa-check/<N>/spec.ts` into `tests/e2e/` and tagging it `@regression`.
+- **Client-path behavior** (clicks, drags, real-time flows) → move `tests/qa-check/<N>/spec.ts` into `tests/e2e/<name>.spec.ts` tagged `@regression`.
+- **Pure logic** (damage math, stat calc, permission predicates) → add an int/unit test alongside the server code.
 
-Phrase the recommendation in the session log entry for the issue, e.g.:
+This is the whole point of the flag: ship decided criticality, you already wrote the breaking spec — promote it here instead of filing a ticket that rots. The spec stays an *independent* check (you authored it falsify-first during verification; ship never wrote it).
+
+**B. Cleared an obstacle to verify? Offer to land it.** If you had to **inline-seed a fixture or add seed data** to reach an obstructed surface (e.g. a monster AoE spell for #1265), you've already done ~90% of the durable-seed work. In the walkthrough, **offer to open the seed PR** reusing it (worktree-first, run `/ship` before the PR) — but file the seed issue regardless, so it's never left dangling.
+
+**C. Otherwise — recommend.** For a critical/regression-prone behavior with no `@durable` flag, recommend promotion in the session-log entry and file a successor via the `issue` skill:
 
 > "Recommend promoting `tests/qa-check/777/spec.ts` to `tests/e2e/roll-auth.spec.ts` tagged `@regression` — follow-up filed as #N."
 
-Do not wire the durable suite yourself in the QA pass. File the successor via the `issue` skill and reference it in the session log.
+Offer the in-pass promotion (A) and the seed PR (B); **never open a PR autonomously** without the user's go.
 
 ## Tools
 
@@ -406,7 +427,7 @@ Copy the relevant template to `tests/qa-check/<N>/spec.ts`, rename the test, upd
 
 - **Single-issue mode.** `/qa-check 269` → fetch just that issue, run its applicable mode, present a one-section report. Same close walkthrough.
 - **Forgejo unreachable.** Fail loudly with the curl error. Don't fall back to local guesses; the user needs to know the API isn't responding.
-- **Dev server won't start (or is on wrong version).** Code-only mode for everything; flag the would-have-been-Playwright issues as visual.
+- **Dev server is down (or on the wrong version).** Down is a *fixable obstacle*, not a code-read license (see "Obstructed surface ≠ no surface"): **`restart-local-dev` first, then drive.** Only if it genuinely won't start after that do you drop to code-only mode for the would-have-been-Playwright issues — and flag them as unverified-pending (visual), not closed.
 - **Issue body is one line of "see slack thread."** No useful hints. Classify visual-only and ask the user for the relevant artifact in the clarifying-question section.
 
 ## Why this design

@@ -134,7 +134,7 @@ Skip the questions and write the issue directly if the intent is clear from cont
 
 ## Step 7: Suggest labels
 
-Pick 1–3 from the cache. Use the most specific applicable labels:
+Pick 1–3 from the cache. Use the most specific applicable labels. **The cache (`/tmp/darkwatch_labels_cache.json`, Step 1) is authoritative for exact names — this table is common picks, not exhaustive. If a name here doesn't match the cache, the cache wins; grep it for the exact name rather than guessing. A label id that doesn't exist is *silently dropped* on POST (the issue is created without it), so a wrong name fails quietly — verify the label landed.**
 
 | Label | Use for |
 |---|---|
@@ -150,7 +150,7 @@ Pick 1–3 from the cache. Use the most specific applicable labels:
 | `security` | Security concern |
 | `infrastructure` | Server, DB, deploy, DevOps |
 | `content` | App data or text content |
-| `shadowdark-rules` | Correctness of Shadowdark rules |
+| `ruleset/shadowdark` | Shadowdark rules correctness / ruleset-specific behavior |
 | `quick-win` | Small effort, clear win |
 | `high-value` | High impact, worth prioritizing |
 | `maybe` | Nice to have, uncertain |
@@ -158,6 +158,12 @@ Pick 1–3 from the cache. Use the most specific applicable labels:
 | `critical` | Blocks users or the app |
 | `regression` | Something that used to work |
 | `maps-feature` | Anything tied to the maps feature (#316 + successors) — token rendering, fog-of-war, LOS, map UI, map storage. Apply automatically when the issue body mentions maps/tokens/fog/LOS. |
+| `imagery` | AI image generation — portraits, monster art, map imagery |
+| `umbrella` | Tracking issue grouping several sub-issues |
+| `tuesday-game` / `pregame` / `postgame` | Tied to a live game session (the running game / prep / recap) |
+| `up-next` / `deep-dive` | Prioritization queues — usually set during triage, not at file-time |
+
+(Other meta labels exist in the cache — `status/*`, `orphan`, `group-discussion`, `blocks-second-ruleset`, `regression` — grep the cache when one of those applies.)
 
 **If no label fits well**, say so and suggest a new one. Pick a sensible hex color. If the user agrees, create it:
 
