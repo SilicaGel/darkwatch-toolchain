@@ -196,6 +196,11 @@ check_numeric_ids() {
 }
 run_check "no numeric ID patterns" check_numeric_ids
 
+# #1270 — e2e tier coverage: every spec must be in the per-PR smoke list OR the
+# nightly-only quarantine. Mirrors ci.yml's "Enforce e2e specs are in a declared
+# test tier" step (lint-typecheck job). No deps needed — pure node + repo files.
+run_check "e2e tier coverage" node scripts/check-e2e-tiers.mjs
+
 # #761 — ratchet: fail if `Record<string, unknown>` count climbs above baseline.
 run_check "Record<string,unknown> budget" node scripts/check-record-type-budget.mjs
 
