@@ -42,7 +42,7 @@ set -uo pipefail
 # To update: review `git diff` of .forgejo/workflows/ci.yml, confirm this
 # script still mirrors the `lint-typecheck` + `test` jobs (update the checks
 # below if they changed), then set this to the value preflight prints.
-EXPECTED_CI_HASH="42d38848267fe28b33040977692d979489991217725a112e6e8b973b56e20452"
+EXPECTED_CI_HASH="bbb9643e05f3602d7756f8d530e3ed545aca4404b1bdba7d39ac0212549adb0a"
 
 # --- setup ------------------------------------------------------------------
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || {
@@ -201,6 +201,11 @@ run_check "no numeric ID patterns" check_numeric_ids
 # test tier" step (lint-typecheck job). No deps needed — pure node + repo files.
 run_check "e2e tier coverage" node scripts/check-e2e-tiers.mjs
 
+# #1411 — ban external https:// image_url in e2e specs. External image hosts
+# (e.g. Wikimedia) cause flaky CI — use uploadSampleMapImage() from
+# tests/helpers/campaign.ts instead. No deps needed — pure node + repo files.
+run_check "e2e external-image ban" node scripts/check-e2e-external-images.mjs
+
 # #761 — ratchet: fail if `Record<string, unknown>` count climbs above baseline.
 run_check "Record<string,unknown> budget" node scripts/check-record-type-budget.mjs
 
@@ -211,6 +216,10 @@ run_check "test-assertion loosening" node scripts/check-test-assertion-loosening
 # #856 — feature-inventory drift: dangling file/event refs (gate) + new
 # high-confidence surfaces missing a row (gate) / new components (advisory).
 run_check "feature-inventory drift" node scripts/check-feature-inventory.mjs
+
+# #1396 — RIGHTS-MATRIX drift: verify requireCharacterAccess() levels in
+# route files match the access-level column in docs/RIGHTS-MATRIX.md.
+run_check "rights-matrix drift" node scripts/check-rights-matrix.mjs
 
 # #1290 — ESLint gate (mirrors ci.yml's `Lint (ESLint)` step). Fails on any
 # ESLint error. Until #1290 this only ran in the bypassable lint-staged

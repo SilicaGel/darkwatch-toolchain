@@ -93,6 +93,12 @@ jobs:
         # theme-contrast broke the deploy. No deps needed (pure node + repo files).
         run: node scripts/check-e2e-tiers.mjs
 
+      - name: Ban external image_url in e2e specs (#1411)
+        # #1369 removed 14 Wikimedia image_url usages; this guard prevents regression.
+        # External https:// image_url values cause flaky CI when the host rate-limits.
+        # Use uploadSampleMapImage() from tests/helpers/campaign.ts instead.
+        run: node scripts/check-e2e-external-images.mjs
+
       - name: Install server dependencies
         run: |
           cd server && npm ci --no-audit --no-fund
@@ -192,6 +198,11 @@ jobs:
         env:
           PR_TITLE: ${{ github.event.pull_request.title }}
         run: node scripts/check-feature-inventory.mjs
+
+      - name: RIGHTS-MATRIX drift guard (#1396)
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: node scripts/check-rights-matrix.mjs
 
       # #1290 — ESLint as a real gate. Until now lint only ran in the
       # bypassable lint-staged pre-commit hook (eslint --fix on staged files),
