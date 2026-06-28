@@ -131,6 +131,47 @@ Only once the acceptance walk passes do you proceed to:
    ```
 4. Move to the next ticket.
 
+## Before you finish: run the structural preflight
+
+After your last ticket is committed (and before you write the final report), run
+the repo's preflight gate so the orchestrator doesn't discover at ship time the
+checks that `npm test` + a build don't cover:
+
+```bash
+scripts/preflight.sh --skip-int
+```
+
+`--skip-int` is **mandatory here**: the integration + `db:verify` checks hit the
+**shared** dev DB (port 3397) that every parallel worktree points at — running
+them concurrently across batches corrupts each other's DB state. So you run
+everything *except* those; the orchestrator runs the full preflight (with the DB
+checks) serially at ship time. This is exactly the set of gates batch agents
+have historically skipped and then failed in CI: **knip** (dead code / unused
+exports), **madge** (import cycles), the **Record<string, unknown> budget**,
+**feature-inventory drift**, **test-assertion loosening**, plus eslint /
+prettier / tsc / unit tests.
+
+If preflight reports a failure, fix it and re-run until the non-int checks are
+green (or explicitly skipped). Fold the fixes into the relevant ticket's commit
+(or a small `fix:` commit if it spans several). Do **not** declare the batch
+done with a red structural preflight.
+
+**Escape-hatch markers** — a few gates are PR-title-driven for genuinely-justified
+cases (the orchestrator adds these to the PR title at ship time; you just *flag*
+the case in your final report with a one-line justification, don't try to add
+them yourself):
+- `[allow-test-loosening]` — an assertion legitimately changed shape (e.g. a
+  surface was migrated, like `alert()` → toast, so the old matcher can't exist).
+  Only valid when the new assertion is **as strong or stronger**.
+- `[allow-record-bleed]` — a new `Record<string, unknown>` is genuinely justified
+  and you couldn't stay net-flat by converting an existing one.
+- `[allow-inventory-drift]` — the feature-inventory guard misreads an intended
+  drift.
+
+If a marker is the honest answer, say so in your final report (which marker +
+why) so the orchestrator can apply it. If you're not sure it's justified, treat
+it as a real failure and fix it instead.
+
 ## Safety valve (use it liberally)
 
 Append `status=blocked` with a concrete question any time you:
