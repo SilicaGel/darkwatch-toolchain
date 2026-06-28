@@ -96,6 +96,12 @@ Always-cheap, always-run if installed:
 - `git secrets --scan` or `gitleaks detect --no-banner` if available
 - `npx depcheck` for unused deps
 
+Structural-quality tools (audit-only — #1289; run if installed, recommend if not):
+- **jscpd** (copy-paste detector) — `npx jscpd client/src server/src --min-tokens 50 --reporters json --output /tmp/deep-audit-jscpd`. Not in the repo, so it downloads on demand; if that's undesirable, recommend it instead.
+- **madge** (module structure — orphans + single-importer + cycles) — already in the repo at `server/node_modules/.bin/madge`; run the orphan + circular passes per `references/tools.md`.
+
+These are **never** preflight/CI gates — they're review *candidates* for over/under-extraction. Their output should **feed the quality subagent's duplication / abstraction / complexity categories**, not be reported raw. (Circular-dependency *enforcement* already lives in `scripts/check-import-cycles.mjs`; madge here is for the orphan/structure picture, not gating.)
+
 Save tool output to `/tmp/deep-audit-<scope>-<tool>.log` and reference paths in the report — don't paste 5,000 lines into the chat.
 
 ---
@@ -111,6 +117,8 @@ For each dimension in the requested scope (default: all four — quality, securi
 > You are auditing the Darkwatch codebase for **code quality**. The repo was largely written by Claude with light human review — assume the failure modes of an LLM coder: copy-paste duplication, dead code, inconsistent patterns, half-finished abstractions, missing or wrong-shaped error handling, optimistic happy-path assumptions, and tests that exercise mocks instead of behavior.
 >
 > Read `client/src/`, `server/src/`, `scripts/`, and `tests/`. Use `references/checklist.md` (in the deep-audit skill) as your map but go deeper than the checklist where something looks off.
+>
+> If present, consume the structural-tool output to anchor your duplication / abstraction / complexity findings (don't just eyeball): `/tmp/deep-audit-jscpd/jscpd-report.json` (jscpd clones → under-extraction candidates) and any madge orphan / single-importer / circular list (→ over-extraction + dead-code candidates). Treat these as *candidates*, not verdicts — verify each before reporting, and skip intentional entrypoints (CLI scripts, seeds, test setup) when judging orphans.
 >
 > Severity bar: **medium and above**. A nit is something a linter would catch or a one-line cleanup. Drop nits unless several of them combine into a real maintainability problem.
 >

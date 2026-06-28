@@ -150,6 +150,30 @@ Check `package.json` scripts in the root, `client/`, and `server/`, plus `.gitea
 
 ---
 
+## Duplication & module structure (audit-only — #1289)
+
+These two tools anchor the quality dimension's **over/under-extraction** judgments with concrete numbers instead of the subagent eyeballing it. They are **audit-only** — run inside `/deep-audit` (and ad-hoc), **never** as preflight/CI gates. Duplication % and orphan-module reports fluctuate and are review *candidates*, not pass/fail defects, so a periodic human-run audit is their right home. (The one exception is **circular dependencies**, which are gate-worthy per-PR — but that enforcement already lives in `scripts/check-import-cycles.mjs` + `.forgejo/workflows/import-cycles.yml`, not here. Here, cycles are just reported alongside the rest of the structure picture.)
+
+### `jscpd` (copy-paste detector) — highest-signal "extract a helper here" tool
+- **Install**: not in the repo; `npx --no-install jscpd` will fail → recommend, or run `npx jscpd …` ad-hoc (downloads on demand).
+- **Run**: `npx jscpd client/src server/src --min-tokens 50 --reporters json --output /tmp/deep-audit-jscpd` (tune `--min-tokens`; 50 is a reasonable start, raise it if the clone list is noisy).
+- **Look at**: `/tmp/deep-audit-jscpd/jscpd-report.json` → `statistics.total.percentage` (overall duplication %) and the `duplicates[]` array (each entry = a cloned block with both file:line locations).
+- **Dimension**: quality (duplication / under-extraction).
+- **Feed it**: hand the `duplicates[]` blocks to the quality subagent as **under-extraction candidates** ("these N blocks are clones; should they be one helper?") — don't paste the raw report into the chat.
+
+### `madge` (module-structure) — already in the repo (`server/node_modules/.bin/madge`)
+- **Install**: already present as a **server** devDependency (it depends on TS ^5; the root is on TS 6.x — see `scripts/check-import-cycles.mjs` for why it lives in `server/`). Use `server/node_modules/.bin/madge`.
+- **Run (orphans)**: `server/node_modules/.bin/madge --orphans --extensions ts --ts-config server/tsconfig.json server/src` and likewise for `client/src` with `--extensions ts,tsx --ts-config client/tsconfig.json`.
+- **Run (circular, JSON)**: `server/node_modules/.bin/madge --circular --json --extensions ts --ts-config server/tsconfig.json server/src` (mirrors the cycle gate; report only — the gate owns enforcement).
+- **Look at**: **orphan modules** (imported by nothing — dead-code / over-extraction candidates) and **single-importer modules** (split out for one caller — over-extraction candidates). Cross-check orphans against intentional entrypoints (CLI scripts, seeds, test setup) before reporting.
+- **Dimension**: quality (abstraction / structure / dead-code).
+- **Feed it**: give the orphan + single-importer list to the quality subagent as **over-extraction / dead-code candidates**.
+
+### `dependency-cruiser` (heavier alternative to madge)
+- **Install**: not in the repo → recommend only if madge's orphan/cycle output proves insufficient (dependency-cruiser adds rule-based architecture constraints + richer reporting, at the cost of a config file).
+- **Run**: `npx --no-install depcruise client/src server/src --output-type err` (violations) + a `--output-type json` pass for orphan/cycle extraction.
+- **Dimension**: quality (structure). Prefer madge unless you specifically need depcruise's rule engine.
+
 ---
 
 ## Operations & Reliability

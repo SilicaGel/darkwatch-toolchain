@@ -60,3 +60,13 @@ Reference Forgejo by issue number (`#126`) or milestone name — those are the a
 ## Why ROADMAP isn't auto-updated by `/ship`
 
 Previously, `/ship` added every shipped feature to a Completed section. That duplicated CHANGELOG and caused ROADMAP to bloat into a ticket list. The thematic model keeps ROADMAP scannable — one page you can read in two minutes and know "where is this project going." Per-ticket progress belongs in Forgejo.
+
+## Review cadence (#1398)
+
+ROADMAP is an **intent doc** — it can't be auto-generated or guarded like docs that mirror code, so the `/ship` `update-roadmap` step is conditional-and-soft and rarely fires. Without a backstop it rots silently (it sat at v0.15.1 for ~70 days while the app reached v0.128). The backstop is a **slow heartbeat**, not a per-PR trigger:
+
+- **Cadence: monthly.** Re-read ROADMAP against the **open Forgejo milestones** + the **recent CHANGELOG** and reconcile any drift (themes that shipped, milestones that closed, direction that moved).
+- **Always bump `**Last reviewed:**`** at the top of `docs/ROADMAP.md` to today's date when you do the pass — *even if nothing changed*. A clean review is still a review, and the date is what the staleness check reads.
+- **Staleness check (warn-only):** `node scripts/check-roadmap-staleness.mjs` flags when `Last reviewed` is older than 5 weeks. It **never blocks** — it just makes the drift visible. Run it ad-hoc, wire it into a `/schedule` routine, or add it as a non-blocking CI/preflight notice. Pass `--strict` to make it exit non-zero (opt-in).
+
+This is human-owned by design — the check surfaces the need; a person does the actual reconciliation.
