@@ -125,7 +125,17 @@ jobs:
             sleep 1
             [ "$i" -eq 30 ] && { echo "MinIO never became ready"; cat /tmp/minio.log; exit 1; }
           done
-          /tmp/mc alias set local http://localhost:9000 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD"
+          # `/minio/health/ready` can flip green a beat before the server accepts
+          # client auth, so `mc alias set` intermittently hits "Server not
+          # initialized yet" and — under `set -e` — kills the whole job (recurring
+          # e2e-full flake). Retry the alias until it authenticates, mirroring the
+          # health loop above, before touching the bucket.
+          for i in $(seq 1 30); do
+            /tmp/mc alias set local http://localhost:9000 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD" >/dev/null 2>&1 && break || true
+            echo "Waiting for MinIO client auth... ($i/30)"
+            sleep 1
+            [ "$i" -eq 30 ] && { echo "MinIO never accepted client auth"; cat /tmp/minio.log; exit 1; }
+          done
           /tmp/mc mb --ignore-existing local/"$MINIO_BUCKET"
           /tmp/mc anonymous set download local/"$MINIO_BUCKET"
           echo "MinIO ready with bucket $MINIO_BUCKET (public-download)"
