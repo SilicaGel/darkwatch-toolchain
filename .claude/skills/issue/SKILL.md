@@ -24,14 +24,23 @@ This does NOT apply to duplicate-checks or general triage — only to "what can 
 
 ---
 
-## Step 1: Load labels (4-hour cache)
+## Step 1: Load labels + milestones (4-hour cache)
 
 Check `/tmp/darkwatch_labels_cache.json`. If it exists and `fetched_at` is less than 4 hours ago, use it. Otherwise fetch fresh and overwrite:
 
 ```bash
 curl -s -H "Authorization: token $FORGEJO_TOKEN" \
-  "https://forge.example.com/api/v1/repos/aaron/darkwatch/labels" \
+  "https://forge.example.com/api/v1/repos/aaron/darkwatch/labels?limit=100" \
   | jq '{fetched_at: (now | todate), labels: .}' > /tmp/darkwatch_labels_cache.json
+```
+
+Do the same for **milestones** (the epics — see Step 7b), cached separately:
+
+```bash
+curl -s -H "Authorization: token $FORGEJO_TOKEN" \
+  "https://forge.example.com/api/v1/repos/aaron/darkwatch/milestones?state=open&limit=50" \
+  | jq '{fetched_at: (now | todate), milestones: [.[] | {id, title, description}]}' \
+  > /tmp/darkwatch_milestones_cache.json
 ```
 
 ---
@@ -165,6 +174,10 @@ Pick 1–3 from the cache. Use the most specific applicable labels. **The cache 
 
 (Other meta labels exist in the cache — `status/*`, `orphan`, `group-discussion`, `blocks-second-ruleset`, `regression` — grep the cache when one of those applies.)
 
+**Two label axes are handled in Step 7b, not here:**
+- `phase/demo` · `phase/beta` · `phase/later` — the **phase** axis (when we plan to do it). Always set one.
+- `critical` — the **severity** axis (it's broken / drop-everything). **Never auto-apply it.** Only add `critical` when the user explicitly says something is broken or blocking — severity overrides phase, so it's the user's call, not a default.
+
 **If no label fits well**, say so and suggest a new one. Pick a sensible hex color. If the user agrees, create it:
 
 ```bash
@@ -176,6 +189,36 @@ curl -s -X POST \
 ```
 
 Then re-fetch the labels and overwrite the cache file.
+
+---
+
+## Step 7b: Assign a milestone (epic) + phase
+
+The tracker uses a **three-axis model** (see `docs/plans/2026-06-28-milestone-epic-reorg.md`). Every issue gets all three:
+
+| Axis | Lives on | Question | Values |
+|---|---|---|---|
+| **Epic** | milestone | *Where* it belongs (durable theme) | the open milestones in the cache |
+| **Phase** | label | *When* we plan to do it | `phase/demo` · `phase/beta` · `phase/later` |
+| **Severity** | label | *How broken* (overrides phase) | `critical` — never auto-applied |
+
+### Pick the epic (milestone)
+
+Read `/tmp/darkwatch_milestones_cache.json` (Step 1) and match the issue to the **one** epic whose theme fits. The deciding question is **"do I know the epic?"** — not "feature vs bug."
+
+- **Known home** → use that milestone id (e.g. anything maps/tokens/fog → *Maps & vision*; login/SSO/authz → *Auth & accounts*; onboarding/help/empty-states → *Onboarding & help*; rules correctness → *Combat & rules depth*).
+- **No epic clearly fits** → use the **`Triage`** milestone (the default inbox). Do **not** invent a new single-issue milestone just to have one.
+- **Seed of a whole new theme** (will accrue many siblings, e.g. "add a video editor") → mention it to the user and propose a new milestone (+ an `umbrella` issue) rather than burying it in Triage. Confirm before creating a milestone.
+
+**Umbrella vs milestone:** a milestone is the *folder* (auto progress bar); an `umbrella` issue is an optional *narrative/checklist* doc that lives **inside** its milestone. An umbrella is never a substitute for assigning the milestone.
+
+### Pick the phase (label)
+
+- `phase/demo` — must be solid for the near-term Arcane Library demo (UX/UI, visible bugs, security/data must-fixes).
+- `phase/beta` — needed before unattended beta testers (onboarding, dashboard, admin/observability, content completeness, hardening).
+- `phase/later` — post-beta / someday.
+
+If urgency is genuinely unclear, ask; otherwise pick the obvious one and say which.
 
 ---
 
@@ -201,11 +244,14 @@ cat > /tmp/_issue_body.md <<'EOF'
 ... markdown body, including ```code fences``` and newlines ...
 EOF
 
-# Build the JSON payload with jq --rawfile (correctly escapes everything)
+# Build the JSON payload with jq --rawfile (correctly escapes everything).
+# labels MUST include a phase/* id (Step 7b); milestone is the epic id (Step 7b,
+# or the Triage id when no epic fits). Add the critical id ONLY if the user said
+# it's broken/blocking.
 PAYLOAD=$(jq -n \
   --arg t "Issue title goes here" \
   --rawfile b /tmp/_issue_body.md \
-  '{title:$t, body:$b, labels:[1,3]}')
+  '{title:$t, body:$b, labels:[1,3,49], milestone:18}')   # 49=phase/beta, 18=Maps & vision (look ids up in the caches)
 
 # POST, capturing status code SEPARATELY from the response body
 CODE=$(curl -s -o /tmp/_issue_resp.json -w '%{http_code}' -X POST \
