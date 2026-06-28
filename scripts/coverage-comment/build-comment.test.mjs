@@ -255,11 +255,11 @@ describe("renderSnippet", () => {
     const out = renderSnippet(src, [2], [4]);
     assert.match(out, /<pre>/);
     // Covered line 2: green bar color
-    assert.match(out, /background-color:#1a7f37[^>]*>\|<\/span>.*b/s);
+    assert.match(out, /background-color:#2ea043[^>]*>\|<\/span>.*b/s);
     // Uncovered line 4: red bar color
-    assert.match(out, /background-color:#cf222e[^>]*>\|<\/span>.*d/s);
-    // Both changed lines have green row background
-    assert.match(out, /background-color:#e6ffec/);
+    assert.match(out, /background-color:#f85149[^>]*>\|<\/span>.*d/s);
+    // Both changed lines have a theme-neutral (semi-transparent) green row tint
+    assert.match(out, /background-color:rgba\(46,160,67,0\.15\)/);
   });
 
   it("returns null when nothing changed", () => {
@@ -274,11 +274,11 @@ describe("renderSnippet", () => {
     ]);
     const out = renderSnippet(src, [2], [], null, e);
     // Line 1 (context, covered) — muted green bar
-    assert.match(out, /aceebb/);
+    assert.match(out, /rgba\(46,160,67,0\.40\)/);
     // Line 3 (context, uncovered) — muted red bar
-    assert.match(out, /ffcdd0/);
+    assert.match(out, /rgba\(248,81,73,0\.40\)/);
     // Line 2 (changed, covered) — bright green bar
-    assert.match(out, /background-color:#1a7f37/);
+    assert.match(out, /background-color:#2ea043/);
   });
 });
 
@@ -321,7 +321,7 @@ describe("buildComment", () => {
     // The "Missing: L..." list was removed (diff snippet shows uncovered lines visually).
     assert.doesNotMatch(md, /Missing: \*\*L/);
     // The snippet should show line2 with a red (uncovered) bar.
-    assert.match(md, /cf222e/);
+    assert.match(md, /f85149/);
     assert.match(md, /below 80% diff coverage/);
   });
 

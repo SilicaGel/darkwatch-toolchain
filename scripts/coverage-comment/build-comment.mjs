@@ -220,8 +220,9 @@ export function renderSplitTable(files) {
 
 // ── 4. Render an HTML <pre> snippet given source lines + covered/uncovered sets.
 //       Line numbers appear on the left (GitLab style), padded to a consistent
-//       width. Changed lines get a pale green row background; a solid green/red
-//       bar block indicates coverage status.
+//       width. Changed lines get a subtle (semi-transparent) green row tint that
+//       works over light and dark Forgejo themes; a solid green/red bar block
+//       indicates coverage status.
 //
 //       Context lines (not in the diff) get a muted light bar when `coverageEntry`
 //       is provided — so reviewers can see if surrounding existing code was already
@@ -263,12 +264,20 @@ export function renderSnippet(
   }, 0);
   const lineNumWidth = String(maxLineNum).length;
 
-  const GREEN_BG = "#e6ffec";
-  const GREEN_FG = "#1a7f37";
-  const RED_FG = "#cf222e";
-  // Muted shades for context lines (existing code, not part of the diff).
-  const GREEN_MUTED = "#aceebb";
-  const RED_MUTED = "#ffcdd0";
+  // Theme-neutral palette. A posted comment is static HTML and can't detect the
+  // reader's Forgejo theme (light vs dark), and Forgejo strips <style>/media
+  // queries from comments — so there's no per-theme branch available. Instead we
+  // avoid opaque light fills (which leave the theme's default text unreadable in
+  // dark mode) and layer subtle rgba tints over whatever the theme background is,
+  // letting text keep the theme foreground. The vivid coverage bars stay opaque
+  // hex so the critical indicator still renders even if a sanitizer drops rgba.
+  const CHANGED_BG = "rgba(46,160,67,0.15)"; // subtle green row tint (added lines)
+  const COVERED_BAR = "#2ea043"; // vivid green block — reads on light + dark
+  const UNCOVERED_BAR = "#f85149"; // vivid red block — reads on light + dark
+  const ADDED_FG = "#2ea043"; // "+" diff marker, bright enough for dark mode
+  // Muted tints for context lines (existing code, not part of the diff).
+  const COVERED_MUTED = "rgba(46,160,67,0.40)";
+  const UNCOVERED_MUTED = "rgba(248,81,73,0.40)";
 
   function esc(s) {
     return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -286,20 +295,20 @@ export function renderSnippet(
       const src = esc(sourceLines[i - 1] ?? "");
       const lineNum = String(i).padStart(lineNumWidth);
 
-      const diffMarker = isChanged ? `<span style="color:${GREEN_FG}">+</span>` : " ";
+      const diffMarker = isChanged ? `<span style="color:${ADDED_FG}">+</span>` : " ";
 
       let barSpan;
       if (isCovered) {
-        barSpan = `<span style="background-color:${GREEN_FG};color:${GREEN_FG}">|</span>`;
+        barSpan = `<span style="background-color:${COVERED_BAR};color:${COVERED_BAR}">|</span>`;
       } else if (isUncovered) {
-        barSpan = `<span style="background-color:${RED_FG};color:${RED_FG}">|</span>`;
+        barSpan = `<span style="background-color:${UNCOVERED_BAR};color:${UNCOVERED_BAR}">|</span>`;
       } else if (coverageEntry) {
         // Context line — show muted bar if we have coverage data for it.
         const ctx = classifyFile(coverageEntry, [i]);
         if (ctx.covered.length > 0) {
-          barSpan = `<span style="background-color:${GREEN_MUTED};color:${GREEN_MUTED}">|</span>`;
+          barSpan = `<span style="background-color:${COVERED_MUTED};color:${COVERED_MUTED}">|</span>`;
         } else if (ctx.uncovered.length > 0) {
-          barSpan = `<span style="background-color:${RED_MUTED};color:${RED_MUTED}">|</span>`;
+          barSpan = `<span style="background-color:${UNCOVERED_MUTED};color:${UNCOVERED_MUTED}">|</span>`;
         } else {
           barSpan = " ";
         }
@@ -311,7 +320,7 @@ export function renderSnippet(
       const inner = `${lineNum}  ${diffMarker} ${barSpan} ${gutterLabel}  ${src}`;
 
       if (isChanged) {
-        out.push(`<span style="background-color:${GREEN_BG}">${inner}</span>`);
+        out.push(`<span style="background-color:${CHANGED_BG}">${inner}</span>`);
       } else {
         out.push(inner);
       }
