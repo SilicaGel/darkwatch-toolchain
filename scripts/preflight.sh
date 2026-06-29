@@ -293,6 +293,15 @@ fi
 # scripts/check-import-cycles.mjs for why madge (not ESLint) is the detector.
 run_check "import cycles (madge)" npm run cycles
 
+# --- 7. hardcoded-size rot guard (warn-only, #1089) -------------------------
+# Flags font-size + px/rem padding/margin/gap in client CSS modules that should
+# use the scale tokens (client/src/styles/scale.css). WARN-ONLY for now — the
+# #1089 migration drives the count down; the final PR flips the script to exit 1
+# and makes this blocking. Runs directly (not via run_check) so it never fails
+# the gate.
+echo "${BOLD}hardcoded sizes (warn-only — #1089)${RESET}"
+node scripts/check-hardcoded-sizes.mjs || true
+
 # --- summary ----------------------------------------------------------------
 echo
 echo "${BOLD}━━━ Summary ━━━${RESET}"
