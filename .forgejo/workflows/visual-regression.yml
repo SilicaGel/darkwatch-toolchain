@@ -59,7 +59,7 @@ jobs:
     timeout-minutes: 30
     # #969 — prebuilt CI image (Node 22 + Chromium + Playwright deps baked).
     container:
-      image: forge.example.com/aaron/darkwatch-ci-playwright:1.61.0
+      image: forge.example.com/aaron/darkwatch-ci-playwright:1.61.1
     services:
       mariadb:
         image: mariadb:11@sha256:be1ef4fe5f14589325c08a41c76334097ce66c86264b75e1d28342c742782a61
