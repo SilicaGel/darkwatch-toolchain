@@ -121,6 +121,33 @@ Run these in order. **Tell each sub-skill to skip its commit step** — ship han
    Removals/renames: if a feature was deleted or moved, edit the corresponding
    row(s) in the same pass. The inventory is a living artifact, not a contract.
 
+8. **Recommend the `run-visual` label when the diff has visual risk but no CSS
+   change (#1494).** The per-PR visual-regression gate
+   (`.forgejo/workflows/visual-regression.yml`) auto-runs on PRs that change
+   `client/src/**/*.css`. But a PR can move rendered pixels *without* touching a
+   `.css` file — a `.tsx` markup/layout change, a font/SVG/icon under
+   `client/public/`, or a shared theme token. The path-filter misses those, so
+   the gate is silently skipped on exactly the off-path visual changes. Adding the
+   **`run-visual`** label forces the gate to run. Mechanical heuristic (recommend,
+   don't force — like the `@durable` flag; the user decides):
+
+   ```bash
+   CHANGED=$(git diff main...HEAD --name-only)
+   # visual-risk paths that the CSS path-filter does NOT cover:
+   VIS_RISK=$(echo "$CHANGED" | grep -qE '^client/src/.*\.tsx$|^client/public/' && echo yes || echo no)
+   # does the CSS path-filter already auto-gate this PR?
+   CSS_AUTO=$(echo "$CHANGED" | grep -qE '^client/src/.*\.css$|^client/src/styles/' && echo yes || echo no)
+   ```
+
+   If `VIS_RISK=yes` **and** `CSS_AUTO=no`, prompt the user:
+   *"This PR changes rendered markup/assets but no CSS, so the visual-regression
+   gate won't auto-run. Add the `run-visual` label to gate it? (y/n)"* On **yes**,
+   apply the `run-visual` label to the PR in Step 5 (look up its id by name:
+   `curl -s -H "Authorization: token $FORGEJO_TOKEN" "https://forge.example.com/api/v1/repos/aaron/darkwatch/labels?limit=200" | jq -r '.[] | select(.name=="run-visual") | .id'`).
+   Skip the prompt entirely when `CSS_AUTO=yes` (already gated) or `VIS_RISK=no`
+   (no rendered change). This is advisory: a `.tsx` change to a non-visual hook
+   shouldn't demand screenshots, so don't hard-gate on it.
+
 ## Step 2.5: Merge latest main into the branch
 
 Before committing docs, merge `origin/main` into the branch so the changelog
@@ -346,6 +373,20 @@ curl -s -X POST \
   -H "Content-Type: application/json" \
   --data-raw '{"labels":[37]}' \
   "https://forge.example.com/api/v1/repos/aaron/darkwatch/issues/N/labels"
+```
+
+If the user said **yes** to the `run-visual` prompt in Step 2 item 8, also apply
+that label to the **PR** (PRs are issues in the Forgejo API, so the same endpoint
+with the PR number works). Look the id up by name so a re-numbered label still
+resolves:
+
+```bash
+RV_ID=$(curl -s -H "Authorization: token $FORGEJO_TOKEN" \
+  "https://forge.example.com/api/v1/repos/aaron/darkwatch/labels?limit=200" \
+  | jq -r '.[] | select(.name=="run-visual") | .id')
+curl -s -X POST -H "Authorization: token $FORGEJO_TOKEN" -H "Content-Type: application/json" \
+  --data-raw "{\"labels\":[$RV_ID]}" \
+  "https://forge.example.com/api/v1/repos/aaron/darkwatch/issues/<PR_NUMBER>/labels"
 ```
 
 ## Step 6: Watch CI

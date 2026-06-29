@@ -1,0 +1,245 @@
+name: Visual Regression (per-PR gate)
+
+# #1494 — gate #1089 Phase-2 CSS-migration PRs with the visual-regression harness
+# BEFORE merge. The spec (tests/e2e/visual-regression.spec.ts) is also nightly-only
+# (e2e-full.yml); this adds a per-PR run so a migration regression is caught pre-merge.
+#
+# Gating is decided in the `detect` job (NOT a top-level `paths:` filter) so the
+# `run-visual` label can force a run on a PR whose changed files wouldn't otherwise
+# match (e.g. a .tsx layout change). `detect` always completes, so a non-matching PR
+# shows a fast green run + a skipped `visual` job — never a perpetually-pending check.
+#
+# The `visual` job mirrors e2e-full.yml's app bringup verbatim (single shard) and runs
+# ONLY the visual spec. Baselines are platform-specific; regenerate them with
+# scripts/regen-visual-baselines.sh (Linux CI image), never a bare --update on macOS.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
+  workflow_dispatch:
+
+jobs:
+  detect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      should-run: ${{ steps.decide.outputs.should-run }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          fetch-depth: 0
+
+      - name: Decide whether to run the visual job
+        id: decide
+        env:
+          HAS_LABEL: ${{ contains(github.event.pull_request.labels.*.name, 'run-visual') }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          set -e
+          if [ "$EVENT" = "workflow_dispatch" ] || [ "$HAS_LABEL" = "true" ]; then
+            echo "should-run=true" >> "$GITHUB_OUTPUT"
+            echo "trigger: event=$EVENT run-visual-label=$HAS_LABEL → running"
+            exit 0
+          fi
+          git fetch origin main --quiet || true
+          CHANGED=$(git diff --name-only origin/main...HEAD || true)
+          echo "changed files vs origin/main:"; echo "$CHANGED"
+          if echo "$CHANGED" | grep -qE '^client/src/.*\.css$|^client/src/styles/|^tests/e2e/visual-regression\.spec\.ts$|^tests/helpers/freeze\.ts$'; then
+            echo "should-run=true" >> "$GITHUB_OUTPUT"
+            echo "client CSS / harness change detected → running"
+          else
+            echo "should-run=false" >> "$GITHUB_OUTPUT"
+            echo "no client CSS / harness change and no run-visual label → skipping visual job"
+          fi
+
+  visual:
+    needs: detect
+    if: needs.detect.outputs.should-run == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # #969 — prebuilt CI image (Node 22 + Chromium + Playwright deps baked).
+    container:
+      image: forge.example.com/aaron/darkwatch-ci-playwright:1.61.0
+    services:
+      mariadb:
+        image: mariadb:11@sha256:be1ef4fe5f14589325c08a41c76334097ce66c86264b75e1d28342c742782a61
+        env:
+          MYSQL_ROOT_PASSWORD: ${{ secrets.CI_DB_ROOT_PASSWORD }}
+          MYSQL_DATABASE: ${{ secrets.CI_DB_NAME }}
+          MYSQL_USER: ${{ secrets.CI_DB_USER }}
+          MYSQL_PASSWORD: ${{ secrets.CI_DB_PASSWORD }}
+        options: >-
+          --health-cmd="healthcheck.sh --connect --innodb_initialized"
+          --health-interval=2s
+          --health-timeout=5s
+          --health-retries=30
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Cache npm downloads
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/.npm
+          key: npm-${{ runner.os }}-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: |
+            npm-${{ runner.os }}-
+
+      - name: Install server dependencies
+        run: cd server && npm ci --no-audit --no-fund
+
+      - name: Build server
+        run: cd server && npm run build
+
+      - name: Install client dependencies
+        run: cd client && npm ci --no-audit --no-fund
+
+      - name: Build client
+        run: cd client && npm run build
+
+      - name: Wait for MariaDB
+        run: |
+          for i in $(seq 1 30); do
+            (echo > /dev/tcp/mariadb/3306) 2>/dev/null && echo "MariaDB is ready" && break
+            echo "Waiting for MariaDB... ($i/30)"
+            sleep 2
+            [ "$i" -eq 30 ] && echo "MariaDB never became ready" && exit 1
+          done
+
+      - name: Apply migrations to CI DB
+        env:
+          DB_HOST: mariadb
+          DB_PORT: "3306"
+          DB_USER: ${{ secrets.CI_DB_USER }}
+          DB_PASSWORD: ${{ secrets.CI_DB_PASSWORD }}
+          DB_NAME: ${{ secrets.CI_DB_NAME }}
+        run: cd server && npm run db:migrate
+
+      - name: Start MinIO + create the images bucket
+        # Mirrors e2e-full.yml: MinIO can't run as a Forgejo service (needs the
+        # `server /data` arg), so run it in-step. Runs BEFORE seed so the qa-fixture
+        # can stage its images (#1238). See e2e-full.yml for the full rationale.
+        env:
+          MINIO_ROOT_USER: darkwatch_admin
+          MINIO_ROOT_PASSWORD: darkwatch_minio_dev
+          MINIO_BUCKET: darkwatch-images
+        run: |
+          curl -sSL https://dl.min.io/server/minio/release/linux-amd64/minio -o /tmp/minio
+          curl -sSL https://dl.min.io/client/mc/release/linux-amd64/mc -o /tmp/mc
+          chmod +x /tmp/minio /tmp/mc
+          mkdir -p /tmp/minio-data
+          /tmp/minio server /tmp/minio-data >/tmp/minio.log 2>&1 &
+          echo $! > /tmp/minio.pid
+          for i in $(seq 1 30); do
+            curl -fsS http://localhost:9000/minio/health/ready >/dev/null 2>&1 && break || true
+            echo "Waiting for MinIO... ($i/30)"
+            sleep 1
+            [ "$i" -eq 30 ] && { echo "MinIO never became ready"; cat /tmp/minio.log; exit 1; }
+          done
+          for i in $(seq 1 30); do
+            /tmp/mc alias set local http://localhost:9000 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD" >/dev/null 2>&1 && break || true
+            echo "Waiting for MinIO client auth... ($i/30)"
+            sleep 1
+            [ "$i" -eq 30 ] && { echo "MinIO never accepted client auth"; cat /tmp/minio.log; exit 1; }
+          done
+          /tmp/mc mb --ignore-existing local/"$MINIO_BUCKET"
+          /tmp/mc anonymous set download local/"$MINIO_BUCKET"
+          echo "MinIO ready with bucket $MINIO_BUCKET (public-download)"
+
+      - name: Seed all tiers (campaign screen needs the demo campaign)
+        # SEED_MODE=all → core → shadowdark → demo → qa-fixture. The visual spec's
+        # openCampaign() opens "Demo Campaign (Shadowdark)" (demo tier).
+        env:
+          DB_HOST: mariadb
+          DB_PORT: "3306"
+          DB_USER: ${{ secrets.CI_DB_USER }}
+          DB_PASSWORD: ${{ secrets.CI_DB_PASSWORD }}
+          DB_NAME: ${{ secrets.CI_DB_NAME }}
+          MINIO_ENDPOINT: http://localhost:9000
+          MINIO_ROOT_USER: darkwatch_admin
+          MINIO_ROOT_PASSWORD: darkwatch_minio_dev
+          MINIO_BUCKET: darkwatch-images
+          MINIO_PUBLIC_BASE_URL: http://localhost:9000/darkwatch-images
+        run: cd server && npm run seed
+
+      - name: Start E2E app server
+        env:
+          PORT: "3001"
+          DB_HOST: mariadb
+          DB_PORT: "3306"
+          DB_USER: ${{ secrets.CI_DB_USER }}
+          DB_PASSWORD: ${{ secrets.CI_DB_PASSWORD }}
+          DB_NAME: ${{ secrets.CI_DB_NAME }}
+          NODE_ENV: test
+          ALLOW_TEST_HOOKS: "true"
+          TEST_HOOK_SECRET: e2e-test-hook-secret
+          JWT_SECRET: e2e-test-secret
+          CLIENT_URL: http://localhost:5173
+          SOCKET_PER_USER_CAP: "1000"
+          SOCKET_PER_IP_CAP: "1000"
+          NODE_OPTIONS: "--max-old-space-size=256"
+          MINIO_ENDPOINT: http://localhost:9000
+          MINIO_ROOT_USER: darkwatch_admin
+          MINIO_ROOT_PASSWORD: darkwatch_minio_dev
+          MINIO_BUCKET: darkwatch-images
+          MINIO_PUBLIC_BASE_URL: http://localhost:9000/darkwatch-images
+        run: |
+          node server/dist/index.js >/tmp/server.log 2>&1 &
+          echo $! > /tmp/server.pid
+          for i in $(seq 1 30); do
+            status=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:3001/api/auth/me 2>/dev/null || true)
+            echo "$status" | grep -qE '^(200|401)$' && break || true
+            echo "Waiting for app server... ($i/30) [got: $status]"
+            sleep 2
+            [ "$i" -eq 30 ] && echo "App server never became ready" && exit 1
+          done
+
+      - name: Start Vite preview server
+        env:
+          API_PROXY_URL: "http://localhost:3001"
+          NODE_OPTIONS: "--max-old-space-size=512"
+        run: |
+          cd client && ./node_modules/.bin/vite preview >/tmp/vite.log 2>&1 &
+          echo $! > /tmp/vite.pid
+          for i in $(seq 1 30); do
+            curl -s -o /dev/null http://localhost:5173 && break || true
+            echo "Waiting for Vite... ($i/30)"
+            sleep 2
+            [ "$i" -eq 30 ] && echo "Vite preview server never became ready" && exit 1
+          done
+
+      - name: Warm up app server (login + auth + campaigns)
+        run: |
+          set -e
+          curl -s -c /tmp/dm-cookies.txt -X POST http://localhost:3001/api/auth/login \
+            -H 'Content-Type: application/json' \
+            -d '{"email":"dm@darkwatch.test","password":"password"}' >/dev/null
+          for pass in 1 2; do
+            curl -s -b /tmp/dm-cookies.txt http://localhost:3001/api/auth/me >/dev/null
+            curl -s -b /tmp/dm-cookies.txt http://localhost:3001/api/campaigns >/dev/null
+            curl -s -b /tmp/dm-cookies.txt http://localhost:3001/api/dashboard >/dev/null
+          done
+          rm -f /tmp/dm-cookies.txt
+          echo "warmup complete"
+
+      - name: Install tests dependencies (browsers baked in image)
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: /ms-playwright
+        run: cd tests && npm ci --no-audit --no-fund
+
+      - name: Run visual-regression spec (13 themes × campaign)
+        env:
+          E2E_SERVER_URL: "http://localhost:3001"
+          TEST_HOOK_SECRET: e2e-test-hook-secret
+          PLAYWRIGHT_BROWSERS_PATH: /ms-playwright
+        run: cd tests && ./node_modules/.bin/playwright test e2e/visual-regression.spec.ts --reporter=line
+
+      - name: Upload diff artifacts on failure
+        if: failure()
+        # v4 unsupported on Forgejo's actions backend; pin v3 (see e2e-full.yml).
+        uses: actions/upload-artifact@ff15f0306b3f739f7b6fd43fb5d26cd321bd4de5 # v3.2.1
+        with:
+          name: visual-regression-report-${{ github.run_id }}
+          path: |
+            tests/playwright-report
+            tests/test-results
+          retention-days: 14
