@@ -46,9 +46,11 @@ mkdir -p "$SRC"
 rsync -a --exclude=node_modules --exclude=.git --exclude=.superpowers \
   --exclude=client/dist --exclude=server/dist "$WT/" "$SRC/"
 
-GREP_ARG=""
-[ -n "$GREP" ] && GREP_ARG="--grep $GREP"
-
+# GREP is passed into the container as an env var (NOT expanded into the heredoc),
+# so a regex with `|` alternation / spaces is quoted safely. A bash array keeps
+# the empty case from injecting a stray empty arg. This lets you regenerate
+# several named screens in one run, e.g.:
+#   --grep 'character-card|character-sheet|quick-inspect|level-up'
 cat > "$SRC/_regen.sh" <<EOF
 set -euo pipefail
 cd /work
@@ -61,8 +63,10 @@ for i in \$(seq 1 40); do s=\$(curl -s -o /dev/null -w "%{http_code}" http://loc
 ( cd client && API_PROXY_URL=http://localhost:3001 ./node_modules/.bin/vite preview --port 5173 >/tmp/vite.log 2>&1 & )
 for i in \$(seq 1 40); do curl -s -o /dev/null http://localhost:5173 && break; sleep 2; [ "\$i" -eq 40 ] && { echo VITE_FAIL; tail -40 /tmp/vite.log; exit 1; }; done
 cd tests
+GREP_ARG=()
+[ -n "\${GREP:-}" ] && GREP_ARG=(--grep "\$GREP")
 E2E_SERVER_URL=http://localhost:3001 E2E_BASE_URL=http://localhost:5173 \
-  ./node_modules/.bin/playwright test e2e/visual-regression.spec.ts $GREP_ARG --update-snapshots --reporter=line
+  ./node_modules/.bin/playwright test e2e/visual-regression.spec.ts "\${GREP_ARG[@]}" --update-snapshots --reporter=line
 echo REGEN_OK
 EOF
 
@@ -70,6 +74,7 @@ echo "==> running CI image to regenerate baselines"
 docker run --rm -v "$SRC":/work -w /work \
   --add-host=host.docker.internal:host-gateway \
   -e PLAYWRIGHT_BROWSERS_PATH=/ms-playwright -e NODE_ENV=test -e PORT=3001 \
+  -e GREP="$GREP" \
   -e DB_HOST=host.docker.internal -e DB_PORT=3397 \
   -e DB_USER="$DB_USER" -e DB_PASSWORD="$DB_PASSWORD" -e DB_NAME="$DBNAME" \
   -e DATABASE_URL="mysql://$DB_USER:$DB_PASSWORD@host.docker.internal:3397/$DBNAME" \
