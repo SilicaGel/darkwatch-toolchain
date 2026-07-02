@@ -72,6 +72,8 @@ Determine the **campaign's ruleset** first (today the only ruleset is **Shadowda
 
 ### Shadowdark checklist (RAW)
 
+> **Before asserting a "known divergence," check the issue's current state** (open/closed) — cited issues (e.g. #1456 starting gold, #1467 stat method) may already be fixed, in which case the checklist must verify the *corrected* behavior, not re-report the old bug.
+
 - **Starting gold** = `2d6 × 5` gp (10–60, avg 35). *(Known divergence: code rolled `3d6×10` — #1456.)*
 - **Stat rolling** = `3d6` in order is RAW; the app also offers 3d6-assign / 4d6-drop / standard array — the **campaign's chosen method should be honored** by character creation. *(Known divergence — #1467.)*
 - **Ancestries** (core): Human, Elf, Dwarf, Halfling, Half-Orc, Goblin. **Classes** (core): Fighter, Priest, Thief, Wizard.
@@ -117,4 +119,5 @@ Write `docs/playtests/YYYY-MM-DD-gap-hunt-report.md`:
 - **Character-generator quality** subsection when creation was exercised.
 - **What felt good** (praise is information).
 - **How it feels to a newcomer** — the narrative read.
+- **Regression diff vs previous gap-hunt** — read the most recent `docs/playtests/*-gap-hunt-report.md` and mark each prior gap **fixed / still-present / regressed** before listing new findings (parity with regression mode).
 - **Proposed issues (DO NOT FILE)** — numbered, each with: title · gap-class · one-line · **suggested epic milestone + phase** (route genuinely-unclassified ones to **Triage**). On filing, dedup against existing issues and fold evidence into them rather than creating duplicates.

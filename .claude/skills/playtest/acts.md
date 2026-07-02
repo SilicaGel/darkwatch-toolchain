@@ -176,3 +176,5 @@ Context: 390×844, `hasTouch`, `isMobile`, iPhone UA. Tabs Sheet/Party/Map/Log. 
 ## Act 15 — Wrap-up
 
 Kill the driver. Write the dated report (structure in SKILL.md), including the **regression diff**: read the most recent `docs/playtests/*-playtest-report.md`, list each of its bugs as fixed/still-present/regressed, then new findings. Present proposed issues in batches; file via `/issue` only after the user reviews.
+
+- **Acts-coverage sync:** diff `acts.md` against `docs/CHANGELOG.md` entries since the previous report's date — flag any shipped user-facing feature with no act covering it, and propose the missing act (the #1381 audit lesson applied to playtesting). Report these as a "coverage gaps" list, don't silently skip.

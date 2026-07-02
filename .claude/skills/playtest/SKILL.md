@@ -1,6 +1,6 @@
 ---
 name: playtest
-description: Use when the user wants a full interactive playthrough test of Darkwatch — "/playtest", "run a playtest", "simulate a game session", "do a regression playthrough", or periodic pre-release QA of gameplay, maps, themes, or mobile. Also for testing a single area interactively (e.g. "/playtest combat", "/playtest themes"), or an exploratory first-time-user gap-hunt ("/playtest gaps", "find gaps", "what's missing / unobvious / not like Roll20").
+description: Use when the user wants a full interactive playthrough test of Darkwatch — "/playtest", "run a playtest", "simulate a game session", "do a regression playthrough", or periodic pre-release QA of gameplay, maps, themes, or mobile. Also for testing a single area interactively (e.g. "/playtest combat", "/playtest themes"), or an exploratory first-time-user gap-hunt ("/playtest gaps", "find gaps", "what's missing / unobvious / not like Roll20"). Also an adversarial "try to break it" mode ("/playtest adversarial <surface>", "try to break it") that hostile-tests one surface for races, authz bypass, stale-state, and input-boundary failures (issue #1388).
 ---
 
 # Playtest
@@ -13,8 +13,9 @@ Pick the mode from what the user asked for:
 
 - **Regression** (default) — drive the scripted **`acts.md`** acts, verify each act's expected-behavior checklist, and diff against the previous report. Finds *broken* behavior.
 - **Gap-hunt / exploratory** (`/playtest gaps`, "find gaps", "first-time user") — drive as a **naive first-time human who acts only on what's visually rendered**, pursuing real goals, to find what's **missing, unobvious, or below expectations**. Finds the *absence* of things — which regression tests structurally can't. **Read `gaphunt.md`** and follow it. This is the mode to use when the aim is gaps over bugs (issue #1455).
+- **Adversarial / "try to break it"** (`/playtest adversarial <surface>`, "try to break it", "break maps/combat") — deliberately misuse ONE surface from a logged-in session (hostile socket emits, raw REST bypassing client guards, concurrent races, stale-state) to provoke failures a good-faith user never would. Finds *defects outside the spec* — which regression and gap-hunt structurally can't. **Read `adversarial.md`** and follow it. Opt-in, bounded, report-only; never gates a close (issue #1388).
 
-Both modes share the driver/harness below.
+All three modes share the driver/harness below.
 
 ## How it works
 
@@ -54,10 +55,11 @@ PLAYTEST_CLIENT_URL=http://localhost:5273 PLAYTEST_SERVER_URL=http://localhost:3
 
 ## Required reading before driving
 
-**REQUIRED (both modes):** Read `gotchas.md` (same directory) BEFORE writing snippets — it encodes every automation trap from the baseline run (esbuild/`page.evaluate` strings, banner-pill vs card targeting, modal backdrops, forced-dice queue, DB recipes, map coordinate math). Skipping it costs hours.
+**REQUIRED (all modes):** Read `gotchas.md` (same directory) BEFORE writing snippets — it encodes every automation trap from the baseline run (esbuild/`page.evaluate` strings, banner-pill vs card targeting, modal backdrops, forced-dice queue, DB recipes, map coordinate math). Skipping it costs hours.
 
 - **Regression mode:** read `acts.md` and run the acts the user asked for (default: all). Each act lists steps plus an **expected-behavior checklist** — verify each item explicitly and mark ✅/❌/⚠️ in your notes as you go.
 - **Gap-hunt mode:** read **`gaphunt.md`** — it defines the personas, jobs-to-be-done, the gap classes (incl. accessibility + a ruleset-scoped rules-correctness lens), the competitive matrix, and the discipline guards (env-caveats, verify-before-filing, report-only).
+- **Adversarial mode:** read **`adversarial.md`** — it defines the wire helpers (`rawFetch`/`emit`/`emitAwait`/`emitRace`), the bounded run loop (checklist → improvise, probe-count budget), the four-surface vector catalog, inverted verdict semantics, and the report-only discipline guards.
 
 ## Ground rules
 
