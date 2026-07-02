@@ -38,6 +38,14 @@ jobs:
   e2e-full:
     runs-on: ubuntu-latest
     timeout-minutes: 75 # #1263 — entire suite (3 shards, 2 Vite restarts); ~40-60 min typical
+    env:
+      # Skip visual-regression screenshots here: this suite runs every spec
+      # serially against ONE shared DB, so end-of-suite screenshots inherit
+      # earlier specs' leftover state (#1041) and drift off the pristine
+      # baselines (nightly runs 4740/4796 — deploy gate red two nights running).
+      # Pixel comparison runs pre-merge in visual-regression.yml (fresh DB,
+      # attributable diff); this gate tests function.
+      E2E_SKIP_VISUAL: "1"
     # #969 — prebuilt CI image (Node 22 + Chromium + Playwright deps baked).
     container:
       image: forge.example.com/aaron/darkwatch-ci-playwright:1.61.1

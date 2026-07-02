@@ -65,7 +65,10 @@ for i in \$(seq 1 40); do curl -s -o /dev/null http://localhost:5173 && break; s
 cd tests
 GREP_ARG=()
 [ -n "\${GREP:-}" ] && GREP_ARG=(--grep "\$GREP")
-E2E_SERVER_URL=http://localhost:3001 E2E_BASE_URL=http://localhost:5173 \
+# VISUAL_ALL_THEMES: regen always sweeps the full 13-theme matrix, even though
+# the default per-PR run only compares the 4-theme subset (DEFAULT_THEMES in the
+# spec) — otherwise a regen would silently leave 9 themes' baselines stale.
+E2E_SERVER_URL=http://localhost:3001 E2E_BASE_URL=http://localhost:5173 VISUAL_ALL_THEMES=1 \
   ./node_modules/.bin/playwright test e2e/visual-regression.spec.ts "\${GREP_ARG[@]}" --update-snapshots --reporter=line
 echo REGEN_OK
 EOF

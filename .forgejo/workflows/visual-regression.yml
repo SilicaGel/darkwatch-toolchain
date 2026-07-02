@@ -226,11 +226,15 @@ jobs:
           PLAYWRIGHT_BROWSERS_PATH: /ms-playwright
         run: cd tests && npm ci --no-audit --no-fund
 
-      - name: Run visual-regression spec (13 themes × campaign)
+      - name: Run visual-regression spec
         env:
           E2E_SERVER_URL: "http://localhost:3001"
           TEST_HOOK_SECRET: e2e-test-hook-secret
           PLAYWRIGHT_BROWSERS_PATH: /ms-playwright
+          # Default = the 4-theme representative subset (see DEFAULT_THEMES in the
+          # spec). The `run-visual` label or a manual dispatch opts into the full
+          # 13-theme sweep — use that pre-release or when a change is theme-scoped.
+          VISUAL_ALL_THEMES: ${{ (contains(github.event.pull_request.labels.*.name, 'run-visual') || github.event_name == 'workflow_dispatch') && '1' || '' }}
         run: cd tests && ./node_modules/.bin/playwright test e2e/visual-regression.spec.ts --reporter=line
 
       - name: Upload diff artifacts on failure
