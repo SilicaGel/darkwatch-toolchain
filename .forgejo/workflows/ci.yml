@@ -625,6 +625,7 @@ jobs:
             e2e/picker-commits.spec.ts \
             e2e/combat-damage.spec.ts \
             e2e/1522-combat-core-cluster.spec.ts \
+            e2e/1531-morale-raw-logging.spec.ts \
             e2e/rest-button.spec.ts \
             e2e/spell-exhaustion.spec.ts \
             e2e/theme-contrast.spec.ts \
