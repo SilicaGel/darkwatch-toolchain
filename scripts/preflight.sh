@@ -42,7 +42,7 @@ set -uo pipefail
 # To update: review `git diff` of .forgejo/workflows/ci.yml, confirm this
 # script still mirrors the `lint-typecheck` + `test` jobs (update the checks
 # below if they changed), then set this to the value preflight prints.
-EXPECTED_CI_HASH="525c61dc4b3e71bfed78854e936e58544ae6906a38a6991f4483a556409c5152"
+EXPECTED_CI_HASH="bc42c7773f462c1d0dd81ca19401354cc6565b115d4f8bb2062c134c818a299d"
 
 # --- setup ------------------------------------------------------------------
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || {
@@ -220,6 +220,11 @@ run_check "feature-inventory drift" node scripts/check-feature-inventory.mjs
 # #1396 — RIGHTS-MATRIX drift: verify requireCharacterAccess() levels in
 # route files match the access-level column in docs/RIGHTS-MATRIX.md.
 run_check "rights-matrix drift" node scripts/check-rights-matrix.mjs
+
+# #1564 — core/ruleset boundary: block NEW rulesets/<slug> imports, bare
+# "shadowdark" literals, and "sd:" socket strings from landing in core
+# production source (count ratchet in ruleset-boundary-allowlist.json).
+run_check "ruleset-boundary" node scripts/check-ruleset-boundary.mjs
 
 # #1290 — ESLint gate (mirrors ci.yml's `Lint (ESLint)` step). Fails on any
 # ESLint error. Until #1290 this only ran in the bypassable lint-staged

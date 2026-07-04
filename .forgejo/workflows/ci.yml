@@ -204,6 +204,17 @@ jobs:
           PR_TITLE: ${{ github.event.pull_request.title }}
         run: node scripts/check-rights-matrix.mjs
 
+      # #1564 — core/ruleset boundary guard (from the #334 gap analysis §3 P1,
+      # umbrella #1563). Blocks NEW rulesets/<slug> imports, bare "shadowdark"
+      # literals, and "sd:" socket strings from landing in core production
+      # source. Existing leaks are grandfathered by a count ratchet in
+      # scripts/ruleset-boundary-allowlist.json that shrinks as #1563 lands.
+      # Escape hatch: [allow-ruleset-boundary] in the PR title.
+      - name: Core/ruleset boundary guard (#1564)
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: node scripts/check-ruleset-boundary.mjs
+
       # #1290 — ESLint as a real gate. Until now lint only ran in the
       # bypassable lint-staged pre-commit hook (eslint --fix on staged files),
       # so rules-of-hooks / e2e-click-discipline were never enforced
