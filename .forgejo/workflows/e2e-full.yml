@@ -258,6 +258,14 @@ jobs:
           E2E_SERVER_URL: "http://localhost:3001"
           TEST_HOOK_SECRET: e2e-test-hook-secret
           PLAYWRIGHT_BROWSERS_PATH: /ms-playwright
+          # #1581 — tests/helpers/db.ts (used only by 1077-hidden-monsters.spec.ts
+          # for a raw combat_state read) falls back to 127.0.0.1:3397 when unset,
+          # which is the local-dev address, not this job's mariadb service.
+          DB_HOST: mariadb
+          DB_PORT: "3306"
+          DB_USER: ${{ secrets.CI_DB_USER }}
+          DB_PASSWORD: ${{ secrets.CI_DB_PASSWORD }}
+          DB_NAME: ${{ secrets.CI_DB_NAME }}
         run: cd tests && ./node_modules/.bin/playwright test --shard=1/3 --reporter=line
 
       - name: Restart Vite preview (between shards 1→2)
@@ -289,6 +297,11 @@ jobs:
           E2E_SERVER_URL: "http://localhost:3001"
           TEST_HOOK_SECRET: e2e-test-hook-secret
           PLAYWRIGHT_BROWSERS_PATH: /ms-playwright
+          DB_HOST: mariadb
+          DB_PORT: "3306"
+          DB_USER: ${{ secrets.CI_DB_USER }}
+          DB_PASSWORD: ${{ secrets.CI_DB_PASSWORD }}
+          DB_NAME: ${{ secrets.CI_DB_NAME }}
         run: cd tests && ./node_modules/.bin/playwright test --shard=2/3 --reporter=line
 
       - name: Restart Vite preview (between shards 2→3)
@@ -320,6 +333,11 @@ jobs:
           E2E_SERVER_URL: "http://localhost:3001"
           TEST_HOOK_SECRET: e2e-test-hook-secret
           PLAYWRIGHT_BROWSERS_PATH: /ms-playwright
+          DB_HOST: mariadb
+          DB_PORT: "3306"
+          DB_USER: ${{ secrets.CI_DB_USER }}
+          DB_PASSWORD: ${{ secrets.CI_DB_PASSWORD }}
+          DB_NAME: ${{ secrets.CI_DB_NAME }}
         run: cd tests && ./node_modules/.bin/playwright test --shard=3/3 --reporter=line
 
       - name: Collect logs for artifact
