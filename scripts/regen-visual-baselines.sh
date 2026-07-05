@@ -7,13 +7,18 @@
 # Usage (from a worktree, with `darkwatch-maria` + `darkwatch-minio` up):
 #   scripts/regen-visual-baselines.sh                 # regenerate all baselines
 #   scripts/regen-visual-baselines.sh --grep laser    # only tests matching /laser/
-#   scripts/regen-visual-baselines.sh --image forge.example.com/aaron/darkwatch-ci-playwright:1.61.0
+#   scripts/regen-visual-baselines.sh --image forge.example.com/aaron/darkwatch-ci-playwright:1.61.1
 #
 # Requires: Docker, and the CI image pulled locally. Uses an ISOLATED DB
 # (dw_visbase) on darkwatch-maria so the shared dev DB is untouched.
+#
+# IMPORTANT: keep this tag in lockstep with the image the visual-regression /
+# e2e-full workflows run on (.forgejo/workflows/*.yml) — a mismatch regenerates
+# baselines against a different browser build than the per-PR gate judges them
+# with, reintroducing exactly the kind of lying baseline #1535 fixed.
 set -euo pipefail
 
-IMAGE="forge.example.com/aaron/darkwatch-ci-playwright:1.61.0"
+IMAGE="forge.example.com/aaron/darkwatch-ci-playwright:1.61.1"
 GREP=""
 while [ $# -gt 0 ]; do
   case "$1" in
