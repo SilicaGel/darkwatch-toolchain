@@ -4,24 +4,24 @@ name: Deploy
 # When called directly via workflow_dispatch, accepts an optional branch input.
 # When called via workflow_call, always deploys main.
 #
-# Architecture (post-runner-split): the runner machine (Mac, for speed)
-# does NOT run production containers — the Pi does. This workflow:
-#   1. Builds the client on the runner (vite output → static files).
-#   2. Rsyncs the server source + client dist + marketing site (www/) to the Pi.
-#   3. SSHes into the Pi and runs `docker build` + `docker-compose up -d`
-#      against the host's docker daemon, where production runs.
+# Architecture (#1337, 2026-07-06): runs ON the Pi itself via the `pi`
+# host-executor runner (forgejo-runner-host.service, user aaron) — no SSH,
+# no rsync-over-network, no Mac dependency. The May-2026 Mac-runner shape
+# (build on Mac → rsync/SSH to the Pi) broke whenever the Mac was off the
+# home LAN; every step below is local to the Pi. The e2e gate that fronts
+# the nightly (nightly-deploy.yml) still runs on the Mac runner — a fully
+# offline Mac still blocks the nightly (accepted residual, see #1337).
 #
-# This avoids the runner-vs-deploy-target split that broke deploy after
-# the May 2026 runner migration: the runner is sandboxed and has no
-# direct path to the Pi's docker daemon, so we go through SSH.
+# Host prerequisites (installed 2026-07-06, see docs/BACKUPS.md): Node 22
+# (system), docker, rsync, caddy; the deploy user's sudoers allows `install`
+# to /etc/caddy + `systemctl reload caddy` (both used with -n).
+# Capability test: full client build 1m41s warm, prod unaffected (#1337).
 #
-# Required Forgejo Actions secrets:
-#   DEPLOY_SSH_KEY       — private key (ed25519) authorised on the Pi
-#   DEPLOY_HOST          — Pi's reachable hostname/IP (e.g. "pi4")
-#   DEPLOY_USER          — SSH user on the Pi (e.g. "aaron")
-#   DEPLOY_KNOWN_HOSTS   — `ssh-keyscan <host>` output for the Pi
-#   plus the runtime secrets the docker-compose.yml expects (forwarded
-#   via a temp .env file used with --env-file at compose-up time).
+# Required Forgejo Actions secrets: the runtime secrets the compose file
+# expects (written to ~/services/darkwatch/.env.deploy below). The
+# DEPLOY_SSH_KEY / DEPLOY_HOST / DEPLOY_USER / DEPLOY_KNOWN_HOSTS secrets are
+# no longer used here (ci.yml's badges job still uses them until #1337
+# part 2 moves it to the Pi too).
 
 on:
   workflow_call: # called by nightly-deploy.yml
@@ -34,121 +34,70 @@ on:
 
 jobs:
   deploy:
-    runs-on: ubuntu-latest
-    timeout-minutes: 30 # #1263 — rsync + docker build on Pi + Caddy reload; ~15-20 min typical
+    runs-on: pi
+    timeout-minutes: 45 # Pi build headroom (measured 1m41s warm; cold npm ci adds ~1 min)
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           ref: ${{ github.event.inputs.branch || 'main' }}
 
-      - name: Install rsync + openssh-client
-        # Forgejo runner images (act-based) don't include rsync or ssh by
-        # default. We need both to ship build artefacts to the Pi.
-        run: |
-          apt-get update -qq
-          apt-get install -y -qq rsync openssh-client
-
-      - name: Setup Node.js
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
-        with:
-          node-version: "22"
-          cache: "npm"
-          cache-dependency-path: |
-            client/package-lock.json
-
-      - name: Install client dependencies
-        run: cd client && npm ci --no-audit --no-fund
-
       - name: Build client
-        run: cd client && npm run build
-
-      - name: Set up SSH (private key + known_hosts)
-        env:
-          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
-          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        # Host executor: system Node 22 — no setup-node, no apt-get. The full
+        # checkout matters: vite.config.ts imports ../scripts/app-version.mjs,
+        # which reads docs/CHANGELOG.md (capability-test finding, #1337).
         run: |
-          mkdir -p ~/.ssh
-          chmod 700 ~/.ssh
-          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/id_ed25519
-          chmod 600 ~/.ssh/id_ed25519
-          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
-          chmod 644 ~/.ssh/known_hosts
-          # Sanity check — fail fast if the key is malformed before we touch the Pi.
-          ssh-keygen -y -f ~/.ssh/id_ed25519 >/dev/null
+          node --version
+          cd client && npm ci --no-audit --no-fund && npm run build
 
-      - name: Rsync server source to Pi
-        env:
-          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
-          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+      - name: Sync client dist + marketing site + server source into place
         run: |
-          # Source-only — the Dockerfile builds inside its own container on the Pi.
-          rsync -az --delete \
-            --exclude=node_modules --exclude=coverage --exclude=dist \
-            --exclude='*.log' --exclude='.DS_Store' \
-            -e 'ssh -i ~/.ssh/id_ed25519' \
-            server/ "${DEPLOY_USER}@${DEPLOY_HOST}:~/deploy/darkwatch/server/"
-
-      - name: Rsync client dist to webroot on Pi
-        env:
-          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
-          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
-        run: |
-          rsync -az --delete \
-            -e 'ssh -i ~/.ssh/id_ed25519' \
-            client/dist/ "${DEPLOY_USER}@${DEPLOY_HOST}:/var/www/darkwatch/"
-
-      - name: Rsync marketing site (www/) to webroot on Pi
-        env:
-          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
-          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
-        run: |
-          # #319/#357 — the public marketing site (example.com) served by Caddy
-          # from /var/www/marketing. No-build static tree pushed verbatim with
-          # --delete so removed pages don't linger on the Pi.
-          # `pitch/` is EXCLUDED: it's the private licensing pitch (names the
+          rsync -az --delete client/dist/ /var/www/darkwatch/
+          # pitch/ is EXCLUDED: it's the private licensing pitch (names the
           # game system) and must not be publicly reachable — it lives in the
           # repo only, to be shared directly when appropriate.
           rsync -az --delete --delete-excluded \
             --exclude='.DS_Store' \
             --exclude='pitch' \
             --exclude='README.md' \
-            -e 'ssh -i ~/.ssh/id_ed25519' \
-            www/ "${DEPLOY_USER}@${DEPLOY_HOST}:/var/www/marketing/"
+            www/ /var/www/marketing/
+          # Server source-only — the Dockerfile builds inside its own
+          # container below.
+          rsync -az --delete \
+            --exclude=node_modules --exclude=coverage --exclude=dist \
+            --exclude='*.log' --exclude='.DS_Store' \
+            server/ ~/deploy/darkwatch/server/
 
-      - name: Back up current Pi config before it's replaced
-        # Keep ONE rolling backup slot per replaced config file (overwritten each
-        # deploy — no clutter) so a deploy that wedges on a config change can be
-        # diagnosed/rolled back against the last-known-good. Runs BEFORE the env
-        # + compose pushes below (and before the Caddyfile install) so each .bak
-        # captures the pre-deploy file. Entirely best-effort: every line is
-        # guarded so a missing file or a sudo denial can NEVER fail the deploy.
-        env:
-          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
-          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+      - name: Back up current configs (rolling .bak + #512 config slice)
+        # One rolling .bak per replaced file (diagnose/roll back a wedged
+        # deploy against last-known-good), PLUS a copy into
+        # ~/backups/darkwatch/config/ so the daily Mac pull (#385) carries the
+        # live config off-Pi. Entirely best-effort: every line is guarded so a
+        # missing file or sudo denial can NEVER fail the deploy.
         run: |
-          ssh -i ~/.ssh/id_ed25519 "${DEPLOY_USER}@${DEPLOY_HOST}" bash <<'EOSSH'
+          mkdir -p ~/backups/darkwatch/config
           if [ -d ~/services/darkwatch ]; then
             cd ~/services/darkwatch
-            if [ -f docker-compose.yml ]; then cp -f docker-compose.yml docker-compose.yml.bak && echo "[backup] docker-compose.yml -> docker-compose.yml.bak"; fi
-            if [ -f .env.deploy ]; then cp -f .env.deploy .env.deploy.bak && echo "[backup] .env.deploy -> .env.deploy.bak"; fi
+            for f in docker-compose.yml .env.deploy; do
+              if [ -f "$f" ]; then
+                cp -f "$f" "$f.bak"
+                cp -f "$f" ~/backups/darkwatch/config/"$f"
+                echo "[backup] $f -> .bak + config slice"
+              fi
+            done
           fi
-          # Caddyfile is root-owned — back it up best-effort. If the deploy
-          # user's sudoers doesn't permit `cp` (it's scoped to `install` +
-          # `systemctl reload caddy`), this logs a skip and the deploy proceeds;
-          # `caddy validate` before install already blocks a malformed config.
           if [ -f /etc/caddy/Caddyfile ]; then
             if sudo -n cp -f /etc/caddy/Caddyfile /etc/caddy/Caddyfile.bak 2>/dev/null; then
-              echo "[backup] /etc/caddy/Caddyfile -> /etc/caddy/Caddyfile.bak"
+              cp -f /etc/caddy/Caddyfile ~/backups/darkwatch/config/Caddyfile 2>/dev/null \
+                || sudo -n cp -f /etc/caddy/Caddyfile ~/backups/darkwatch/config/Caddyfile 2>/dev/null \
+                || true
+              echo "[backup] Caddyfile -> .bak + config slice"
             else
-              echo "[backup] SKIPPED /etc/caddy/Caddyfile (sudo cp not permitted — add 'cp' to the deploy user's sudoers if you want this backup)"
+              echo "[backup] SKIPPED /etc/caddy/Caddyfile (sudo cp not permitted)"
             fi
           fi
-          EOSSH
 
-      - name: Push runtime env file to Pi
+      - name: Write runtime env file
         env:
-          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
-          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
           DB_ROOT_PASSWORD: ${{ secrets.DB_ROOT_PASSWORD }}
           DB_NAME: ${{ secrets.DB_NAME }}
           DB_USER: ${{ secrets.DB_USER }}
@@ -170,11 +119,9 @@ jobs:
         run: |
           # App version reported by /health + Sentry: the canonical CHANGELOG
           # version (shared parser) plus the short git sha, e.g. "0.102.21+a6f2e45".
-          # The CHANGELOG version matches the client masthead + README badge; the
-          # sha pins the exact build. node + git are available from earlier steps.
           APP_VERSION="$(node scripts/app-version.mjs)+$(git rev-parse --short HEAD)"
-          # Build the env file with `printf '%s\n'` so values containing
-          # special chars (= ' " $) survive untouched.
+          # Build with `printf '%s\n'` so values containing special chars
+          # (= ' " $) survive untouched; umask keeps it private.
           umask 077
           {
             printf 'APP_VERSION=%s\n' "$APP_VERSION"
@@ -197,73 +144,45 @@ jobs:
             printf 'MINIO_PUBLIC_BASE_URL=%s\n' "$MINIO_PUBLIC_BASE_URL"
             printf 'MINIO_BROWSER_REDIRECT_URL=%s\n' "$MINIO_BROWSER_REDIRECT_URL"
           } > /tmp/darkwatch.deploy.env
-          scp -i ~/.ssh/id_ed25519 /tmp/darkwatch.deploy.env \
-            "${DEPLOY_USER}@${DEPLOY_HOST}:~/services/darkwatch/.env.deploy"
-          rm -f /tmp/darkwatch.deploy.env
+          mv /tmp/darkwatch.deploy.env ~/services/darkwatch/.env.deploy
 
-      - name: Push prod docker-compose to Pi (#852)
-        # Ship the version-controlled compose file so prod config is no longer
-        # a hand-edited file living only on the Pi. The next step's
-        # `docker compose up` reads ~/services/darkwatch/docker-compose.yml,
-        # so overwrite it from the repo copy here. The repo copy is byte-for-
-        # byte the live file as of this PR, so the first deploy is a no-op;
-        # thereafter, env-var/port/volume changes are reviewed in the same PR
-        # as the deploy.yml + secret changes (no more split-brain — #852).
-        # Target dir is user-owned (~), so no sudo needed.
-        env:
-          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
-          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
-        run: |
-          scp -i ~/.ssh/id_ed25519 deploy/docker-compose.prod.yml \
-            "${DEPLOY_USER}@${DEPLOY_HOST}:~/services/darkwatch/docker-compose.yml"
+      - name: Push prod docker-compose into place (#852)
+        # Version-controlled compose file — env-var/port/volume changes are
+        # reviewed in the same PR as deploy.yml + secret changes.
+        run: cp deploy/docker-compose.prod.yml ~/services/darkwatch/docker-compose.yml
 
-      - name: Build server image and (re)start container on Pi
-        env:
-          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
-          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+      - name: Pre-migration DB dump — no backup, no deploy (#385)
+        # Zero-gap restore point immediately before the riskiest step
+        # (migrations run when the new container boots below). Deliberately
+        # NOT continue-on-error: a deploy that can't take a backup doesn't
+        # deploy. Also refresh the cron's installed copy so it never drifts
+        # from the repo (docs/BACKUPS.md).
         run: |
-          # The Pi's public-facing reverse proxy is Caddy (host systemd unit,
-          # /etc/caddy/Caddyfile), not nginx. It serves static client assets
-          # from /var/www/darkwatch and reverse-proxies /api/* + /socket.io/* +
-          # /health to localhost:8080 (this container's published port). The
-          # Caddyfile is shipped + reloaded by the separate step below (#1037).
-          ssh -i ~/.ssh/id_ed25519 "${DEPLOY_USER}@${DEPLOY_HOST}" bash <<'EOSSH'
-          set -euo pipefail
+          bash scripts/backup-db.sh --suffix predeploy
+          install -m 755 scripts/backup-db.sh ~/bin/darkwatch-backup-db.sh
+
+      - name: Build server image and (re)start container
+        # The Pi's public-facing reverse proxy is Caddy (host systemd unit,
+        # /etc/caddy/Caddyfile), serving static client assets from
+        # /var/www/darkwatch and reverse-proxying /api/* + /socket.io/* +
+        # /health to localhost:8080. The Caddyfile is installed + reloaded by
+        # the step below (#1037).
+        run: |
           cd ~/deploy/darkwatch/server
           docker build -t darkwatch-server:latest .
           docker rm -f darkwatch-server 2>/dev/null || true
           cd ~/services/darkwatch
           docker compose --env-file .env.deploy up -d --remove-orphans
-          EOSSH
 
-      - name: Push Caddyfile to Pi and reload (#1037)
-        # Ship the version-controlled Caddyfile and graceful-reload Caddy so the
-        # public reverse-proxy config is reviewed in PRs, not hand-edited on the
-        # host. Ordered LAST — after the container is already deployed — so a
-        # Caddy/sudo hiccup can never block the app rollout.
-        #
-        # Safety:
-        #   - `caddy validate` on the staged file before we touch /etc — a
-        #     malformed Caddyfile aborts here, before install/reload.
-        #   - `systemctl reload caddy` is graceful and itself re-validates,
-        #     keeping the running config if the new one is bad → a bad reload
-        #     cannot take the proxy down.
-        #   - all sudo uses `-n` (non-interactive): if the deploy user lacks
-        #     NOPASSWD for `install` to /etc/caddy or `systemctl reload caddy`,
-        #     the step fails loudly instead of hanging on a password prompt.
-        #     (Requires a sudoers rule for the deploy user — see deploy/README
-        #     / PR #<this>. The app deploy above is unaffected either way.)
-        env:
-          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
-          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+      - name: Install Caddyfile + reload (#1037)
+        # Ordered LAST — after the container is already deployed — so a
+        # Caddy/sudo hiccup can never block the app rollout. `caddy validate`
+        # before install; `systemctl reload caddy` is graceful and
+        # re-validates, so a bad config can never take the proxy down. All
+        # sudo is -n (non-interactive): a missing sudoers rule fails loudly,
+        # never hangs.
         run: |
-          scp -i ~/.ssh/id_ed25519 deploy/Caddyfile \
-            "${DEPLOY_USER}@${DEPLOY_HOST}:/tmp/darkwatch.Caddyfile.staged"
-          ssh -i ~/.ssh/id_ed25519 "${DEPLOY_USER}@${DEPLOY_HOST}" bash <<'EOSSH'
-          set -euo pipefail
-          caddy validate --adapter caddyfile --config /tmp/darkwatch.Caddyfile.staged
-          sudo -n install -m 644 -o root -g root /tmp/darkwatch.Caddyfile.staged /etc/caddy/Caddyfile
+          caddy validate --adapter caddyfile --config deploy/Caddyfile
+          sudo -n install -m 644 -o root -g root deploy/Caddyfile /etc/caddy/Caddyfile
           sudo -n systemctl reload caddy
-          rm -f /tmp/darkwatch.Caddyfile.staged
           echo "Caddy reloaded with repo Caddyfile."
-          EOSSH
