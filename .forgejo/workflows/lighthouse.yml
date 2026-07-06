@@ -17,14 +17,14 @@ on:
       - ".forgejo/workflows/lighthouse.yml"
       - "package.json"
       - "package-lock.json"
-  push:
-    branches: [main]
-    paths:
-      - "client/**"
-      - "lighthouserc.cjs"
-      - ".forgejo/workflows/lighthouse.yml"
-      - "package.json"
-      - "package-lock.json"
+  # push-to-main trigger removed (#1617): the PR comment is PR-gated and badge
+  # upload doesn't exist yet (#819) — post-merge runs built 8-18 min of output
+  # nothing consumed. Restore only when #819 lands.
+
+# Cancel superseded PR runs (#1617).
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   lighthouse:

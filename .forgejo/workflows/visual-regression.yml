@@ -18,6 +18,12 @@ on:
     types: [opened, synchronize, reopened, labeled]
   workflow_dispatch:
 
+# Cancel superseded PR runs (#1617). Dispatch runs use refs/heads/<branch>,
+# PR runs use the PR ref — distinct groups, no cross-cancellation.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   detect:
     runs-on: ubuntu-latest

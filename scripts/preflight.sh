@@ -44,7 +44,7 @@ set -uo pipefail
 # below if they changed), then set this to the value preflight prints.
 # Reconciled 2026-07-06: only the mariadb service-image digest changed (#1627,
 # Renovate); lint-typecheck + test jobs untouched.
-EXPECTED_CI_HASH="2d57b80b1874a871e41ceba29fbf084ca7a5b3b75b14ea9808a1e3da12cb4b14"
+EXPECTED_CI_HASH="970d032033c63e91c80013ff3c9bcc5b5ec7a5ba45c301b1d65d31a326d4620f"
 
 # --- setup ------------------------------------------------------------------
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || {

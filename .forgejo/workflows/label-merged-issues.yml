@@ -5,6 +5,12 @@ on:
     types: [closed]
     branches: [main]
 
+# Cancel superseded runs (#1617) — only ever cancels a stale duplicate of the
+# same close event; the newest run still does the labeling.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   label-issues:
     if: github.event.pull_request.merged == true
