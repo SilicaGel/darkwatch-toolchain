@@ -21,7 +21,10 @@ name: Nightly Deploy
 
 on:
   schedule:
-    - cron: "0 3 * * *"
+    # 06:00 UTC = 2am ET (moved from 03:00 — #385, 2026-07-06): keeps the gate
+    # clear of evening pushes AND after the 1am ET DB dump on the Pi, so every
+    # deploy's migrations run with a fresh restore point behind them.
+    - cron: "0 6 * * *"
   workflow_dispatch:
 
 jobs:
