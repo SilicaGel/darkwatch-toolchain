@@ -134,7 +134,7 @@ Joe carries one demo spell per shape. Start a combat with several monsters, plac
 
 ## Act 11 — Loot, handouts, recap & AI
 
-Loot: DM + **player** add catalog and custom items; DM Give to… a character (lands in gear, notes preserved); Deposit to loot from a sheet. Handouts: add (URL today — note if upload exists), Save & Push to **every** client (regression #1199), player local-dismiss persistence, re-Show reopens for dismissers, Take it back broadcast-dismisses. Session lifecycle: End Session → recap stats next session (nat 20s/high/low). **AI recap** if `ANTHROPIC_API_KEY` is set: generate at session end with notes; verify streaming, persistence, edit + regenerate from Past Sessions. Export the session log (MD + PDF).
+Loot: DM + **player** add catalog and custom items; DM Give to… a character (lands in gear, notes preserved); Deposit to loot from a sheet. Handouts: add via Image URL or Upload file, Save & Push to **every** client (regression #1199), player local-dismiss persistence, re-Show reopens for dismissers, Take it back broadcast-dismisses. Session lifecycle: End Session → recap stats next session (nat 20s/high/low). **AI recap** if `ANTHROPIC_API_KEY` is set: generate at session end with notes; verify streaming, persistence, edit + regenerate from Past Sessions. Export the session log (MD + PDF).
 
 - ☐ Loot syncs live both directions; players CAN add (❌ 2026-06-12); ↗ Give is DM-only (leaked visibly before)
 - ☐ Handout push reaches all clients first try (regression #1199)
