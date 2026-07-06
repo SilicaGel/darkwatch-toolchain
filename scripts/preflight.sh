@@ -42,7 +42,9 @@ set -uo pipefail
 # To update: review `git diff` of .forgejo/workflows/ci.yml, confirm this
 # script still mirrors the `lint-typecheck` + `test` jobs (update the checks
 # below if they changed), then set this to the value preflight prints.
-EXPECTED_CI_HASH="bc42c7773f462c1d0dd81ca19401354cc6565b115d4f8bb2062c134c818a299d"
+# Reconciled 2026-07-06: only the mariadb service-image digest changed (#1627,
+# Renovate); lint-typecheck + test jobs untouched.
+EXPECTED_CI_HASH="2d57b80b1874a871e41ceba29fbf084ca7a5b3b75b14ea9808a1e3da12cb4b14"
 
 # --- setup ------------------------------------------------------------------
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || {
