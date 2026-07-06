@@ -1,14 +1,17 @@
 ---
 name: issue
-description: File, triage, or update a Forgejo issue from within the current session. Use whenever the user invokes `/issue <description>`, or says "file an issue", "open a ticket", "track this as a ticket", "add an issue for that", "create an issue". Checks for duplicates, expands terse descriptions using session context, suggests labels, creates new issues automatically, and confirms before updating existing ones. Use this even if the user's description is very short or vague — context from the conversation fills in the gaps.
+description: Use whenever the user invokes `/issue <description>`, or says "file an issue", "open a ticket", "track this as a ticket", "add an issue for that", "create an issue" — files, triages, or updates a Forgejo issue. Use even when the description is very short or vague; conversation context fills the gaps.
+version: 1.0.0
+last_changed: 2026-07-05
 ---
 
 # Issue Skill
 
 Creates and manages issues on the Darkwatch Forgejo repo.
 
-- **API base**: `https://forge.example.com/api/v1/repos/aaron/darkwatch`
-- **Auth**: `$FORGEJO_TOKEN` (env var, always available)
+API transport rules (base URL, auth, status-code + `jq --rawfile` payload discipline,
+pagination, label-id gotchas): `.claude/skills/_shared/forgejo-api.md`. The recipes
+below assume you've internalized that file.
 
 ---
 
@@ -62,19 +65,23 @@ This is the key step that lets you turn a 3-word input into a useful, specific i
 
 ## Steps 3–4: Fetch open issues + inline duplicate check
 
-**Do not dispatch a sub-agent for this.** Earlier versions used a Haiku sub-agent for context isolation, but a foreground sub-agent blocks the parent — if it loops on tool calls (which it has, in practice), the whole session stalls and the user has no clean way to bail. `jq` filtering does the same job in seconds and keeps the parent in control. **The 20–50KB of raw JSON stays out of context as long as you only `jq` against the file and never print it.** Read excerpts only when you need them.
+**Do not dispatch a sub-agent for this** (retired pattern — a looping foreground sub-agent stalls the session; see CHANGELOG.md). `jq` filtering does the same job in seconds. **The 20–50KB of raw JSON stays out of context as long as you only `jq` against the file and never print it.** Read excerpts only when you need them.
 
 ### Fetch open issues (paginated)
 
+Work in a session-unique dir (`_shared/forgejo-api.md` "Temp files" rule) — fixed
+`/tmp` names collide across concurrent sessions:
+
 ```bash
+TMP=$(mktemp -d /tmp/issue.XXXXXX)   # reuse this $TMP for the rest of the run
 curl -sS -H "Authorization: token $FORGEJO_TOKEN" \
-  "https://forge.example.com/api/v1/repos/aaron/darkwatch/issues?state=open&limit=50&type=issues&page=1" > /tmp/_iss_p1.json
+  "https://forge.example.com/api/v1/repos/aaron/darkwatch/issues?state=open&limit=50&type=issues&page=1" > "$TMP/iss_p1.json"
 curl -sS -H "Authorization: token $FORGEJO_TOKEN" \
-  "https://forge.example.com/api/v1/repos/aaron/darkwatch/issues?state=open&limit=50&type=issues&page=2" > /tmp/_iss_p2.json
+  "https://forge.example.com/api/v1/repos/aaron/darkwatch/issues?state=open&limit=50&type=issues&page=2" > "$TMP/iss_p2.json"
 curl -sS -H "Authorization: token $FORGEJO_TOKEN" \
-  "https://forge.example.com/api/v1/repos/aaron/darkwatch/issues?state=open&limit=50&type=issues&page=3" > /tmp/_iss_p3.json
-jq -s 'add' /tmp/_iss_p1.json /tmp/_iss_p2.json /tmp/_iss_p3.json > /tmp/_iss_all.json
-echo "TOTAL=$(jq 'length' /tmp/_iss_all.json)"
+  "https://forge.example.com/api/v1/repos/aaron/darkwatch/issues?state=open&limit=50&type=issues&page=3" > "$TMP/iss_p3.json"
+jq -s 'add' "$TMP"/iss_p*.json > "$TMP/iss_all.json"
+echo "TOTAL=$(jq 'length' "$TMP/iss_all.json")"
 ```
 
 Fetch page 3 only if page 2 returned 50 results (i.e. you might still be paginating). If `length` of page 2 < 50, drop the page-3 curl. The `jq -s 'add'` works fine with two files.
@@ -85,10 +92,10 @@ Distill the proposed title + description into 5–10 keywords + a few key phrase
 
 ```bash
 # Title-only scan (cheap, catches obvious dupes)
-jq -r '.[] | select(.title | test("KEY|PHRASES|HERE"; "i")) | "\(.number)\t\(.title)"' /tmp/_iss_all.json
+jq -r '.[] | select(.title | test("KEY|PHRASES|HERE"; "i")) | "\(.number)\t\(.title)"' "$TMP/iss_all.json"
 
 # Title + body scan (use when the title-only scan is empty)
-jq -r '.[] | select((.title + " " + (.body // "")) | test("KEY|PHRASES|HERE"; "i")) | "\(.number)\t\(.title)"' /tmp/_iss_all.json
+jq -r '.[] | select((.title + " " + (.body // "")) | test("KEY|PHRASES|HERE"; "i")) | "\(.number)\t\(.title)"' "$TMP/iss_all.json"
 ```
 
 Pick **specific** terms — `advantage|disadvantage|modifier key|shift.click` beats `roll` (too broad). Run a wider second pass with synonyms / adjacent terms if the first pass came up empty and you want to be sure. Keep total `jq` runs small (≤ 5 normally).
@@ -226,21 +233,19 @@ If urgency is genuinely unclear, ask; otherwise pick the obvious one and say whi
 
 ### Critical: do not retry a POST on a parsing error
 
-A successful Forgejo write returns HTTP **201**. The body of that response can contain markdown with embedded newlines that `jq` will refuse to parse if you pipe it straight in. **A `jq` parse error on the response does NOT mean the POST failed** — it means the write succeeded but your display step broke.
-
-Always:
-
-1. Write the JSON payload to a file with `jq -n --rawfile`, then `curl --data-binary @file` — never inline a multi-line markdown body into `-d "..."`.
-2. Use `-o /tmp/resp.json -w '%{http_code}'` to capture the HTTP status separately from the body. **Branch on the status code, never on whether `jq` parsed the response.**
-3. If you see a `jq` error after a POST and you're not sure the write happened, do NOT retry — list your recent issues first (`GET …/issues?state=open&sort=newest&limit=5`) and check whether the issue you were trying to create is already there. Three identical issues filed 10 seconds apart is much worse than one issue with a missing screenshot.
+Full rule in `_shared/forgejo-api.md` — branch on the HTTP status code, never on
+whether `jq` parsed the response; a `jq` error after a 201 means the write SUCCEEDED.
+If unsure, list newest issues before even thinking about a retry.
 
 ### Creating a new issue
 
 No confirmation needed. Use this recipe:
 
 ```bash
-# Write the body to a file (avoids all shell quoting / heredoc pain)
-cat > /tmp/_issue_body.md <<'EOF'
+# Write the body to a file (avoids all shell quoting / heredoc pain).
+# $TMP is the mktemp -d workspace from Steps 3–4 (mktemp a fresh one if needed) —
+# never a fixed /tmp name.
+cat > "$TMP/issue_body.md" <<'EOF'
 ... markdown body, including ```code fences``` and newlines ...
 EOF
 
@@ -250,21 +255,21 @@ EOF
 # it's broken/blocking.
 PAYLOAD=$(jq -n \
   --arg t "Issue title goes here" \
-  --rawfile b /tmp/_issue_body.md \
+  --rawfile b "$TMP/issue_body.md" \
   '{title:$t, body:$b, labels:[1,3,49], milestone:18}')   # 49=phase/beta, 18=Maps & vision (look ids up in the caches)
 
 # POST, capturing status code SEPARATELY from the response body
-CODE=$(curl -s -o /tmp/_issue_resp.json -w '%{http_code}' -X POST \
+CODE=$(curl -s -o "$TMP/issue_resp.json" -w '%{http_code}' -X POST \
   -H "Authorization: token $FORGEJO_TOKEN" \
   -H "Content-Type: application/json" \
   --data-binary "$PAYLOAD" \
   "https://forge.example.com/api/v1/repos/aaron/darkwatch/issues")
 
 if [ "$CODE" = "201" ]; then
-  jq '{number, title, html_url}' /tmp/_issue_resp.json
+  jq '{number, title, html_url}' "$TMP/issue_resp.json"
 else
   echo "POST failed: HTTP $CODE"
-  head -c 500 /tmp/_issue_resp.json
+  head -c 500 "$TMP/issue_resp.json"
 fi
 ```
 
@@ -274,21 +279,23 @@ After creating, report: *"Created #N: [title] — [link]"*.
 
 ```bash
 # 1. Upload the image — returns JSON with browser_download_url
-CODE=$(curl -s -o /tmp/_upload.json -w '%{http_code}' -X POST \
+CODE=$(curl -s -o "$TMP/upload.json" -w '%{http_code}' -X POST \
   -H "Authorization: token $FORGEJO_TOKEN" \
   -F "attachment=@/path/to/screenshot.png" \
   "https://forge.example.com/api/v1/repos/aaron/darkwatch/issues/{index}/assets")
-[ "$CODE" = "201" ] && URL=$(jq -r '.browser_download_url' /tmp/_upload.json)
+[ "$CODE" = "201" ] && URL=$(jq -r '.browser_download_url' "$TMP/upload.json")
 
-# 2. Append the embedded image to the body file and PATCH
-echo -e "\n## Screenshot\n\n![screenshot]($URL)" >> /tmp/_issue_body.md
-PATCH_PAYLOAD=$(jq -n --rawfile b /tmp/_issue_body.md '{body:$b}')
-CODE=$(curl -s -o /tmp/_patch_resp.json -w '%{http_code}' -X PATCH \
+# 2. Append the embedded image to the body file and PATCH.
+#    Re-read "$TMP/issue_body.md" first if any time has passed — never PATCH a
+#    body file you haven't just verified (the PR #1616 cross-session lesson).
+echo -e "\n## Screenshot\n\n![screenshot]($URL)" >> "$TMP/issue_body.md"
+PATCH_PAYLOAD=$(jq -n --rawfile b "$TMP/issue_body.md" '{body:$b}')
+CODE=$(curl -s -o "$TMP/patch_resp.json" -w '%{http_code}' -X PATCH \
   -H "Authorization: token $FORGEJO_TOKEN" \
   -H "Content-Type: application/json" \
   --data-binary "$PATCH_PAYLOAD" \
   "https://forge.example.com/api/v1/repos/aaron/darkwatch/issues/{index}")
-[ "$CODE" = "201" ] || { echo "PATCH failed: $CODE"; head -c 500 /tmp/_patch_resp.json; }
+[ "$CODE" = "201" ] || { echo "PATCH failed: $CODE"; head -c 500 "$TMP/patch_resp.json"; }
 ```
 
 **macOS file access notes:**

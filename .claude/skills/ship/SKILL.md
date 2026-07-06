@@ -1,6 +1,8 @@
 ---
 name: ship
-description: Use when a development branch is ready to merge — updates changelog, handbook, roadmap, and brochure (if UI changed), commits all docs in one coordinated commit, drafts a `## Test plans` block (one entry per `Ready #N`) for the PR body, then opens a PR via the Forgejo API with `Ready #N` for every resolved issue (NOT `Closes` — issues stay open and get moved to `status/qa` on merge by the label-merged-issues workflow).
+description: Use when a development branch is ready to merge — the user invokes `/ship`, says "ship it", "ship this branch", or "open the PR". Handles the full docs + PR housekeeping for this repo; read the body before acting, the PR-body protocol has hard rules.
+version: 1.0.0
+last_changed: 2026-07-05
 ---
 
 # ship
@@ -325,11 +327,12 @@ Ready #N
 🤖 Generated with [Claude Code](https://claude.com/claude-code)
 ```
 
-Build the body via `jq -n --rawfile` (don't inline a multi-line markdown body into curl's `-d`) so newlines and code fences survive intact:
+Build the body via `jq -n --rawfile` per the transport rules in `.claude/skills/_shared/forgejo-api.md` (never inline multi-line markdown into curl's `-d`; branch on the HTTP status code). **The workspace MUST be `mktemp`'d, never a fixed `/tmp` name** — a fixed `/tmp/_pr_body.md` is shared across concurrent sessions and once got the wrong body PATCHed onto PR #1616:
 
 ```bash
 BRANCH=$(git branch --show-current)
-cat > /tmp/_pr_body.md <<'EOF'
+TMP=$(mktemp -d /tmp/ship.XXXXXX)
+cat > "$TMP/pr_body.md" <<'EOF'
 ## Summary
 - <bullet 1>
 - <bullet 2>
@@ -348,17 +351,19 @@ PAYLOAD=$(jq -n \
   --arg title "short title under 70 chars" \
   --arg head "$BRANCH" \
   --arg base "main" \
-  --rawfile body /tmp/_pr_body.md \
+  --rawfile body "$TMP/pr_body.md" \
   '{title:$title, head:$head, base:$base, body:$body}')
 
-CODE=$(curl -s -o /tmp/_pr_resp.json -w '%{http_code}' -X POST \
+CODE=$(curl -s -o "$TMP/pr_resp.json" -w '%{http_code}' -X POST \
   -H "Authorization: token $FORGEJO_TOKEN" \
   -H "Content-Type: application/json" \
   --data-binary "$PAYLOAD" \
   "https://forge.example.com/api/v1/repos/aaron/darkwatch/pulls")
 
-[ "$CODE" = "201" ] && jq '{number, html_url}' /tmp/_pr_resp.json || { echo "PR open failed: $CODE"; head -c 500 /tmp/_pr_resp.json; }
+[ "$CODE" = "201" ] && jq '{number, html_url}' "$TMP/pr_resp.json" || { echo "PR open failed: $CODE"; head -c 500 "$TMP/pr_resp.json"; }
 ```
+
+If you later amend the PR body (PATCH), rebuild it from scratch in a fresh `$TMP` — never re-send a body file another step (or session) may have touched without re-reading it first.
 
 Capture the PR number from the response — you need it for Step 6.
 

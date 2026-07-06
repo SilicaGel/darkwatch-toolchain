@@ -1,6 +1,8 @@
 ---
 name: update-readme
 description: Use when something that affects the repo-root README.md has changed — seed accounts, dev command, Node version, tech stack rows, listed skills, listed docs, prerequisites. Keeps README.md accurate as the first-thing-a-contributor-sees entry point. Ship invokes this automatically when the diff touches relevant paths.
+version: 1.0.0
+last_changed: 2026-07-05
 ---
 
 # update-readme

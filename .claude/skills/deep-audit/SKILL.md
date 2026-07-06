@@ -1,6 +1,8 @@
 ---
 name: deep-audit
-description: Run a deep, honest audit of the Darkwatch codebase — quality, security, performance, and operations/reliability — assuming the code was written by an under-supervised junior dev or a cheap LLM (because most of it was). Reconciles findings against open Forgejo issues, suggests milestones + labels for new findings, and produces both a saved markdown report and an in-shell summary. Use whenever the user invokes `/deep-audit`, `/deep-audit security`, `/deep-audit perf`, `/deep-audit quality`, or `/deep-audit ops`. Treat anything below "medium" severity as drop-on-the-floor unless it's noteworthy.
+description: Use whenever the user invokes `/deep-audit` (or scoped `/deep-audit security | perf | quality | ops`), or asks for a full honest codebase audit, a pre-launch review, or "how healthy is the codebase" — a slow, subagent-driven audit reconciled against open Forgejo issues. Not for reviewing a single diff or PR.
+version: 1.0.0
+last_changed: 2026-07-05
 ---
 
 # Deep Audit Skill
@@ -36,7 +38,7 @@ Everything Aaron wrote (or supervised). That includes:
 - `www/` and `site/` — brochure site
 - `scripts/` — coverage-comment, deploy, helpers
 - `tests/` and per-package tests — yes, audit the tests themselves
-- `.gitea/` / `.github/` workflows, `Dockerfile`, `docker-compose.yml`
+- `.forgejo/workflows/`, `Dockerfile`, `docker-compose.yml`
 - `docs/` only when something looks dangerously stale or contradicts code
 
 Skip: `node_modules`, `.worktrees`, `.fallow`, `test-results`, `ui-review*`, generated coverage, anything in `.gitignore`.
@@ -156,7 +158,7 @@ For each dimension in the requested scope (default: all four — quality, securi
 
 > You are auditing **operations and reliability** in Darkwatch from an SRE / on-call perspective. The product is going public soon — assume you'll be paged at 11pm when something breaks. The codebase has been written largely by Claude with light human oversight, so the operational layer is the *most likely* part to be missing or under-baked (LLMs default to writing happy-path code, not operational concerns).
 >
-> Read across `server/src/`, the CI configuration in `.github/workflows/` and `.gitea/workflows/` (if present), `Dockerfile(s)`, `docker-compose.yml`, deploy scripts, root config files, `scripts/`, and the `package.json` files. Use the `references/checklist.md` Operations section as your map but go further when something looks off.
+> Read across `server/src/`, the CI configuration in `.forgejo/workflows/`, `Dockerfile(s)`, `docker-compose.yml`, deploy scripts, root config files, `scripts/`, and the `package.json` files. Use the `references/checklist.md` Operations section as your map but go further when something looks off.
 >
 > Look hard at:
 > - **Logging**: Is there a structured logger (pino/winston/bunyan)? Or is it just `console.log/warn/error` everywhere? Count `console.*` calls in server code — anything > 10 is a finding. Are logs JSON? Do they include correlation/request IDs?
@@ -165,7 +167,7 @@ For each dimension in the requested scope (default: all four — quality, securi
 > - **Metrics & observability**: prom-client, OpenTelemetry, statsd anywhere? Otherwise on-call has zero visibility into rate-of-events / latency / connection counts.
 > - **DB backup & restore**: Is there a backup script (mysqldump cron, snapshot pipeline)? Has restore ever been tested? An untested backup is not a backup. Look for `scripts/backup*` or backup mentions in deploy docs.
 > - **Migration safety**: Are migrations wrapped in transactions where possible? Is there a rollback procedure documented? Does the runner snapshot before applying? Is there a way to undo a bad migration without manual SQL surgery?
-> - **CI hygiene**: Multiple CI configs (e.g. `.github/workflows` AND `.gitea/workflows`)? Different Node versions across them? Is one the source of truth or are they drifting?
+> - **CI hygiene**: Is `.forgejo/workflows/` the single CI source of truth, or are stray `.github/`/`.gitea/` leftovers drifting beside it? Consistent Node versions across workflow files?
 > - **Pre-commit hooks**: husky/lefthook/git-hooks installed? Or does enforcement only happen in CI (which means broken commits hit main and CI bounces)?
 > - **Secrets management**: How are secrets loaded (env file, secret manager)? Any keys/tokens in source? `.env.example` with real values?
 > - **Stale-closure / fire-and-forget anti-patterns** in async code: useEffect deps with `eslint-disable` (smells like a stale-closure landmine), socket reconnect handlers with stale state references, `void someAsyncFn()` or `someAsyncFn().catch(console.error)` that silently swallow on the email/notification path.
@@ -221,13 +223,11 @@ Verify file:line references actually exist before including them — subagents o
 
 This is the part the user explicitly asked for. **Don't skip it, and don't half-bake it.** A bad reconciliation step (filing duplicates of issues we already have, missing reopen-worthy ones) makes the whole audit a net negative — every duplicate is a paper cut on the issue list.
 
-### Why Sonnet, not Haiku
-
-Earlier versions of this skill used Haiku for reconciliation; in practice it returned mostly closed-issue matches and missed obvious open-issue overlaps. The matching task is genuinely subtle (paraphrase, partial-overlap, scope-narrower, scope-broader, regression-of-fix) and benefits from a stronger reasoner. Use Sonnet — extra cost is small relative to the audit run.
+Use a **Sonnet-or-stronger** subagent for reconciliation — never Haiku (retired: it matched mostly closed issues and missed open overlaps; see CHANGELOG.md). The matching task is genuinely subtle (paraphrase, partial-overlap, scope-narrower/broader, regression-of-fix).
 
 ### 6a. Save findings to a file first
 
-Don't try to embed the merged findings inline in the prompt — they get long. Write the JSON array to `/tmp/deep-audit-findings.json` first, then point the subagent at the path. This also makes the same artifact available to Step 8 (report writing).
+Don't try to embed the merged findings inline in the prompt — they get long. Write the JSON array to a **session-unique** path (e.g. `$(mktemp -d /tmp/deep-audit.XXXXXX)/findings.json` — fixed `/tmp` names collide across concurrent sessions, see `_shared/forgejo-api.md` "Temp files"), substitute that concrete path into the subagent prompt below, and keep it around — the same artifact feeds Step 8 (report writing).
 
 ### 6b. Reconciliation subagent
 
@@ -237,7 +237,7 @@ Agent({
   description: "Audit-finding reconciliation",
   prompt: `You are matching deep-audit findings to existing Darkwatch issues. Accuracy matters more than throughput — duplicates pollute the issue list and missed matches mean the team re-discusses solved problems.
 
-Findings file: /tmp/deep-audit-findings.json (read it). Each finding has fields: idx, dim, severity, category, title, refs, what.
+Findings file: <the session-unique findings.json path from 6a> (read it). Each finding has fields: idx, dim, severity, category, title, refs, what.
 
 Steps:
 
@@ -354,7 +354,7 @@ Template:
 ```markdown
 # Deep Audit — YYYY-MM-DD
 
-**Scope:** all | quality | security | perf
+**Scope:** all | quality | security | perf | ops
 **Commit:** <short SHA>
 **Branches scanned:** main
 **Tools run:** npm audit, tsc, eslint, depcheck, ...

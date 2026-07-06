@@ -1,6 +1,8 @@
 ---
 name: queue-batches
-description: Use whenever the user invokes `/queue-batches`, `/queue-batches NxM` (e.g. `/queue-batches 3x5`), or says "queue up some batches", "kick off parallel work on some tickets", "run N groups of M issues in parallel". Dispatches N background agents in isolated git worktrees, each working sequentially through M Darkwatch Forgejo issues, with live status streaming and question routing back to the user.
+description: Use whenever the user invokes `/queue-batches` or `/queue-batches NxM` (e.g. `/queue-batches 3x5`), or says "queue up some batches", "kick off parallel work on some tickets", "run N groups of M issues in parallel".
+version: 1.0.0
+last_changed: 2026-07-05
 ---
 
 # Queue Batches
@@ -72,7 +74,7 @@ Only skip this check when the user explicitly overrides with `force` (or the equ
 
 ### 1. Fetch + triage
 
-- Fetch open issues: `curl -sS -H "Authorization: token $FORGEJO_TOKEN" "https://forge.example.com/api/v1/repos/aaron/darkwatch/issues?state=open&limit=50&type=issues"` (paginate if 50 returned; always fresh — no cache)
+- Fetch open issues: `curl -sS -H "Authorization: token $FORGEJO_TOKEN" "https://forge.example.com/api/v1/repos/aaron/darkwatch/issues?state=open&limit=50&type=issues"` (paginate if 50 returned; always fresh — no cache; transport rules in `.claude/skills/_shared/forgejo-api.md`)
 - Exclude labels: `pipe-dream`, `maybe`, anything labelled `blocked`
 - For each remaining issue, read the body (not just title) to triage into a zone. Labels are a hint, not gospel. If an issue touches multiple zones, skip it with a note.
 
@@ -263,7 +265,7 @@ Bake this into the per-ticket pre-made decisions block in the dispatched prompt.
 
 - Batch count: 3
 - Tickets per batch: 5
-- Sub-agent model: `sonnet-4-6`
+- Sub-agent model: `sonnet` (the current Sonnet; user can override per batch, e.g. to `opus`)
 - Branch naming: `feat/<zone>-<YYYYMMDD>` (e.g. `feat/auth-routes-20260417`)
 - Worktree path: `.worktrees/<branch-name-short>`
 
@@ -278,6 +280,3 @@ All overridable via user input during plan approval.
 - **Letting the agent push.** Bake "no push" into the prompt every single time.
 - **Not handling `status=failed` distinctly.** A failure needs user attention immediately, not a status-table update.
 
-## Real-world ancestry
-
-This skill formalizes the workflow run manually on 2026-04-16 (security-sprint-1, schema-pass-1, visible-wins-1) and 2026-04-17 (the -2 variants). Three parallel 8-ticket batches shipped ~24 issues across ~12 hours of clock time.

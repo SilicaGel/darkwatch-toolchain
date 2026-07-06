@@ -1,6 +1,8 @@
 ---
 name: update-handbook
 description: Use when a feature has been added, changed, or removed, or when dev patterns/stack change — keeps docs/HANDBOOK.md accurate and updates the Last-updated date.
+version: 1.0.0
+last_changed: 2026-07-05
 ---
 
 # update-handbook

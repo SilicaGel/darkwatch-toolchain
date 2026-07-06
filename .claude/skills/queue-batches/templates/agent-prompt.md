@@ -6,7 +6,7 @@ Placeholders (replace before dispatching):
 - `{worktree_path}` — relative path from repo root, e.g. `.worktrees/auth-routes-20260417`
 - `{tickets_ordered}` — newline-separated `#N` list in execution order
 - `{log_path}` — `/tmp/queue-status/{batch_name}.log`
-- `{model}` — the model hint for traceability (e.g. `sonnet-4-6`)
+- `{model}` — the model hint for traceability (e.g. `sonnet`)
 - `{pre_made_decisions}` — bullet list of decisions the orchestrator made so the agent doesn't stall on them. Fill this from the ticket bodies + any user input captured during plan approval.
 
 ---

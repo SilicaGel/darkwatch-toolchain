@@ -1,6 +1,8 @@
 ---
 name: qa-check
-description: Verify open Forgejo issues with the `status/qa` label by reading code, running Playwright specs, or flagging for visual review. Use whenever the user invokes `/qa-check`, says "QA the qa issues", "check status/qa", "go through the qa list", "verify what's in qa", or asks "what's ready to close?" in a QA context. Optionally targets a single issue with `/qa-check <number>`. Walks the user through closes interactively — never closes in batch without confirmation.
+description: Use whenever the user invokes `/qa-check` (optionally `/qa-check <number>` for one issue), says "QA the qa issues", "check status/qa", "go through the qa list", "verify what's in qa", or asks "what's ready to close?" in a QA context — verifies open `status/qa` Forgejo issues.
+version: 1.0.0
+last_changed: 2026-07-05
 ---
 
 # QA Check
@@ -43,15 +45,13 @@ Only the last row is a true exemption. **A unit test does not become sufficient 
 - No args → verify all open `status/qa` issues.
 - `/qa-check <number>` → verify one issue. Skip Step 1, fetch only that issue, run only its applicable verification.
 
-## Forgejo API basics (already established for this repo)
+## Forgejo API
 
-- Auth: `$FORGEJO_TOKEN` (env var, always available).
-- Base: `https://forge.example.com/api/v1/repos/aaron/darkwatch`.
-- Filter by label **name**, URL-encoded: `?labels=status%2Fqa`. Numeric IDs silently no-op — same gotcha the `issue` skill documents.
-- Close: `PATCH /issues/{n}` with `{"state":"closed"}`.
-- Comment: `POST /issues/{n}/comments` with `{"body":"..."}`.
-- **Strip `status/qa` on every close:** `DELETE /issues/{n}/labels/38` (label id 38 = `status/qa`). The label means "awaiting verification" — once verified-and-closed, the label is misleading and clutters future audits. **Forgejo silently 204s on already-absent labels, so this is safe to run unconditionally.** Do this on every close, not just the "verified" ones — a "wontfix" / "duplicate" / "scope-changed" close shouldn't leave the label behind either.
-- Build all POST/PATCH bodies with `jq -n --arg/--argjson` so multi-line markdown bodies don't break quoting.
+Transport basics (auth, base URL, status-code + payload discipline, label-name
+URL-encoding, close/comment endpoints): read `.claude/skills/_shared/forgejo-api.md`.
+qa-check-specific rule:
+
+- **Strip `status/qa` on every close:** `DELETE /issues/{n}/labels/38` (label id 38 = `status/qa`). The label means "awaiting verification" — once verified-and-closed, the label is misleading and clutters future audits. Forgejo silently 204s on already-absent labels, so run it unconditionally — a "wontfix" / "duplicate" / "scope-changed" close shouldn't leave the label behind either.
 
 ## Flow
 
@@ -72,11 +72,14 @@ For each issue in the QA queue, find the closing PR and extract its plan:
 
 ```bash
 # Find merged PRs that referenced this issue. Scan recent closed PRs and match `Ready #N`.
+# $TMP is a session-unique workspace (fixed /tmp names collide across sessions —
+# _shared/forgejo-api.md "Temp files" rule).
+TMP=${TMP:-$(mktemp -d /tmp/qa-check.XXXXXX)}
 N=<issue number>
 curl -sS -H "Authorization: token $FORGEJO_TOKEN" \
   "https://forge.example.com/api/v1/repos/aaron/darkwatch/pulls?state=closed&limit=30&sort=newest" \
   | jq -r --arg n "$N" '.[] | select(.merged == true and (.body // "" | test("Ready #" + $n + "\\b|Closes #" + $n + "\\b"))) | "\(.number)\t\(.html_url)\n---BODY---\n\(.body)\n---END---"' \
-  > /tmp/qa-pr-${N}.txt
+  > "$TMP/qa-pr-${N}.txt"
 ```
 
 If the result is empty, expand the PR search window (`limit=50`, paginate if needed). If still empty, this issue was closed without a referencing PR (manual close, API close, or a pre-#766 ship) — proceed to Step 2 with no plan.
@@ -90,7 +93,7 @@ awk -v n="$N" '
   in_plans && $0 ~ "^### #" n " " { in_block=1; print; next }
   in_block && /^### / { in_block=0 }
   in_block { print }
-' /tmp/qa-pr-${N}.txt
+' "$TMP/qa-pr-${N}.txt"
 ```
 
 Classify the extracted block:
@@ -141,7 +144,7 @@ This is a proposal, not an autonomous spec-write: the user is part of QA and may
 
 ### Step 3 — Run code checks inline (do NOT dispatch a sub-agent)
 
-For all code-readable issues, do the grep + read inline in this session. **Earlier versions of this skill dispatched a Haiku sub-agent for context isolation — that pattern has been retired** because foreground sub-agents can stall the session if they loop on tool calls. Same reason the `issue` skill dropped its sub-agent.
+For all code-readable issues, do the grep + read inline in this session — do NOT dispatch a foreground sub-agent (retired pattern, it can stall the session; see CHANGELOG.md).
 
 For each issue, produce one mental result row:
 
@@ -242,7 +245,7 @@ Only attempted if there are playwright-runnable issues.
   await page.goto(`/campaign/${id}`);
   ```
 - **Theme-iterating specs need ~1s settle after change.** WebGL-shader themes (laser, storm, arcane, ember, crystal, void, bone) need a few frames to initialize. 150ms is not enough.
-- **`CompactCard` is a plain `<div onClick>`** — no `role="button"`, no native focus. Earlier guidance in this skill claimed it was `<div role="button">` — that was wrong. Two reliable ways to click it:
+- **`CompactCard` is a plain `<div onClick>`** — no `role="button"` (don't trust older notes claiming otherwise), no native focus. Two reliable ways to click it:
   - **Preferred (post-#777):** `page.locator('[data-testid="character-card-<id>"]').click()` — stable across UI text changes.
   - **Fallback:** `page.getByText(name, { exact: true }).first().click()` — the click bubbles up to the card's onClick. Works without testids but breaks if names collide or get renamed.
 - **Stable `data-testid` locators added in #777.** Prefer these over text/role queries when they fit:
@@ -434,9 +437,8 @@ Copy the relevant template to `tests/qa-check/<N>/spec.ts`, rename the test, upd
 
 - **Interactive, not autonomous.** The user said "I should be part of the QA process." Closing in batch loses that. Each section gets its own ack.
 - **Strongest signal, not cheapest.** Darkwatch is played visually and in real time, so "wired ≠ works" — a grep that confirms a symbol exists is the weakest possible signal for user-facing behavior. The default is to exercise the played surface (run the durable spec; falsifiable throwaway for a real gap). Code-readable is the *exception*, justified only when there's no user surface or a falsifiable unit/int test already pins the user-facing output. The earlier "cheapest mode / code-readable first" framing is what produced the #994/#1342 under-verifications — accuracy beats speed here; catching breakage sooner is the efficiency that matters.
-- **No foreground sub-agents.** The earlier Haiku-sub-agent dispatch pattern (Step 3) was removed because a stuck sub-agent can wedge the session — same lesson the `issue` skill learned the hard way.
 - **Playwright artifacts stay local.** This skill runs on the user's machine, not in CI. Uploading screenshots to Forgejo is friction with no audience.
-- **Throwaway specs go under `tests/qa-check/<N>/`,** NOT `tests/test-results/`. Playwright clobbers `test-results/` between runs — earlier versions of this skill prescribed that location and the specs disappeared.
+- **Throwaway specs go under `tests/qa-check/<N>/`,** NOT `tests/test-results/` — Playwright clobbers `test-results/` between runs.
 - **State navigation via API,** not card-clicking heuristics. Dashboard cards share text and `.first()` matches lie.
 - **`partial` is a real status.** Many QA issues are "feature shipped, but the issue title was broader." Forcing green/red hides the scope question. **And don't conflate "narrow fix met the literal acceptance phrase" with "the user-visible intent is satisfied"** — walk the surface the reporter would see.
 - **Acceptance-coverage check (Step 3), per-bullet report (Step 6), close-gate (Step 7) — why they exist.** Re-auditing the 2026-05-08 `/qa-check` batch (16 issues closed "code-readable") found **3 over-closed on a one-line grep**, all later reopened:

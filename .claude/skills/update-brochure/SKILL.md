@@ -1,6 +1,8 @@
 ---
 name: update-brochure
 description: Use when a user-facing feature is added, changed, or removed, or a new RPG system is added — keeps site/index.html and site/screenshots.js in sync with the app. Skip for backend-only changes.
+version: 1.0.0
+last_changed: 2026-07-05
 ---
 
 # update-brochure
@@ -27,9 +29,9 @@ This means:
 
 ## Reference files (load when needed, not up front)
 
-- `reference/framing-guide.md` — how to frame screenshots (modal close-up vs panel crop vs full viewport, theme assignment, dual-viewport rules). Load **only when writing or reviewing a capture function**.
-- `reference/processes.md` — detailed steps for every process type (Feature added / removed / changed, --audit, --full-audit, --add, --ignore). Load **only after the dispatch decision below picks a process**.
-- `reference/brochure-server.md` — isolated port-5199/3099 screenshot stack (start / wait / tear down). Load **only when a capture is about to run** — not for metadata-only changes.
+- `references/framing-guide.md` — how to frame screenshots (modal close-up vs panel crop vs full viewport, theme assignment, dual-viewport rules). Load **only when writing or reviewing a capture function**.
+- `references/processes.md` — detailed steps for every process type (Feature added / removed / changed, --audit, --full-audit, --add, --ignore). Load **only after the dispatch decision below picks a process**.
+- `references/brochure-server.md` — isolated port-5199/3099 screenshot stack (start / wait / tear down). Load **only when a capture is about to run** — not for metadata-only changes.
 
 ## Step 0: Audit what changed (ALWAYS run first, cheap, decides skip-vs-act)
 
@@ -76,7 +78,7 @@ The authoritative list of existing captures lives in `site/screenshots.js` (`run
 
 **Global changes** (`index.css`, theme files, shared layout components) affect **every** capture — plan a full refresh.
 
-**Unmapped changes** usually indicate a **new feature row** — dispatch to the "Feature added" process in `reference/processes.md`.
+**Unmapped changes** usually indicate a **new feature row** — dispatch to the "Feature added" process in `references/processes.md`.
 
 ### B.1 Coverage gaps — areas the brochure does NOT yet capture (2026-06-25 audit, #1381)
 
@@ -123,7 +125,7 @@ Confirm with the user before dispatching to a process or running any screenshot 
 
 ### E. Dispatch to process
 
-Based on the plan, dispatch to one of the process types (all in `reference/processes.md`):
+Based on the plan, dispatch to one of the process types (all in `references/processes.md`):
 
 | Plan item | Process |
 |---|---|
@@ -136,11 +138,11 @@ Based on the plan, dispatch to one of the process types (all in `reference/proce
 | `--add 'description'` | **--add** (targeted custom capture) |
 | `--ignore 'name'` | **--ignore** (remove row + ignore-list entry) |
 
-Load `reference/processes.md` and follow the relevant section.
+Load `references/processes.md` and follow the relevant section.
 
 ### F. Capturing? Bring up the brochure stack first
 
-Any process that runs screenshots MUST use the isolated brochure stack — don't hit 5173/3000 directly, a stale process from another worktree may be serving them. See `reference/brochure-server.md` for the start / wait-for-ready / tear-down procedure.
+Any process that runs screenshots MUST use the isolated brochure stack — don't hit 5173/3000 directly, a stale process from another worktree may be serving them. See `references/brochure-server.md` for the start / wait-for-ready / tear-down procedure.
 
 ---
 

@@ -1,6 +1,8 @@
 ---
 name: restart-local-dev
 description: Use when the user runs /restart-local-dev or asks to restart local Darkwatch dev servers. Kills all running Darkwatch processes (client, server, www, brochure) and restarts them fresh.
+version: 1.0.0
+last_changed: 2026-07-05
 ---
 
 # Restart Local Dev

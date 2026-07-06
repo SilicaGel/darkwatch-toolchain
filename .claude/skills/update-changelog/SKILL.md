@@ -1,6 +1,8 @@
 ---
 name: update-changelog
 description: Use when a feature has shipped, a bug has been fixed, or a feature has been removed — writes a new versioned entry in docs/CHANGELOG.md using semver rules and commits it.
+version: 1.0.0
+last_changed: 2026-07-05
 ---
 
 # update-changelog

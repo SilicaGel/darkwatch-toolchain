@@ -1,10 +1,10 @@
 # Brochure update processes — detailed reference
 
 Loaded by `update-brochure` once the dispatch decision in SKILL.md has chosen a process. See also:
-- `reference/framing-guide.md` — screenshot framing rules
-- `reference/brochure-server.md` — port-isolated screenshot server setup
+- `references/framing-guide.md` — screenshot framing rules
+- `references/brochure-server.md` — port-isolated screenshot server setup
 
-Every capture run **must** use the isolated brochure server (see `reference/brochure-server.md`). Do not hit ports 5173/3000 directly — a stale process from another worktree may be holding them and serving different state.
+Every capture run **must** use the isolated brochure server (see `references/brochure-server.md`). Do not hit ports 5173/3000 directly — a stale process from another worktree may be holding them and serving different state.
 
 ---
 
@@ -52,7 +52,7 @@ Every capture run **must** use the isolated brochure server (see `reference/broc
    await shotBoth(page, 'feature-name', captureFeatureName);
    ```
 
-3. Start the isolated brochure stack (see `reference/brochure-server.md`), then run the screenshot script:
+3. Start the isolated brochure stack (see `references/brochure-server.md`), then run the screenshot script:
 
    ```bash
    cd site && VITE_URL=http://localhost:5199 node screenshots.js --only feature-name
@@ -72,7 +72,7 @@ Every capture run **must** use the isolated brochure server (see `reference/broc
 
    **Never review or adjust the mobile PNG for crop** — mobile is always full viewport by design.
 
-5. Tear down the brochure stack (see `reference/brochure-server.md`).
+5. Tear down the brochure stack (see `references/brochure-server.md`).
 
 6. Commit (skip if being called from the `ship` skill — ship handles the coordinated commit):
 
@@ -106,7 +106,7 @@ Every capture run **must** use the isolated brochure server (see `reference/broc
 ## Process: Feature changed (copy or screenshot update)
 
 1. Update the heading and description in the relevant `.feature-row` in `site/index.html`
-2. Re-run the screenshots if the UI changed visually (start/tear down the brochure stack via `reference/brochure-server.md`):
+2. Re-run the screenshots if the UI changed visually (start/tear down the brochure stack via `references/brochure-server.md`):
 
    ```bash
    cd site && VITE_URL=http://localhost:5199 node screenshots.js --only feature-name
@@ -150,7 +150,7 @@ Surface a summary. Confirm with the user before making any changes. Do not commi
 
 ## Process: --full-audit
 
-Use when explicitly invoked (`/update-brochure --full-audit`). The comprehensive version: scans for unmapped features, refreshes all screenshots, and reviews row copy. Takes longer — plan for it. Requires the brochure stack (see `reference/brochure-server.md`).
+Use when explicitly invoked (`/update-brochure --full-audit`). The comprehensive version: scans for unmapped features, refreshes all screenshots, and reviews row copy. Takes longer — plan for it. Requires the brochure stack (see `references/brochure-server.md`).
 
 ### 1. Load the ignore list
 
@@ -171,7 +171,7 @@ Flag anything not covered by any of those three. Present the list to the user an
 
 ### 3. Start brochure stack and run all captures (full refresh)
 
-Bring up the isolated brochure stack (see `reference/brochure-server.md`), then redo every capture unconditionally — don't check mtime. This guarantees CSS changes, theme changes, and data changes are all picked up.
+Bring up the isolated brochure stack (see `references/brochure-server.md`), then redo every capture unconditionally — don't check mtime. This guarantees CSS changes, theme changes, and data changes are all picked up.
 
 ```bash
 cd site && VITE_URL=http://localhost:5199 node screenshots.js
@@ -197,7 +197,7 @@ After the above, run the standard drift checks from `--audit` (orphans, missing 
 
 ### 6. Tear down brochure stack
 
-See `reference/brochure-server.md`.
+See `references/brochure-server.md`.
 
 ### 7. Present findings, confirm, do not commit
 
@@ -244,7 +244,7 @@ Apply tone guidelines. Describe what the feature does for the player or DM, not 
 
 ### 5. Bring up the brochure stack, run, review, adjust (max 2 retries on desktop)
 
-See `reference/brochure-server.md` for startup.
+See `references/brochure-server.md` for startup.
 
 ```bash
 cd site && VITE_URL=http://localhost:5199 node screenshots.js --only slug-name

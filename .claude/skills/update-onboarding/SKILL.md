@@ -1,6 +1,8 @@
 ---
 name: update-onboarding
 description: Use when a dev workflow, convention, tooling, repo structure, or setup step changes — keeps docs/ONBOARDING.md accurate for new contributors. Trigger on new npm scripts, new skills, new env vars, new worktree patterns, new test commands, file reorganizations, or changes to the brainstorm→spec→plan→implement cycle.
+version: 1.0.0
+last_changed: 2026-07-05
 ---
 
 # update-onboarding

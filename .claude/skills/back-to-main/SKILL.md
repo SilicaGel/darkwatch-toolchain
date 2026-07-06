@@ -1,6 +1,8 @@
 ---
 name: back-to-main
-description: Use when a PR has been merged and the branch/worktree need cleanup — pulls main, re-installs deps + applies migrations so main doesn't drift, removes the feat/ worktree and local branch, clears CI status files, stops any active monitors, and marks all queue-batch tasks deleted.
+description: Use when a PR has been merged and the branch/worktree need cleanup — the user invokes `/back-to-main`, or says "clean up the branch", "the PR merged, tidy up", "get back to a clean main".
+version: 1.0.0
+last_changed: 2026-07-05
 ---
 
 # back-to-main
@@ -56,11 +58,11 @@ done
 
 ## Step 2: Remove worktree(s)
 
-List worktrees and remove each merged one (they live under `.claude/worktrees/`):
+List worktrees and remove each merged one (they live under `.worktrees/`):
 
 ```bash
 git worktree list
-git worktree remove --force .claude/worktrees/<name>
+git worktree remove --force .worktrees/<name>
 ```
 
 `--force` covers the squash-merge case (the branch reads as "not fully merged").
@@ -73,7 +75,7 @@ happens, move the dir aside and let git drop the registration — an atomic
 rename always succeeds where the in-place delete races:
 
 ```bash
-trash=$(mktemp -d) && mv .claude/worktrees/<name> "$trash/dead" && rm -rf "$trash" &
+trash=$(mktemp -d) && mv .worktrees/<name> "$trash/dead" && rm -rf "$trash" &
 git worktree prune
 ```
 

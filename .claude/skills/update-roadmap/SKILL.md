@@ -1,6 +1,8 @@
 ---
 name: update-roadmap
 description: Use when a strategic direction, theme, or milestone shifts — keeps docs/ROADMAP.md accurate as a thematic/narrative overview. Trigger on new milestones starting or closing, a theme entering the active sprint, a pivot in strategic direction, or a longer-term idea being promoted into active work. Do NOT use this for individual tickets shipping or closing — those live in Forgejo and the CHANGELOG.
+version: 1.0.0
+last_changed: 2026-07-05
 ---
 
 # update-roadmap
