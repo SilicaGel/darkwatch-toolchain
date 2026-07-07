@@ -450,7 +450,10 @@ jobs:
   # ---------------------------------------------------------------------------
   smoke:
     runs-on: ubuntu-latest
-    timeout-minutes: 30 # #1263 — build + 13 Playwright specs + DB seed; ~15-20 min typical
+    # #1263 — build + smoke specs + DB seed; ~15-20 min typical. #1621 — the
+    # affected tier can append up to 20 nightly-only specs (+MinIO + all-tier
+    # seed) on PRs touching a mapped area, so allow headroom above the base.
+    timeout-minutes: 45
     # #969 — run inside the prebuilt CI image (Node 22 + Chromium + Playwright
     # system deps baked). No apt install-deps, no browser download, no
     # actions/setup-node. Pinned to the @playwright/test version; rebuilt by
@@ -471,8 +474,35 @@ jobs:
           --health-timeout=5s
           --health-retries=30
           --tmpfs /var/lib/mysql:rw,noexec,nosuid,size=512m
+      minio:
+        # #1621 — the affected tier can route maps/image/AoE specs into this job;
+        # they store uploads in object storage, and the all-tier seed below
+        # stages the QA fixture's (#1238) map image through it. Same service
+        # shape as the `test` job's MinIO (Forgejo's act_runner supports `cmd:`).
+        image: minio/minio:RELEASE.2025-04-08T15-41-24Z@sha256:8834ae47a2de3509b83e0e70da9369c24bbbc22de42f2a2eddc530eee88acd1b
+        cmd:
+          - server
+          - /data
+          - --console-address
+          - ":9001"
+        env:
+          MINIO_ROOT_USER: darkwatch_admin
+          MINIO_ROOT_PASSWORD: darkwatch_minio_dev
+        options: >-
+          --health-cmd="curl -fsS http://localhost:9000/minio/health/ready || exit 1"
+          --health-interval=2s
+          --health-timeout=5s
+          --health-retries=30
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          # #1621 affected tier: scripts/affected-e2e.mjs diffs origin/main...HEAD
+          # to pick which nightly-only specs to also run; the three-dot merge-base
+          # needs full history (same as visual-regression.yml / ship-guard.yml).
+          fetch-depth: 0
+
+      - name: Fetch base ref (affected e2e tier needs origin/main — #1621)
+        run: git fetch origin main --quiet || true
 
       # #969 — Node 22 is baked into the container image, so no actions/setup-node.
       # We still cache the npm download dir (what setup-node's cache:'npm' did)
@@ -521,21 +551,63 @@ jobs:
           DB_NAME: ${{ secrets.CI_DB_NAME }}
         run: cd server && npm run db:migrate
 
-      - name: Seed core + shadowdark + demo content (smoke specs assume seeded DB)
+      - name: Wait for MinIO + create the images bucket (#1621 affected tier)
+        # The affected tier (#1621) can append maps/image/AoE specs that store
+        # uploads in object storage, and the all-tier seed below stages the QA
+        # fixture's (#1238) map image through it. Create the bucket + make it
+        # anonymously downloadable (mirrors docker-compose's minio-init /
+        # e2e-full.yml). mc is fetched here (not baked in the CI image); pick the
+        # arch to match this container (the smoke image is arm64 — see the
+        # rolldown arm64 patch above).
+        env:
+          MINIO_ROOT_USER: darkwatch_admin
+          MINIO_ROOT_PASSWORD: darkwatch_minio_dev
+          MINIO_BUCKET: darkwatch-images
+        run: |
+          for i in $(seq 1 30); do
+            (echo > /dev/tcp/minio/9000) 2>/dev/null && echo "MinIO reachable" && break
+            echo "Waiting for MinIO... ($i/30)"; sleep 2
+            [ "$i" -eq 30 ] && { echo "MinIO never became ready"; exit 1; }
+          done
+          case "$(uname -m)" in
+            aarch64 | arm64) MC_ARCH=linux-arm64 ;;
+            *) MC_ARCH=linux-amd64 ;;
+          esac
+          curl -sSL "https://dl.min.io/client/mc/release/$MC_ARCH/mc" -o /tmp/mc
+          chmod +x /tmp/mc
+          # `/minio/health/ready` can flip green a beat before client auth is
+          # accepted (a recurring e2e-full flake), so retry the alias until it
+          # authenticates before touching the bucket.
+          for i in $(seq 1 30); do
+            /tmp/mc alias set local http://minio:9000 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD" >/dev/null 2>&1 && break || true
+            echo "Waiting for MinIO client auth... ($i/30)"; sleep 1
+            [ "$i" -eq 30 ] && { echo "MinIO never accepted client auth"; exit 1; }
+          done
+          /tmp/mc mb --ignore-existing local/"$MINIO_BUCKET"
+          /tmp/mc anonymous set download local/"$MINIO_BUCKET"
+          echo "MinIO ready with bucket $MINIO_BUCKET (public-download)"
+
+      - name: Seed all tiers (smoke base + any affected-tier spec's preconditions)
         env:
           DB_HOST: mariadb
           DB_PORT: "3306"
           DB_USER: ${{ secrets.CI_DB_USER }}
           DB_PASSWORD: ${{ secrets.CI_DB_PASSWORD }}
           DB_NAME: ${{ secrets.CI_DB_NAME }}
-        # The demo campaign ("Demo Campaign (Shadowdark)") is Tier 3 — it is
-        # NOT created by seed:shadowdark. The smoke specs' openCampaign()
-        # helper looks for it, so seed:shadowdark:demo is required. The old
-        # monolith ci.yml got away without it only because the integration
-        # tests ran first in the same job and left the demo campaign in the
-        # shared DB as a side effect; this job has its own fresh DB. Matches
-        # e2e-full.yml, which seeds all three tiers for the same reason.
-        run: cd server && npm run seed:core && npm run seed:shadowdark && npm run seed:shadowdark:demo
+          # #1621 — MinIO env (+ MinIO running) so the QA fixture (#1238) stages
+          # its map image and creates the active map; without it the fixture
+          # skips the map and map-* specs have nothing to render.
+          MINIO_ENDPOINT: http://minio:9000
+          MINIO_ROOT_USER: darkwatch_admin
+          MINIO_ROOT_PASSWORD: darkwatch_minio_dev
+          MINIO_BUCKET: darkwatch-images
+          MINIO_PUBLIC_BASE_URL: http://minio:9000/darkwatch-images
+        # `npm run seed` (SEED_MODE=all) seeds core → shadowdark → demo →
+        # qa-fixture. The base smoke specs need the demo campaign
+        # (openCampaign()); affected-tier map specs (e.g.
+        # map-viewport-persistence) need the qa-fixture tier. Matches e2e-full.yml
+        # so any spec the affected tier routes has the same seed it does nightly.
+        run: cd server && npm run seed
 
       - name: Smoke — start E2E app server
         env:
@@ -556,6 +628,13 @@ jobs:
           SOCKET_PER_USER_CAP: "1000"
           SOCKET_PER_IP_CAP: "1000"
           NODE_OPTIONS: "--max-old-space-size=256"
+          # #1621 — affected-tier image/map specs upload to + serve from object
+          # storage; MinIO (service) + bucket are brought up above.
+          MINIO_ENDPOINT: http://minio:9000
+          MINIO_ROOT_USER: darkwatch_admin
+          MINIO_ROOT_PASSWORD: darkwatch_minio_dev
+          MINIO_BUCKET: darkwatch-images
+          MINIO_PUBLIC_BASE_URL: http://minio:9000/darkwatch-images
         run: |
           node server/dist/index.js >/tmp/server.log 2>&1 &
           for i in $(seq 1 30); do
@@ -618,13 +697,30 @@ jobs:
       - name: Typecheck tests/ (specs + helpers + smoke-walk)
         run: cd tests && npm run typecheck
 
-      - name: Smoke — run critical specs
+      - name: Smoke — run critical specs (+ affected nightly-only tier, #1621)
         id: smoke_e2e
         env:
           E2E_SERVER_URL: "http://localhost:3001"
           TEST_HOOK_SECRET: e2e-test-hook-secret
           PLAYWRIGHT_BROWSERS_PATH: /ms-playwright
+          # #1621 — affected-tier specs (e.g. 1560-aoe-walls, 1077-hidden-monsters)
+          # open a raw DB connection via tests/helpers/db.ts, which falls back to
+          # the local-dev 127.0.0.1:3397 when unset. Point it at this job's
+          # mariadb service (mirrors e2e-full.yml's shard steps, #1581).
+          DB_HOST: mariadb
+          DB_PORT: "3306"
+          DB_USER: ${{ secrets.CI_DB_USER }}
+          DB_PASSWORD: ${{ secrets.CI_DB_PASSWORD }}
+          DB_NAME: ${{ secrets.CI_DB_NAME }}
         run: |
+          # Affected tier (#1621): nightly-only specs whose area this PR's diff
+          # touches (tests/e2e/spec-areas.json), plus any e2e spec the PR modifies
+          # directly (self-tier). Empty on docs/infra PRs → exactly the base smoke
+          # set below (zero cost). Run from the repo root (reads spec-areas.json +
+          # git diff) BEFORE `cd tests`. Diagnostics go to stderr (shown in log);
+          # stdout is the machine list, appended unquoted for word-splitting.
+          EXTRA_SPECS=$(node scripts/affected-e2e.mjs)
+          echo "Affected-tier extra specs: ${EXTRA_SPECS:-(none)}"
           # character-creation.spec is excluded (#490) — confirmed in run 743
           # to be a real step-3 PATCH waiter race, separate from the Zod
           # cascade that #501 fixed. Re-enable only after the underlying race
@@ -647,6 +743,7 @@ jobs:
             e2e/rest-button.spec.ts \
             e2e/spell-exhaustion.spec.ts \
             e2e/theme-contrast.spec.ts \
+            $EXTRA_SPECS \
             --reporter=line
 
       - name: Dump server and vite logs on failure
