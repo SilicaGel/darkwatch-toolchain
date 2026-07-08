@@ -24,6 +24,16 @@ name: E2E Full Suite
 on:
   workflow_call:
   workflow_dispatch:
+  schedule:
+    # #1622 — midday no-deploy backstop at 19:00 UTC (3pm ET). The deploy gate
+    # runs at 06:00 UTC (2am ET, nightly-deploy.yml); a spec-breaking merge made
+    # during the ET workday otherwise first executes there, ~a day late against
+    # the whole day's merges. This second run catches most of the day's merges by
+    # mid-afternoon ET — it runs THIS workflow directly (schedule trigger), NOT
+    # via nightly-deploy.yml, so it never deploys. Scheduled runs only fire from
+    # the default branch's copy of this file, so the cron is observable only after
+    # merge (a branch prove uses workflow_dispatch). Hour = Aaron's call (#1620).
+    - cron: "0 19 * * *"
   # NOTE: no `pull_request` trigger. The Forgejo runner shares a memory-capped
   # OrbStack VM with an unrelated container stack, so running this heavy suite
   # (mariadb service + builds + Chromium × shards) concurrently with ci.yml on
@@ -33,6 +43,15 @@ on:
   # and on demand (workflow_dispatch) when the runner isn't contended. To prove
   # a harness/spec change before merge, dispatch this workflow manually rather
   # than relying on a per-PR run. (#1141)
+
+# #1622 — serialize every e2e-full entry point (nightly workflow_call, the
+# midday cron above, manual dispatch, and the future run-e2e-full label #1623)
+# onto one queue so two heavy suites never stack on the shared OrbStack VM. NO
+# cancel-in-progress: an in-flight deploy-gate run must finish, not be killed by
+# a later cron/dispatch.
+concurrency:
+  group: e2e-full
+  cancel-in-progress: false
 
 jobs:
   e2e-full:
@@ -266,7 +285,11 @@ jobs:
           DB_USER: ${{ secrets.CI_DB_USER }}
           DB_PASSWORD: ${{ secrets.CI_DB_PASSWORD }}
           DB_NAME: ${{ secrets.CI_DB_NAME }}
-        run: cd tests && ./node_modules/.bin/playwright test --shard=1/3 --reporter=line
+          # #1622 — per-shard JSON report; the notify-failure job parses these for
+          # failing spec titles. Written into the uploaded logs dir (Playwright
+          # creates the parent). One file per shard so they don't clobber.
+          PLAYWRIGHT_JSON_OUTPUT_NAME: /tmp/e2e-full-logs/results-shard-1.json
+        run: cd tests && ./node_modules/.bin/playwright test --shard=1/3 --reporter=line,json
 
       - name: Restart Vite preview (between shards 1→2)
         env:
@@ -302,7 +325,8 @@ jobs:
           DB_USER: ${{ secrets.CI_DB_USER }}
           DB_PASSWORD: ${{ secrets.CI_DB_PASSWORD }}
           DB_NAME: ${{ secrets.CI_DB_NAME }}
-        run: cd tests && ./node_modules/.bin/playwright test --shard=2/3 --reporter=line
+          PLAYWRIGHT_JSON_OUTPUT_NAME: /tmp/e2e-full-logs/results-shard-2.json
+        run: cd tests && ./node_modules/.bin/playwright test --shard=2/3 --reporter=line,json
 
       - name: Restart Vite preview (between shards 2→3)
         env:
@@ -338,7 +362,8 @@ jobs:
           DB_USER: ${{ secrets.CI_DB_USER }}
           DB_PASSWORD: ${{ secrets.CI_DB_PASSWORD }}
           DB_NAME: ${{ secrets.CI_DB_NAME }}
-        run: cd tests && ./node_modules/.bin/playwright test --shard=3/3 --reporter=line
+          PLAYWRIGHT_JSON_OUTPUT_NAME: /tmp/e2e-full-logs/results-shard-3.json
+        run: cd tests && ./node_modules/.bin/playwright test --shard=3/3 --reporter=line,json
 
       - name: Collect logs for artifact
         if: always()
@@ -371,3 +396,176 @@ jobs:
           tail -n 200 /tmp/server.log || echo "no server log"
           echo "=== vite log (last 200 lines) ==="
           tail -n 200 /tmp/vite.log || echo "no vite log"
+
+  # notify-failure — #1622. Every e2e-full failure (nightly deploy gate, the
+  # midday cron, a manual dispatch, or the future run-e2e-full label) self-
+  # attributes onto a rolling Forgejo issue so morning triage starts with "these
+  # specs, these commits" instead of archaeology — and so diagnosis never depends
+  # on Forgejo log archival (the 2026-07-05 23:18 red's log was never archived,
+  # log_in_storage=0). Reuses the notify-main-red rolling-issue pattern (ci.yml).
+  notify-failure:
+    needs: e2e-full
+    if: always() && needs.e2e-full.result == 'failure'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # github.token needs these to read prior runs (last-green) + file the rolling
+    # issue. secrets.FORGEJO_TOKEN (a PAT) is kept as a fallback — it can write
+    # issues (label-merged-issues proves it) but lacks read scope on the issues
+    # list / actions API, which is what 403'd the first prove run.
+    permissions:
+      contents: read
+      issues: write
+      actions: read
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          # git log <last-green>..HEAD needs the merge-base history.
+          fetch-depth: 0
+
+      - name: Download the e2e-full report artifact
+        # v4 unsupported on Forgejo's actions backend; pin v3 (see ci.yml).
+        uses: actions/download-artifact@9bc31d5ccc31df68ecc42ccf4149144866c47d8a # v3.0.2
+        continue-on-error: true # a crash before upload must not muzzle the notify
+        with:
+          name: e2e-full-logs-${{ github.run_id }}
+          path: /tmp/e2e-full-logs
+
+      - name: Comment the rolling "e2e-full is red" issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FALLBACK_TOKEN: ${{ secrets.FORGEJO_TOKEN }}
+          API_URL: ${{ github.api_url }}
+          REPO: ${{ github.repository }}
+          SERVER_URL: ${{ github.server_url }}
+          RUN_NUMBER: ${{ github.run_number }}
+          RUN_ID: ${{ github.run_id }}
+          SHA: ${{ github.sha }}
+          EVENT: ${{ github.event_name }}
+          REF: ${{ github.ref_name }}
+        run: |
+          python3 - <<'PY'
+          import os, json, glob, subprocess
+          api, repo = os.environ["API_URL"], os.environ["REPO"]
+          server, run_number, run_id = os.environ["SERVER_URL"], os.environ["RUN_NUMBER"], os.environ["RUN_ID"]
+          sha, event, ref = os.environ["SHA"], os.environ.get("EVENT", "?"), os.environ.get("REF", "?")
+          run_url = f"{server}/{repo}/actions/runs/{run_number}"
+          MARKER = "<!-- e2e-full-red -->"
+
+          # HTTP via curl, NOT urllib: forge.example.com is behind Cloudflare,
+          # which fingerprint-blocks Python-urllib with a 403 "error code: 1010"
+          # (the first prove run's failure) — curl passes, which is why the other
+          # CI API callers (label-merged-issues, diff-coverage) use it. The
+          # full-scope PAT is tried first (proven to read tasks/issues + write);
+          # github.token is a fallback (scoped by the permissions block above).
+          TOKENS = [("secrets.FORGEJO_TOKEN", os.environ.get("FALLBACK_TOKEN", "")),
+                    ("github.token", os.environ.get("GH_TOKEN", ""))]
+          TOKENS = [(n, t) for n, t in TOKENS if t]
+          print(f"api_url={api} repo={repo} tokens available: {[n for n, _ in TOKENS]}")
+
+          def call(method, path, payload=None):
+              # Try each token; return (parsed_json_or_{}, token_name) on 2xx, else (None, None).
+              for name, tok in TOKENS:
+                  cmd = ["curl", "-sS", "-X", method,
+                         "-H", f"Authorization: token {tok}",
+                         "-H", "Content-Type: application/json",
+                         "-w", "\n%{http_code}", f"{api}/repos/{repo}{path}"]
+                  if payload is not None:
+                      cmd += ["--data", json.dumps(payload)]
+                  r = subprocess.run(cmd, capture_output=True, text=True)
+                  out = r.stdout
+                  nl = out.rfind("\n")
+                  code, raw = (out[nl + 1:].strip(), out[:nl]) if nl >= 0 else (out.strip(), "")
+                  if code.startswith("2"):
+                      try:
+                          return (json.loads(raw) if raw.strip() else {}, name)
+                      except Exception:
+                          return ({}, name)
+                  print(f"  {method} {path} via {name}: HTTP {code or '?'} {raw[:150]}")
+              return (None, None)
+
+          # 1. Failing spec titles from the per-shard Playwright JSON reports.
+          def walk(suite, out):
+              for spec in suite.get("specs", []):
+                  if not spec.get("ok", True):
+                      f, t = spec.get("file", ""), spec.get("title", "")
+                      out.append(f"{f} › {t}" if f else t)
+              for child in suite.get("suites", []):
+                  walk(child, out)
+          failing, parsed_any = [], False
+          for path in sorted(glob.glob("/tmp/e2e-full-logs/results-shard-*.json")):
+              try:
+                  with open(path) as fh:
+                      report = json.load(fh)
+                  parsed_any = True
+                  for suite in report.get("suites", []):
+                      walk(suite, failing)
+              except Exception as e:
+                  print(f"warn: could not parse {path}: {e}")
+          seen = set()
+          failing = [s for s in failing if not (s in seen or seen.add(s))]
+
+          # 2. Last-green e2e-full head_sha via the Forgejo actions API (newest-first).
+          last_green = None
+          data, _ = call("GET", "/actions/tasks?limit=50")
+          if isinstance(data, dict):
+              for t in data.get("workflow_runs", data.get("tasks", [])):
+                  if t.get("name") == "e2e-full" and t.get("status") == "success" and t.get("head_sha"):
+                      last_green = t["head_sha"]
+                      break
+          if last_green is None:
+              print("last-green: unresolved (actions read failed or no prior green) — using recent commits")
+
+          # 3. Suspect commits.
+          def git(*args):
+              return subprocess.run(["git", *args], capture_output=True, text=True)
+          suspects, range_desc = "", ""
+          if last_green:
+              r = git("log", f"{last_green}..HEAD", "--oneline", "-n", "40")
+              if r.returncode == 0:
+                  suspects = r.stdout.strip() or "(no commits since last green — likely flake/infra, not a code regression)"
+                  range_desc = f"`{last_green[:12]}..{sha[:12]}` (since last green e2e-full)"
+          if not suspects:
+              r = git("log", "--oneline", "-n", "15")
+              suspects = r.stdout.strip() or "(git history unavailable)"
+              range_desc = "most recent 15 commits (no last-green reference resolved)"
+
+          # 4. Compose + file/update the rolling issue.
+          if failing:
+              specs_block = "\n".join(f"- `{s}`" for s in failing[:50])
+              if len(failing) > 50:
+                  specs_block += f"\n- …and {len(failing) - 50} more"
+              specs_hdr = f"**Failing specs ({len(failing)}):**"
+          elif parsed_any:
+              specs_block = "_(report parsed, no failing spec recorded — likely an infra/setup step failed before/after the suite; see run logs)_"
+              specs_hdr = "**Failing specs:**"
+          else:
+              specs_block = "_(no report artifact to parse — the run likely died before the suite; see run logs)_"
+              specs_hdr = "**Failing specs:**"
+          body = (
+              f"{MARKER}\n\n"
+              f"\U0001f534 **e2e-full is red** — run [#{run_number}]({run_url}) · trigger `{event}` · ref `{ref}`\n\n"
+              f"**Commit:** `{sha[:12]}`\n\n"
+              f"{specs_hdr}\n{specs_block}\n\n"
+              f"**Suspect commits** — {range_desc}:\n```\n{suspects}\n```\n\n"
+              f"_Auto-filed by e2e-full.yml `notify-failure` (#1622). Full report artifact: `e2e-full-logs-{run_id}`. "
+              f"Fix forward, then re-run e2e-full — this issue auto-updates on the next red._"
+          )
+          # Find the existing rolling issue (best-effort — if the list read fails,
+          # fall through to creating a fresh one rather than crashing).
+          issues, _ = call("GET", "/issues?state=open&type=issues&limit=50")
+          existing = None
+          if isinstance(issues, list):
+              existing = next((i["number"] for i in issues if MARKER in (i.get("body") or "")), None)
+          if existing:
+              res, name = call("POST", f"/issues/{existing}/comments", {"body": body})
+              action = f"commented on existing issue #{existing}"
+          else:
+              res, name = call("POST", "/issues", {"title": "\U0001f534 e2e-full is red", "body": body})
+              action = f"filed a new issue #{res.get('number')}" if isinstance(res, dict) else "create failed"
+          if res is not None:
+              print(f"notify-failure: {action} (via {name})")
+          else:
+              print("ERROR: could not post the e2e-full-red issue with any available token.\n"
+                    "----- intended issue body -----\n" + body)
+              raise SystemExit(1)
+          PY
