@@ -34,27 +34,34 @@ on:
     # the default branch's copy of this file, so the cron is observable only after
     # merge (a branch prove uses workflow_dispatch). Hour = Aaron's call (#1620).
     - cron: "0 19 * * *"
-  # NOTE: no `pull_request` trigger. The Forgejo runner shares a memory-capped
-  # OrbStack VM with an unrelated container stack, so running this heavy suite
-  # (mariadb service + builds + Chromium × shards) concurrently with ci.yml on
-  # every push starved the VM — the CI MariaDB got killed mid-seed
-  # (PROTOCOL_CONNECTION_LOST) and the RAM-backed /workspace tmpfs hit ENOSPC.
-  # This suite runs nightly (via nightly-deploy.yml's workflow_call deploy gate)
-  # and on demand (workflow_dispatch) when the runner isn't contended. To prove
-  # a harness/spec change before merge, dispatch this workflow manually rather
-  # than relying on a per-PR run. (#1141)
+  # #1623 — opt-in `run-e2e-full` PR label. Historically this suite had NO
+  # pull_request trigger (running the heavy suite on every PR starved the shared
+  # OrbStack VM — MariaDB killed mid-seed, /workspace tmpfs ENOSPC). It still
+  # never runs on an unlabeled PR: the `e2e-full` job's `if:` below skips unless
+  # the PR carries `run-e2e-full`, so an unlabeled PR only pays a no-op job
+  # evaluation. This job-level `if:` is used deliberately instead of an `if:` on a
+  # reusable-workflow (`uses:`) job — Forgejo does NOT honor the latter (it ran
+  # the suite anyway on the first #1623 attempt). Label the PR for combat-core /
+  # maps / server-authoritative / broadcast-shape changes + multi-ticket batches.
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
 
-# #1622 — serialize every e2e-full entry point (nightly workflow_call, the
-# midday cron above, manual dispatch, and the future run-e2e-full label #1623)
-# onto one queue so two heavy suites never stack on the shared OrbStack VM. NO
-# cancel-in-progress: an in-flight deploy-gate run must finish, not be killed by
-# a later cron/dispatch.
+# Serialize every HEAVY e2e-full run — nightly workflow_call, the midday cron,
+# manual dispatch, and a LABELED run-e2e-full PR — onto one `e2e-full` queue so
+# two suites never stack on the shared VM (#1622; no cancel — an in-flight deploy
+# gate must finish). An UNLABELED PR only evaluates the skip-gate, so it gets a
+# unique per-ref group — it must never queue behind a 50-min nightly just to skip
+# (#1623).
 concurrency:
-  group: e2e-full
+  group: ${{ github.event_name == 'pull_request' && !contains(github.event.pull_request.labels.*.name, 'run-e2e-full') && format('e2e-full-skip-{0}', github.ref) || 'e2e-full' }}
   cancel-in-progress: false
 
 jobs:
   e2e-full:
+    # #1623 — on a PR, run ONLY when the run-e2e-full label is present. Every
+    # non-PR trigger (nightly workflow_call, midday cron, manual dispatch) has
+    # github.event_name != 'pull_request', so those always run.
+    if: ${{ github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'run-e2e-full') }}
     runs-on: ubuntu-latest
     timeout-minutes: 75 # #1263 — entire suite (3 shards, 2 Vite restarts); ~40-60 min typical
     env:
@@ -405,7 +412,11 @@ jobs:
   # log_in_storage=0). Reuses the notify-main-red rolling-issue pattern (ci.yml).
   notify-failure:
     needs: e2e-full
-    if: always() && needs.e2e-full.result == 'failure'
+    # Skip on PR-triggered runs (the run-e2e-full label, #1623): the author sees
+    # the failing check directly, and the rolling issue is for the nightly/midday
+    # gate — commenting it for a PR would conflate signals and the suspect list
+    # (last-green..PR-head) would include unmerged commits.
+    if: always() && needs.e2e-full.result == 'failure' && github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     # github.token needs these to read prior runs (last-green) + file the rolling
