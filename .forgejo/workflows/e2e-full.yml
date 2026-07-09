@@ -412,11 +412,15 @@ jobs:
   # log_in_storage=0). Reuses the notify-main-red rolling-issue pattern (ci.yml).
   notify-failure:
     needs: e2e-full
-    # Skip on PR-triggered runs (the run-e2e-full label, #1623): the author sees
-    # the failing check directly, and the rolling issue is for the nightly/midday
-    # gate — commenting it for a PR would conflate signals and the suspect list
-    # (last-green..PR-head) would include unmerged commits.
-    if: always() && needs.e2e-full.result == 'failure' && github.event_name != 'pull_request'
+    # The job itself must NEVER end "skipped": when this workflow runs as a
+    # workflow_call callee (nightly-deploy's e2e-full job), Forgejo folds a
+    # skipped callee job into the CALLER's aggregate as failure — a green suite
+    # read as red and silently blocked the deploy (2026-07-09, two nights
+    # running). So the job always runs and completes green; the real gates
+    # (only on failure; not on PR-triggered runs, #1623 — the author sees the
+    # failing check directly and the suspect list would include unmerged
+    # commits) live on every STEP below instead.
+    if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 10
     # github.token needs these to read prior runs (last-green) + file the rolling
@@ -429,11 +433,13 @@ jobs:
       actions: read
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        if: needs.e2e-full.result == 'failure' && github.event_name != 'pull_request'
         with:
           # git log <last-green>..HEAD needs the merge-base history.
           fetch-depth: 0
 
       - name: Download the e2e-full report artifact
+        if: needs.e2e-full.result == 'failure' && github.event_name != 'pull_request'
         # v4 unsupported on Forgejo's actions backend; pin v3 (see ci.yml).
         uses: actions/download-artifact@9bc31d5ccc31df68ecc42ccf4149144866c47d8a # v3.0.2
         continue-on-error: true # a crash before upload must not muzzle the notify
@@ -442,6 +448,7 @@ jobs:
           path: /tmp/e2e-full-logs
 
       - name: Comment the rolling "e2e-full is red" issue
+        if: needs.e2e-full.result == 'failure' && github.event_name != 'pull_request'
         env:
           GH_TOKEN: ${{ github.token }}
           FALLBACK_TOKEN: ${{ secrets.FORGEJO_TOKEN }}
