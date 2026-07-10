@@ -42,9 +42,10 @@ set -uo pipefail
 # To update: review `git diff` of .forgejo/workflows/ci.yml, confirm this
 # script still mirrors the `lint-typecheck` + `test` jobs (update the checks
 # below if they changed), then set this to the value preflight prints.
-# Reconciled 2026-07-06: only the mariadb service-image digest changed (#1627,
-# Renovate); lint-typecheck + test jobs untouched.
-EXPECTED_CI_HASH="fa8d28ec58a05f99ce146222a1be505d327835a38c179d175e44b69c1be34f6c"
+# Reconciled 2026-07-10 (#1654): notify-main-red switched from urllib to curl,
+# and lint-typecheck gained a "Forbid urllib HTTP calls" gate — mirrored below
+# as check_no_urllib_http. The `test` job is untouched.
+EXPECTED_CI_HASH="88340fe93418455c9624e01004cd7d1c55251fb0dbff8ad8f246f37f3ce59221"
 
 # --- setup ------------------------------------------------------------------
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || {
@@ -167,6 +168,17 @@ check_no_bare_npx() {
   [ -z "$hits" ] || { echo "bare 'npx <bin>' found in a workflow:"; echo "$hits"; return 1; }
 }
 run_check "no bare npx in workflows" check_no_bare_npx
+
+# Mirrors ci.yml's "Forbid urllib HTTP calls in workflows" gate (#1654).
+# Pattern written `urllib[.]request` so this line doesn't match itself.
+check_no_urllib_http() {
+  local hits
+  hits=$(for f in .forgejo/workflows/*.yml; do
+    awk -F'#' -v fn="$f" '{print fn ":" NR ":" $1}' "$f"
+  done | grep -E 'urllib[.]request' || true)
+  [ -z "$hits" ] || { echo "workflow calls the Forgejo API via urllib (Cloudflare 403s it) — use curl:"; echo "$hits"; return 1; }
+}
+run_check "no urllib HTTP in workflows" check_no_urllib_http
 
 check_soft_delete_filters() {
   local fail=0 f

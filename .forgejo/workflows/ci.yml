@@ -93,6 +93,31 @@ jobs:
           fi
           echo "OK — no bare 'npx <bin>' in workflows"
 
+      - name: Forbid urllib HTTP calls in workflows (Cloudflare 403 guard)
+        run: |
+          # forge.example.com sits behind Cloudflare, which fingerprint-blocks
+          # Python's urllib HTTP client with a 403 "error code: 1010". A workflow
+          # that reaches for it to call the Forgejo API therefore ALWAYS fails —
+          # and, because these are notify/alert jobs that rarely fire, it fails
+          # silently for months (#1654: notify-main-red never filed a single
+          # alert). curl is the proven transport. urllib.parse (quoting, no I/O)
+          # is fine — this gate only matches the HTTP client.
+          #
+          # The pattern is written `urllib[.]request` so this step's own source
+          # line does not satisfy the regex it defines. `awk -F'#'` strips
+          # trailing comments first, so prose mentioning it above doesn't trip.
+          hits=$(for f in .forgejo/workflows/*.yml; do
+            awk -F'#' -v fn="$f" '{print fn ":" NR ":" $1}' "$f"
+          done | grep -E 'urllib[.]request' || true)
+          if [ -n "$hits" ]; then
+            echo "ERROR: a workflow calls the Forgejo API via Python urllib."
+            echo "  Cloudflare 403s it (error code: 1010) — the call can never succeed."
+            echo "  Use curl instead; see the 'call()' helper in notify-main-red (ci.yml)."
+            echo "$hits"
+            exit 1
+          fi
+          echo "OK — no urllib HTTP calls in workflows"
+
       - name: Enforce e2e specs are in a declared test tier (#1270)
         # Drift guard: every tests/e2e/*.spec.ts must be in the per-PR smoke list
         # (below) OR in tests/e2e/nightly-only.txt. A spec in neither runs in no
@@ -915,10 +940,15 @@ jobs:
       && (needs.lint-typecheck.result == 'failure'
           || needs.test.result == 'failure'
           || needs.smoke.result == 'failure')
+    # issues: write so github.token can serve as the fallback poster below.
+    permissions:
+      contents: read
+      issues: write
     steps:
       - name: Open or update the "main CI is red" issue
         env:
           FORGEJO_TOKEN: ${{ secrets.FORGEJO_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
           API_URL: ${{ github.api_url }}
           REPO: ${{ github.repository }}
           SERVER_URL: ${{ github.server_url }}
@@ -929,31 +959,68 @@ jobs:
           R_SMOKE: ${{ needs.smoke.result }}
         run: |
           python3 - <<'PY'
-          import os, json, urllib.request
-          api, repo, tok = os.environ["API_URL"], os.environ["REPO"], os.environ["FORGEJO_TOKEN"]
+          import os, json, subprocess
+          api, repo = os.environ["API_URL"], os.environ["REPO"]
           run_url = f'{os.environ["SERVER_URL"]}/{repo}/actions/runs/{os.environ["RUN_NUMBER"]}'
           failed = [n for n, r in (("lint-typecheck", os.environ["R_LINT"]),
                                    ("test", os.environ["R_TEST"]),
                                    ("smoke", os.environ["R_SMOKE"])) if r == "failure"]
           MARKER = "<!-- ci-main-red -->"
-          body = (f"{MARKER}\n\n🔴 **main CI is red** — run [#{os.environ['RUN_NUMBER']}]({run_url})\n\n"
+          body = (f"{MARKER}\n\n\U0001f534 **main CI is red** — run [#{os.environ['RUN_NUMBER']}]({run_url})\n\n"
                   f"- Commit: `{os.environ['SHA'][:12]}`\n- Failed job(s): {', '.join(failed) or 'unknown'}\n\n"
                   "_Auto-filed by ci.yml `notify-main-red` (#1270). npm audit is advisory on main, "
                   "so this also flags a fresh-advisory regression that did not block the merge._")
-          def req(method, path, payload):
-              r = urllib.request.Request(f"{api}/repos/{repo}{path}", method=method,
-                                         data=json.dumps(payload).encode(),
-                                         headers={"Authorization": f"token {tok}", "Content-Type": "application/json"})
-              return urllib.request.urlopen(r, timeout=30)
+
+          # HTTP via curl, NOT urllib (#1654): forge.example.com is behind
+          # Cloudflare, which fingerprint-blocks Python-urllib with a 403
+          # "error code: 1010" — so every call here raised and the alert was
+          # never filed on the one day it mattered. curl passes, which is why
+          # the other CI API callers (label-merged-issues, diff-coverage,
+          # e2e-full's notify-failure) use it. The full-scope PAT is tried
+          # first; github.token is a fallback (scoped by `permissions` above).
+          TOKENS = [("secrets.FORGEJO_TOKEN", os.environ.get("FORGEJO_TOKEN", "")),
+                    ("github.token", os.environ.get("GH_TOKEN", ""))]
+          TOKENS = [(n, t) for n, t in TOKENS if t]
+          print(f"api_url={api} repo={repo} tokens available: {[n for n, _ in TOKENS]}")
+
+          def call(method, path, payload=None):
+              # Try each token; return (parsed_json_or_{}, token_name) on 2xx, else (None, None).
+              for name, tok in TOKENS:
+                  cmd = ["curl", "-sS", "-X", method,
+                         "-H", f"Authorization: token {tok}",
+                         "-H", "Content-Type: application/json",
+                         "-w", "\n%{http_code}", f"{api}/repos/{repo}{path}"]
+                  if payload is not None:
+                      cmd += ["--data", json.dumps(payload)]
+                  r = subprocess.run(cmd, capture_output=True, text=True)
+                  out = r.stdout
+                  nl = out.rfind("\n")
+                  code, raw = (out[nl + 1:].strip(), out[:nl]) if nl >= 0 else (out.strip(), "")
+                  if code.startswith("2"):
+                      try:
+                          return (json.loads(raw) if raw.strip() else {}, name)
+                      except Exception:
+                          return ({}, name)
+                  print(f"  {method} {path} via {name}: HTTP {code or '?'} {raw[:150]}")
+              return (None, None)
+
           # Find an existing open issue carrying the marker → comment; else create.
-          q = urllib.request.Request(f"{api}/repos/{repo}/issues?state=open&type=issues&limit=50",
-                                     headers={"Authorization": f"token {tok}"})
-          issues = json.load(urllib.request.urlopen(q, timeout=30))
-          existing = next((i["number"] for i in issues if MARKER in (i.get("body") or "")), None)
+          # Best-effort read: if the list call fails, fall through to creating a
+          # fresh issue rather than crashing with no alert at all.
+          issues, _ = call("GET", "/issues?state=open&type=issues&limit=50")
+          existing = None
+          if isinstance(issues, list):
+              existing = next((i["number"] for i in issues if MARKER in (i.get("body") or "")), None)
           if existing:
-              req("POST", f"/issues/{existing}/comments", {"body": body})
-              print(f"Commented on existing red-main issue #{existing}")
+              res, name = call("POST", f"/issues/{existing}/comments", {"body": body})
+              action = f"commented on existing red-main issue #{existing}"
           else:
-              req("POST", "/issues", {"title": "🔴 main CI is red", "body": body})
-              print("Filed a new red-main issue")
+              res, name = call("POST", "/issues", {"title": "\U0001f534 main CI is red", "body": body})
+              action = f"filed a new red-main issue #{res.get('number')}" if isinstance(res, dict) else "create failed"
+          if res is not None:
+              print(f"notify-main-red: {action} (via {name})")
+          else:
+              print("ERROR: could not post the main-red issue with any available token.\n"
+                    "----- intended issue body -----\n" + body)
+              raise SystemExit(1)
           PY
