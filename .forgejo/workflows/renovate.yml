@@ -65,7 +65,25 @@ jobs:
           # Empty on the scheduled run (no input) → real run; 'full' when the
           # manual-dispatch dryRun box is checked → log-only, no writes.
           RENOVATE_DRY_RUN: ${{ inputs.dryRun && 'full' || '' }}
+          # binarySource=global — use the npm already on PATH (setup-node above),
+          # NOT Renovate's default 'install' (#1632). The default assumes a
+          # Containerbase image where Renovate downloads/provisions its own npm at
+          # runtime; this is a plain `npx renovate` on a setup-node runner, so on
+          # a lockfile rebuild that needs a fresh registry resolution the
+          # runtime-provisioned npm failed ("Artifact file update failure"),
+          # leaving a sub-workspace package.json out of sync with its lockfile and
+          # cascading `npm ci` across every job. The metadata phase uses
+          # Renovate's own HTTP client, which is why version *detection* worked
+          # while only the lockfile *artifact* step failed. See #1628 (first hit).
+          RENOVATE_BINARY_SOURCE: global
           LOG_LEVEL: info
+          # Full debug log to a file (#1632) — stdout stays at info (readable),
+          # but the artifact step below captures a complete debug ndjson so the
+          # next artifact failure is self-diagnosing even if Forgejo's flaky
+          # post-run log archival (log_in_storage) drops the run log.
+          LOG_FILE: /tmp/renovate-log.ndjson
+          LOG_FILE_LEVEL: debug
+          LOG_FILE_FORMAT: json
         # Renovate clones the repo itself and reads /renovate.json as the repo
         # config — no checkout step needed. Skips cleanly when the token is unset.
         run: |
@@ -77,3 +95,16 @@ jobs:
             echo "::notice::Dry-run mode — computing updates, creating NO branches/PRs/issues."
           fi
           npx --yes renovate
+
+      - name: Upload Renovate debug log
+        # if: always() so a failed/partial run still yields the log that explains
+        # it. if-no-files-found: ignore covers the token-unset early-exit (no log
+        # written). Pinned v3.2.1 — v4 is unsupported on Forgejo's actions backend
+        # (see ci.yml / e2e-full.yml).
+        if: always()
+        uses: actions/upload-artifact@ff15f0306b3f739f7b6fd43fb5d26cd321bd4de5 # v3.2.1
+        with:
+          name: renovate-log-${{ github.run_id }}
+          path: /tmp/renovate-log.ndjson
+          if-no-files-found: ignore
+          retention-days: 30
