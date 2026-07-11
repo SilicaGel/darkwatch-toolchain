@@ -45,7 +45,7 @@ set -uo pipefail
 # Reconciled 2026-07-10 (#1654): notify-main-red switched from urllib to curl,
 # and lint-typecheck gained a "Forbid urllib HTTP calls" gate — mirrored below
 # as check_no_urllib_http. The `test` job is untouched.
-EXPECTED_CI_HASH="88340fe93418455c9624e01004cd7d1c55251fb0dbff8ad8f246f37f3ce59221"
+EXPECTED_CI_HASH="8cb55530219ff2b8351c3af3c2ab5dcc8fb31a7eecdb13549371a5de0f60cd56"
 
 # --- setup ------------------------------------------------------------------
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || {

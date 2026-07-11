@@ -768,6 +768,7 @@ jobs:
             e2e/rest-button.spec.ts \
             e2e/spell-exhaustion.spec.ts \
             e2e/theme-contrast.spec.ts \
+            e2e/773-help-page.spec.ts \
             $EXTRA_SPECS \
             --reporter=line
 

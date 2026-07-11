@@ -90,9 +90,19 @@ Run these in order. **Tell each sub-skill to skip its commit step** — ship han
    ```
 
    The `/update-brochure` skill will spin up its own isolated server/client on dedicated ports (see its SKILL.md), so this step is safe to run alongside other dev servers. Skip its commit — ship handles the coordinated commit.
-6. **Roadmap** — do NOT update by default. `ROADMAP.md` is now thematic, not a ticket tracker — it tracks strategic direction only. Only invoke `update-roadmap` if a theme has meaningfully shifted (new milestone starting / closing, longer-term idea promoted to active, strategic pivot). Per-ticket progress lives in Forgejo and the changelog.
+6. **Update the help page** — use the `update-help` skill if the diff touches any client path. Same check as the brochure minus `site/`:
 
-7. **Update the feature inventory** — the drift guard (`#856`,
+   ```bash
+   if git diff main...HEAD --name-only | grep -qE '^(client/src/|client/public/)'; then
+     # Invoke /update-help — skip its commit
+   fi
+   ```
+
+   Text-only edits to `client/src/pages/help/` — no servers or captures needed, so it's cheap to run. Skip its commit — ship handles the coordinated commit.
+
+7. **Roadmap** — do NOT update by default. `ROADMAP.md` is now thematic, not a ticket tracker — it tracks strategic direction only. Only invoke `update-roadmap` if a theme has meaningfully shifted (new milestone starting / closing, longer-term idea promoted to active, strategic pivot). Per-ticket progress lives in Forgejo and the changelog.
+
+8. **Update the feature inventory** — the drift guard (`#856`,
    `scripts/check-feature-inventory.mjs`) is now the source of truth; this step
    reacts to it and adds the one thing it can't check (row honesty).
 
@@ -123,7 +133,7 @@ Run these in order. **Tell each sub-skill to skip its commit step** — ship han
    Removals/renames: if a feature was deleted or moved, edit the corresponding
    row(s) in the same pass. The inventory is a living artifact, not a contract.
 
-8. **Recommend the `run-visual` label when the diff has visual risk but no CSS
+9. **Recommend the `run-visual` label when the diff has visual risk but no CSS
    change (#1494).** The per-PR visual-regression gate
    (`.forgejo/workflows/visual-regression.yml`) auto-runs on PRs that change
    `client/src/**/*.css`. But a PR can move rendered pixels *without* touching a
@@ -380,7 +390,7 @@ curl -s -X POST \
   "https://forge.example.com/api/v1/repos/aaron/darkwatch/issues/N/labels"
 ```
 
-If the user said **yes** to the `run-visual` prompt in Step 2 item 8, also apply
+If the user said **yes** to the `run-visual` prompt in Step 2 item 9, also apply
 that label to the **PR** (PRs are issues in the Forgejo API, so the same endpoint
 with the PR number works). Look the id up by name so a re-numbered label still
 resolves:
