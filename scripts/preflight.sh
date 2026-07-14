@@ -42,10 +42,11 @@ set -uo pipefail
 # To update: review `git diff` of .forgejo/workflows/ci.yml, confirm this
 # script still mirrors the `lint-typecheck` + `test` jobs (update the checks
 # below if they changed), then set this to the value preflight prints.
-# Reconciled 2026-07-10 (#1654): notify-main-red switched from urllib to curl,
-# and lint-typecheck gained a "Forbid urllib HTTP calls" gate — mirrored below
-# as check_no_urllib_http. The `test` job is untouched.
-EXPECTED_CI_HASH="8cb55530219ff2b8351c3af3c2ab5dcc8fb31a7eecdb13549371a5de0f60cd56"
+# Reconciled 2026-07-14 (#1360/#1701): the smoke job's spec list gained
+# e2e/1360-undo-revert.spec.ts — smoke isn't mirrored here, so no check
+# changes; hash bump is the acknowledgement. (Previously reconciled
+# 2026-07-10, #1654: urllib→curl + check_no_urllib_http.)
+EXPECTED_CI_HASH="b9750fbc70eaff76a2396dec9517bb317ff596c323064f659254ccece4f2bef9"
 
 # --- setup ------------------------------------------------------------------
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || {
