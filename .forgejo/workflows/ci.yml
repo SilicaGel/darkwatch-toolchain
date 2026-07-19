@@ -247,6 +247,14 @@ jobs:
           PR_TITLE: ${{ github.event.pull_request.title }}
         run: node scripts/check-ruleset-boundary.mjs
 
+      # #1736 — War Table styles consume --wt-* tokens only; the ONLY files
+      # allowed to hold raw color literals are the theme-definition files
+      # wt-theme-*.css (spec §18.2). Scans WT consumer styles (wt-tokens.css,
+      # wartable.css, pages/wartable/**/*.module.css) and fails on any
+      # hex/rgb/hsl literal outside the allowlist.
+      - name: WT no-raw-color guard (#1736)
+        run: node scripts/check-wt-raw-colors.mjs
+
       # #1290 — ESLint as a real gate. Until now lint only ran in the
       # bypassable lint-staged pre-commit hook (eslint --fix on staged files),
       # so rules-of-hooks / e2e-click-discipline were never enforced

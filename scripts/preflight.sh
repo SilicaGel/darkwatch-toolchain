@@ -42,11 +42,11 @@ set -uo pipefail
 # To update: review `git diff` of .forgejo/workflows/ci.yml, confirm this
 # script still mirrors the `lint-typecheck` + `test` jobs (update the checks
 # below if they changed), then set this to the value preflight prints.
-# Reconciled 2026-07-14 (#1360/#1701): the smoke job's spec list gained
-# e2e/1360-undo-revert.spec.ts — smoke isn't mirrored here, so no check
-# changes; hash bump is the acknowledgement. (Previously reconciled
-# 2026-07-10, #1654: urllib→curl + check_no_urllib_http.)
-EXPECTED_CI_HASH="b9750fbc70eaff76a2396dec9517bb317ff596c323064f659254ccece4f2bef9"
+# Reconciled 2026-07-19 (#1736 Task 4): lint-typecheck gained the WT
+# no-raw-color guard step (check-wt-raw-colors.mjs), mirrored here as the
+# "WT raw colors" check — both sides updated, hash bump acknowledges.
+# (Previously reconciled 2026-07-14, #1360/#1701: smoke spec list.)
+EXPECTED_CI_HASH="2135b06c2be860faa4eb0356e94a856153f683f924857a3b41c8db58eb2f7f06"
 
 # --- setup ------------------------------------------------------------------
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || {
@@ -320,6 +320,14 @@ run_check "import cycles (madge)" npm run cycles
 # blocking gate (via run_check) — any new hardcoded size fails preflight.
 echo "${BOLD}hardcoded sizes (#1089)${RESET}"
 run_check "hardcoded sizes" node scripts/check-hardcoded-sizes.mjs
+
+# --- 8. WT no-raw-color guard (blocking, #1736) -----------------------------
+# WT styles consume --wt-* tokens only; the ONLY files allowed to hold raw
+# color literals are the theme-definition files wt-theme-*.css (spec §18.2).
+# Scans WT consumer styles (wt-tokens.css, wartable.css, pages/wartable/**)
+# and fails on any hex/rgb/hsl literal outside the allowlisted theme files.
+echo "${BOLD}WT raw colors (#1736)${RESET}"
+run_check "WT raw colors" node scripts/check-wt-raw-colors.mjs
 
 # --- summary ----------------------------------------------------------------
 echo
