@@ -78,7 +78,30 @@ function rangeSize(r) {
   return (r.end.line - r.start.line) * 100000 + (r.end.column - r.start.column);
 }
 
-export function classifyFile(entry, changedLines) {
+// A blank or comment-only CHANGED line can sit *inside* a covered compound
+// statement's span (e.g. a comment between two executed lines of an `if` body).
+// The narrowest matching statement is then the covered wrapper, so the line is
+// wrongly counted as "covered" and inflates diff coverage (#1660). When source
+// text is available we classify such lines `irrelevant` BEFORE any span match.
+//
+// Conservative on purpose: a false positive on a real UNCOVERED line would
+// re-inflate coverage (fail-open); a false positive on a real COVERED line
+// would block good PRs (fail-closed). We only strip lines that are
+// unambiguously non-code and never run a stateful multi-line /* */ scanner
+// (strings/regex/template literals can fool it).
+const NON_EXEC_LINE_RES = [
+  /^\s*$/, // blank
+  /^\s*\/\//, // line comment
+  /^\s*\/\*.*\*\/\s*$/, // single-line block comment
+  /^\s*\*/, // JSDoc / block-comment continuation
+];
+
+function isNonExecutableLine(text) {
+  if (text == null) return false;
+  return NON_EXEC_LINE_RES.some((re) => re.test(text));
+}
+
+export function classifyFile(entry, changedLines, sourceLines = null) {
   const result = {
     covered: [],
     uncovered: [],
@@ -94,6 +117,13 @@ export function classifyFile(entry, changedLines) {
     hits: entry.s[k] || 0,
   }));
   for (const line of changedLines) {
+    // Strip blank/comment-only changed lines up front so they can't inherit a
+    // covered wrapper statement's hits. Only when source text is available —
+    // a missing file must never fail closed.
+    if (sourceLines && isNonExecutableLine(sourceLines[line - 1])) {
+      result.irrelevant.push(line);
+      continue;
+    }
     const matching = stmts.filter((s) => s.range.start.line <= line && line <= s.range.end.line);
     if (matching.length === 0) {
       result.irrelevant.push(line);
@@ -144,9 +174,9 @@ export function fmtRange([a, b]) {
 //   "U"   — covered by unit only
 //   "I"   — covered by integration only
 //   blank — uncovered in both (appears in `uncovered`)
-export function classifyFileDual(entryUnit, entryInt, changedLines) {
-  const unitResult = classifyFile(entryUnit, changedLines);
-  const intResult = classifyFile(entryInt, changedLines);
+export function classifyFileDual(entryUnit, entryInt, changedLines, sourceLines = null) {
+  const unitResult = classifyFile(entryUnit, changedLines, sourceLines);
+  const intResult = classifyFile(entryInt, changedLines, sourceLines);
 
   const coveredU = new Set(unitResult.covered);
   const coveredI = new Set(intResult.covered);
@@ -523,15 +553,20 @@ export function buildComment({
   for (const [path, lineSet] of changed) {
     let c;
     let coverageEntry = null;
+    // Read source up front so classifyFile can strip blank/comment-only changed
+    // lines before span-matching (#1660). Missing file → null → no stripping
+    // (never fail closed).
+    const src = readSource(path);
+    const sourceLines = src != null ? src.split("\n") : null;
     if (dualMode) {
       const entryUnit = coverageByPathUnit.get(path) ?? null;
       const entryInt = coverageByPathInt.get(path) ?? null;
-      c = classifyFileDual(entryUnit, entryInt, [...lineSet]);
+      c = classifyFileDual(entryUnit, entryInt, [...lineSet], sourceLines);
       // Use unit entry for context line classification; fall back to int.
       coverageEntry = entryUnit ?? entryInt;
     } else {
       const entry = coverageByPath.get(path) ?? null;
-      c = classifyFile(entry, [...lineSet]);
+      c = classifyFile(entry, [...lineSet], sourceLines);
       coverageEntry = entry;
     }
     files.push({ path, ...c, coverageEntry });

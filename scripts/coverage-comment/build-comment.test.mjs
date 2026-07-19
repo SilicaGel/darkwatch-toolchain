@@ -119,6 +119,37 @@ describe("classifyFile", () => {
     const r = classifyFile(e, [5]);
     assert.deepEqual(r.uncovered, [5]);
   });
+
+  // ── #1660: blank/comment-only changed lines inside a covered wrapper span ──
+  it("strips blank + comment-only changed lines inside a covered span as irrelevant", () => {
+    // One wide covered statement spans lines 10-14 (hits=1). Lines 11 (comment)
+    // and 12 (blank) sit inside it — without source stripping they'd inherit
+    // the wrapper's hits and be wrongly "covered".
+    const e = entry([[stmt(10, 0, 14, 1), 1]]);
+    const src = Array(14).fill("  doThing();");
+    src[10] = "  // a comment"; // line 11
+    src[11] = ""; // line 12 (blank)
+    const r = classifyFile(e, [10, 11, 12, 13, 14], src);
+    assert.deepEqual(r.irrelevant, [11, 12]);
+    assert.deepEqual(r.covered, [10, 13, 14]);
+    assert.equal(r.uncovered.length, 0);
+  });
+
+  it("fail-closed guard: a real executable line adjacent to comments stays covered", () => {
+    const e = entry([[stmt(4, 0, 6, 1), 1]]);
+    const src = ["", "", "", "  // above", "  doThing();", "  // below"];
+    const r = classifyFile(e, [4, 5, 6], src);
+    // Only the comment lines are stripped; the real code line stays covered.
+    assert.deepEqual(r.covered, [5]);
+    assert.deepEqual(r.irrelevant, [4, 6]);
+  });
+
+  it("does not strip anything when no source is provided (never fail closed)", () => {
+    const e = entry([[stmt(10, 0, 14, 1), 1]]);
+    const r = classifyFile(e, [10, 11, 12]);
+    assert.deepEqual(r.covered, [10, 11, 12]);
+    assert.equal(r.irrelevant.length, 0);
+  });
 });
 
 // ── toRanges / fmtRange ────────────────────────────────────────────────────
@@ -465,5 +496,22 @@ describe("buildComment", () => {
     assert.doesNotMatch(md, /Missing: \*\*L/);
     // But should still show uncovered lines in the diff snippet
     assert.match(md, /line2/);
+  });
+
+  it("#1660: comment-only changed lines inside a covered span report no testable lines (not 100%)", () => {
+    // Diff adds lines 1-2, both comments. A single wide covered statement spans
+    // lines 1-3 (hits=1). Without source stripping the two comment lines inherit
+    // the wrapper's hits → wrongly reported as 100% covered.
+    const diff = ["+++ b/src/a.ts", "@@ -0,0 +1,2 @@"].join("\n");
+    const coverage = new Map([["src/a.ts", entry([[stmt(1, 0, 3, 1), 1]])]]);
+    const md = buildComment({
+      diffText: diff,
+      coverageByPath: coverage,
+      readSource: () => "// comment one\n// comment two\ncode();\n",
+      ...baseOpts,
+    });
+    assert.match(md, /No testable lines changed/);
+    assert.match(md, /non-executable/);
+    assert.doesNotMatch(md, /Diff coverage: 100/);
   });
 });
