@@ -1,13 +1,39 @@
 ---
 name: ship
 description: Use when a development branch is ready to merge — the user invokes `/ship`, says "ship it", "ship this branch", or "open the PR". Handles the full docs + PR housekeeping for this repo; read the body before acting, the PR-body protocol has hard rules.
-version: 1.0.0
-last_changed: 2026-07-05
+version: 1.1.0
+last_changed: 2026-07-20
 ---
 
 # ship
 
 Use this skill when a development branch is ready to merge. It handles all the housekeeping and opens a PR.
+
+## Model economy (2026-07-20, Aaron's directive)
+
+When the session is running on a premium model (Fable/Opus tier), do NOT burn
+its tokens on the mechanical stretches of this skill — delegate them to a
+subagent on a cheaper model (`Agent` tool, `model: sonnet`; bump to `opus`
+only if a stretch needs real judgment):
+
+- **Delegate:** running preflight and reporting its tail; the brochure
+  *stack mechanics only* (server up/teardown, `npm ci`, re-running a capture
+  command verbatim); fixing mechanical CI failures (lint/prettier/lockfile)
+  in the watch loop; `back-to-main`-style cleanup after merge.
+- **Keep on the session model:** wording and judgment — changelog/handbook/
+  help copy, Ready-#N resolution, inventory row-honesty (Check 3), test-plan
+  drafting and the interactive confirm loop with the user, conflict
+  resolution decisions, and **brochure capture content review** (Aaron,
+  2026-07-20): deciding what state to frame and whether the PNG actually
+  shows the right content/information is judgment work — a capture that
+  "succeeds" can still frame the wrong thing (e.g. a recap modal hijacking a
+  layout shot). The session model writes the capture function and reviews
+  every PNG; only the mechanical server/re-run steps are delegable.
+
+The bash scripts themselves (`preflight.sh`, `ci-watch.sh`, `screenshots.js`)
+cost no model tokens while running — the savings come from not narrating
+their orchestration on the expensive model. A delegated stretch returns only
+its outcome line(s) to the coordinator.
 
 ## Step 0: Confirm the branch
 

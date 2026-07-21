@@ -8,6 +8,9 @@
 #   scripts/regen-visual-baselines.sh                 # regenerate all baselines
 #   scripts/regen-visual-baselines.sh --grep laser    # only tests matching /laser/
 #   scripts/regen-visual-baselines.sh --image forge.example.com/aaron/darkwatch-ci-playwright:1.61.1
+#   scripts/regen-visual-baselines.sh --spec e2e/1736-wt-visual.spec.ts   # a different visual spec
+#     (--spec is the parameterization the 315/1736 WT visual spec headers call
+#     for: snapshots land in tests/<spec>-snapshots, default unchanged)
 #
 # Requires: Docker, and the CI image pulled locally. Uses an ISOLATED DB
 # (dw_visbase) on darkwatch-maria so the shared dev DB is untouched.
@@ -20,16 +23,18 @@ set -euo pipefail
 
 IMAGE="forge.example.com/aaron/darkwatch-ci-playwright:1.61.1"
 GREP=""
+SPEC="e2e/visual-regression.spec.ts"
 while [ $# -gt 0 ]; do
   case "$1" in
     --image) IMAGE="$2"; shift 2 ;;
     --grep)  GREP="$2"; shift 2 ;;
+    --spec)  SPEC="$2"; shift 2 ;;
     *) echo "unknown arg: $1" >&2; exit 2 ;;
   esac
 done
 
 WT="$(git rev-parse --show-toplevel)"
-SNAP_REL="tests/e2e/visual-regression.spec.ts-snapshots"
+SNAP_REL="tests/${SPEC}-snapshots"
 [ -d "$WT/tests" ] || { echo "must run from inside the repo worktree" >&2; exit 1; }
 
 # Credentials come from the worktree's server/.env (dev values).
@@ -74,7 +79,7 @@ GREP_ARG=()
 # the default per-PR run only compares the 4-theme subset (DEFAULT_THEMES in the
 # spec) — otherwise a regen would silently leave 9 themes' baselines stale.
 E2E_SERVER_URL=http://localhost:3001 E2E_BASE_URL=http://localhost:5173 VISUAL_ALL_THEMES=1 \
-  ./node_modules/.bin/playwright test e2e/visual-regression.spec.ts "\${GREP_ARG[@]}" --update-snapshots --reporter=line
+  ./node_modules/.bin/playwright test "\$SPEC" "\${GREP_ARG[@]}" --update-snapshots --reporter=line
 echo REGEN_OK
 EOF
 
@@ -82,7 +87,7 @@ echo "==> running CI image to regenerate baselines"
 docker run --rm -v "$SRC":/work -w /work \
   --add-host=host.docker.internal:host-gateway \
   -e PLAYWRIGHT_BROWSERS_PATH=/ms-playwright -e NODE_ENV=test -e PORT=3001 \
-  -e GREP="$GREP" \
+  -e GREP="$GREP" -e SPEC="$SPEC" \
   -e DB_HOST=host.docker.internal -e DB_PORT=3397 \
   -e DB_USER="$DB_USER" -e DB_PASSWORD="$DB_PASSWORD" -e DB_NAME="$DBNAME" \
   -e DATABASE_URL="mysql://$DB_USER:$DB_PASSWORD@host.docker.internal:3397/$DBNAME" \
