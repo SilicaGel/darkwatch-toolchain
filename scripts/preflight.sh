@@ -329,6 +329,15 @@ run_check "hardcoded sizes" node scripts/check-hardcoded-sizes.mjs
 echo "${BOLD}WT raw colors (#1736)${RESET}"
 run_check "WT raw colors" node scripts/check-wt-raw-colors.mjs
 
+# --- 9. WT type-floor guard (blocking, #1736 Phase 4 Task 4) ----------------
+# L7 legibility law (spec:33): every WT text size clears an >=11px absolute
+# floor. Scans the WT size-token contract (wt-tokens.css, wartable.css) and
+# fails on any --wt-*-size* custom property declared under 11px. Covers the
+# unguarded-global-sheet gap check-hardcoded-sizes.mjs leaves open (it only
+# scans *.module.css, never these two global sheets).
+echo "${BOLD}WT type floor (#1736)${RESET}"
+run_check "WT type floor" node scripts/check-wt-type-floor.mjs
+
 # --- summary ----------------------------------------------------------------
 echo
 echo "${BOLD}━━━ Summary ━━━${RESET}"
