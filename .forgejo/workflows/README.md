@@ -56,14 +56,17 @@ production MariaDB and are **separate** from the CI secrets above.
 
   The Forgejo runner's `capacity` is set to 3 so the three primary jobs run
   concurrently rather than serialising on one slot.
-- **`e2e-full.yml`** — runs nightly at 03:00 UTC (via `nightly-deploy.yml`) and
-  on manual dispatch. Brings up the full app stack and runs the **entire**
-  Playwright E2E suite (no allow-list, sharded 3×). Heavier than CI; isolated to
-  off-hours so the Pi4 runner isn't competing with daytime PR work. (#1270 removed
-  the old curated `e2e.yml`; e2e-full is the sole nightly Playwright gate.)
-- **`smoke-walk.yml`** — runs on every push to `main` (non-blocking,
-  `continue-on-error: true`). Starts the app in Vite dev mode and runs
-  `npm run smoke-walk` — an exploratory SPA walker that catches console errors,
-  4xx/5xx network responses, and React rendering drift that deterministic specs
-  don't cover. Failures upload `report.md` + screenshots as artifacts but do
-  NOT block deploys. See `tests/README.md` for details.
+- **`e2e-full.yml`** — `workflow_call` (from `nightly-deploy.yml`, which fires at
+  06:00 UTC), its own midday `schedule` at 19:00 UTC, and `workflow_dispatch`.
+  Brings up the full app stack and runs the **entire** Playwright E2E suite (no
+  allow-list, sharded 3×). Heavier than CI; the nightly slot is off-hours so the
+  Pi4 runner isn't competing with daytime PR work. (#1270 removed the old curated
+  `e2e.yml`; e2e-full is the sole nightly Playwright gate.)
+- **`smoke-walk.yml`** — **not** push-triggered: it runs only via `workflow_call`
+  (from `nightly-deploy.yml`) and `workflow_dispatch`. Starts the app in Vite dev
+  mode and runs `npm run smoke-walk` — an exploratory SPA walker that catches
+  console errors, 4xx/5xx network responses, and React rendering drift that
+  deterministic specs don't cover. It is a **hard deploy gate**: `nightly-deploy`'s
+  `deploy` job `needs: [e2e-full, smoke-walk]`, so a smoke-walk failure blocks the
+  nightly deploy (there is no `continue-on-error`). Runs upload `report.md` +
+  screenshots as artifacts either way. See `tests/README.md` for details.
