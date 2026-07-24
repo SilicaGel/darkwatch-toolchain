@@ -1,0 +1,26 @@
+{
+  "$comment": [
+    "Advisories that do NOT gate CI, with a written justification and a hard expiry.",
+    "Adding an entry here is a deliberate, reviewable act — never a silent suppression.",
+    "",
+    "Rules enforced by scripts/audit-gate.mjs:",
+    "  - An entry suppresses ONLY the named advisory in the named workspace.",
+    "  - Past `expires` the entry STOPS suppressing and the gate goes red, forcing a",
+    "    re-review. Bump the date only with a fresh justification.",
+    "  - An entry that no longer matches any advisory is reported as stale (warning),",
+    "    so cleanup is prompted once upstream ships a fix.",
+    "",
+    "Only ever allowlist something that is genuinely not exploitable in this app.",
+    "'It is inconvenient to upgrade' is not a justification."
+  ],
+  "allow": [
+    {
+      "ghsa": "GHSA-qwww-vcr4-c8h2",
+      "package": "react-router",
+      "workspaces": ["client"],
+      "issue": 1883,
+      "expires": "2026-10-31",
+      "reason": "RSC-mode-only CSRF bypass. Darkwatch is a Vite SPA using react-router in DECLARATIVE mode (BrowserRouter + Routes/Route); it does not use React Server Components. Verified no RSC surface exists in client/src: no unstable_RSC, createCallServer, RSCHydratedRouter, and no @vitejs/plugin-rsc dependency. The vulnerable code path is therefore unreachable in this application. No fix is available on the React 18 line: react-router 7.18.1 is the last 7.x and is in the vulnerable range, while every 8.x release requires React >=19.2.7. Clearing this properly means a React 18 -> 19 upgrade, tracked in the issue above."
+    }
+  ]
+}

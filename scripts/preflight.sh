@@ -42,11 +42,15 @@ set -uo pipefail
 # To update: review `git diff` of .forgejo/workflows/ci.yml, confirm this
 # script still mirrors the `lint-typecheck` + `test` jobs (update the checks
 # below if they changed), then set this to the value preflight prints.
-# Reconciled 2026-07-19 (#1736 Task 4): lint-typecheck gained the WT
-# no-raw-color guard step (check-wt-raw-colors.mjs), mirrored here as the
-# "WT raw colors" check — both sides updated, hash bump acknowledges.
+# Reconciled 2026-07-24 (#1883): the two "Security audit" steps now call
+# scripts/audit-gate.mjs (npm audit + a justified, expiring allowlist) instead
+# of `npm audit --audit-level=high` directly. Severity policy is unchanged.
+# Preflight deliberately does NOT mirror these steps — npm audit reads the LIVE
+# advisory feed, so mirroring it would make preflight non-deterministic and let
+# an unrelated upstream advisory block local work. CI remains the enforcer.
+# (Previously reconciled 2026-07-19, #1736 Task 4: WT no-raw-color guard.)
 # (Previously reconciled 2026-07-14, #1360/#1701: smoke spec list.)
-EXPECTED_CI_HASH="2135b06c2be860faa4eb0356e94a856153f683f924857a3b41c8db58eb2f7f06"
+EXPECTED_CI_HASH="202973932feba85786ee1eb02b7639df4ee29b1ad3c434cc5185bf57bd0b4e9f"
 
 # --- setup ------------------------------------------------------------------
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || {

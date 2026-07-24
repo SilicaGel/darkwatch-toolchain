@@ -162,18 +162,24 @@ jobs:
       # otherwise retro-fail an unrelated commit on main (the multer incident,
       # #1273) — green at PR time, red at merge time. On main we warn instead;
       # the `notify-main-red` job surfaces it and weekly Renovate patches it.
+      #
+      # #1883 — the gate now runs through `scripts/audit-gate.mjs`, which wraps
+      # `npm audit --json` and applies `scripts/audit-allowlist.json`. Rationale:
+      # `npm audit --audit-level=high` is all-or-nothing, so a single unfixable-
+      # but-UNREACHABLE advisory forces a choice between leaving every PR red and
+      # dropping the gate entirely. The wrapper narrows the exception to a named
+      # GHSA in a named workspace, with a written justification and a hard expiry
+      # (past it the gate goes red again, forcing re-review). Severity policy is
+      # unchanged: high + critical gate, moderate/low do not.
       - name: Security audit (server)
         run: |
-          cd server
-          if npm audit --audit-level=high; then exit 0; fi
+          if node scripts/audit-gate.mjs server; then exit 0; fi
           if [ "${{ github.event_name }}" = "pull_request" ]; then exit 1; fi
           echo "::warning::npm audit (server) found high-severity advisories — advisory on main (not blocking)."
 
-      # #413 — postcss moderate is known and does not gate.
       - name: Security audit (client)
         run: |
-          cd client
-          if npm audit --audit-level=high; then exit 0; fi
+          if node scripts/audit-gate.mjs client; then exit 0; fi
           if [ "${{ github.event_name }}" = "pull_request" ]; then exit 1; fi
           echo "::warning::npm audit (client) found high-severity advisories — advisory on main (not blocking)."
 
