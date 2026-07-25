@@ -50,7 +50,7 @@ set -uo pipefail
 # an unrelated upstream advisory block local work. CI remains the enforcer.
 # (Previously reconciled 2026-07-19, #1736 Task 4: WT no-raw-color guard.)
 # (Previously reconciled 2026-07-14, #1360/#1701: smoke spec list.)
-EXPECTED_CI_HASH="202973932feba85786ee1eb02b7639df4ee29b1ad3c434cc5185bf57bd0b4e9f"
+EXPECTED_CI_HASH="51810fe90d0f46fd2e2f5e61397964224dff8677d5e010aace59ee53407c7238"
 
 # --- setup ------------------------------------------------------------------
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || {

@@ -136,11 +136,13 @@ jobs:
           cd server && npm ci --no-audit --no-fund
           # npm bug #4828: platform-specific optional bindings can be skipped when
           # the runner's Node doesn't satisfy the package's engines field.
-          # Force-install the linux-arm64 rolldown binding if npm ci missed it.
-          if [ ! -d "node_modules/@rolldown/binding-linux-arm64-gnu" ]; then
-            VER=$(node -e "const l=JSON.parse(require('fs').readFileSync('package-lock.json','utf8')); console.log(l.packages['node_modules/@rolldown/binding-linux-arm64-gnu'].version)")
-            echo "Patching missing rolldown linux-arm64 binding @ $VER"
-            npm install --no-save --ignore-engines "@rolldown/binding-linux-arm64-gnu@$VER"
+          # Force-install the runner-arch rolldown binding if npm ci missed it
+          # (arch-aware since the x64 runner joined the arm64 fleet).
+          ROLLDOWN_ARCH=$(node -p "process.arch")
+          if [ ! -d "node_modules/@rolldown/binding-linux-${ROLLDOWN_ARCH}-gnu" ]; then
+            VER=$(node -e "const l=JSON.parse(require('fs').readFileSync('package-lock.json','utf8')); console.log(l.packages['node_modules/@rolldown/binding-linux-'+process.arch+'-gnu'].version)")
+            echo "Patching missing rolldown linux-${ROLLDOWN_ARCH} binding @ $VER"
+            npm install --no-save --ignore-engines "@rolldown/binding-linux-${ROLLDOWN_ARCH}-gnu@$VER"
           fi
 
       - name: Install client dependencies
@@ -351,10 +353,11 @@ jobs:
       - name: Install server dependencies
         run: |
           cd server && npm ci --no-audit --no-fund
-          if [ ! -d "node_modules/@rolldown/binding-linux-arm64-gnu" ]; then
-            VER=$(node -e "const l=JSON.parse(require('fs').readFileSync('package-lock.json','utf8')); console.log(l.packages['node_modules/@rolldown/binding-linux-arm64-gnu'].version)")
-            echo "Patching missing rolldown linux-arm64 binding @ $VER"
-            npm install --no-save --ignore-engines "@rolldown/binding-linux-arm64-gnu@$VER"
+          ROLLDOWN_ARCH=$(node -p "process.arch")
+          if [ ! -d "node_modules/@rolldown/binding-linux-${ROLLDOWN_ARCH}-gnu" ]; then
+            VER=$(node -e "const l=JSON.parse(require('fs').readFileSync('package-lock.json','utf8')); console.log(l.packages['node_modules/@rolldown/binding-linux-'+process.arch+'-gnu'].version)")
+            echo "Patching missing rolldown linux-${ROLLDOWN_ARCH} binding @ $VER"
+            npm install --no-save --ignore-engines "@rolldown/binding-linux-${ROLLDOWN_ARCH}-gnu@$VER"
           fi
 
       - name: Install client dependencies
@@ -557,10 +560,11 @@ jobs:
       - name: Install server dependencies
         run: |
           cd server && npm ci --no-audit --no-fund
-          if [ ! -d "node_modules/@rolldown/binding-linux-arm64-gnu" ]; then
-            VER=$(node -e "const l=JSON.parse(require('fs').readFileSync('package-lock.json','utf8')); console.log(l.packages['node_modules/@rolldown/binding-linux-arm64-gnu'].version)")
-            echo "Patching missing rolldown linux-arm64 binding @ $VER"
-            npm install --no-save --ignore-engines "@rolldown/binding-linux-arm64-gnu@$VER"
+          ROLLDOWN_ARCH=$(node -p "process.arch")
+          if [ ! -d "node_modules/@rolldown/binding-linux-${ROLLDOWN_ARCH}-gnu" ]; then
+            VER=$(node -e "const l=JSON.parse(require('fs').readFileSync('package-lock.json','utf8')); console.log(l.packages['node_modules/@rolldown/binding-linux-'+process.arch+'-gnu'].version)")
+            echo "Patching missing rolldown linux-${ROLLDOWN_ARCH} binding @ $VER"
+            npm install --no-save --ignore-engines "@rolldown/binding-linux-${ROLLDOWN_ARCH}-gnu@$VER"
           fi
 
       - name: Build server

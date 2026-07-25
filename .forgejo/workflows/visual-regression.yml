@@ -129,8 +129,12 @@ jobs:
           MINIO_ROOT_PASSWORD: darkwatch_minio_dev
           MINIO_BUCKET: darkwatch-images
         run: |
-          curl -sSL https://dl.min.io/server/minio/release/linux-amd64/minio -o /tmp/minio
-          curl -sSL https://dl.min.io/client/mc/release/linux-amd64/mc -o /tmp/mc
+          case "$(uname -m)" in
+            aarch64 | arm64) MINIO_ARCH=linux-arm64 ;;
+            *) MINIO_ARCH=linux-amd64 ;;
+          esac
+          curl -sSL "https://dl.min.io/server/minio/release/${MINIO_ARCH}/minio" -o /tmp/minio
+          curl -sSL "https://dl.min.io/client/mc/release/${MINIO_ARCH}/mc" -o /tmp/mc
           chmod +x /tmp/minio /tmp/mc
           mkdir -p /tmp/minio-data
           /tmp/minio server /tmp/minio-data >/tmp/minio.log 2>&1 &
