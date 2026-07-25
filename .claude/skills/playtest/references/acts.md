@@ -2,7 +2,9 @@
 
 Run all acts for a full playthrough, or the subset the user names (`/playtest combat themes`). Acts assume the driver is running and `gotchas.md` has been read. Screenshot prefix per act keeps `/tmp/playtest/` navigable (`01-`, `02-`, …). Every ☐ is an expected behavior: verify it explicitly and record ✅ / ❌ / ⚠️ (partial) with evidence.
 
-Acts marked **[fresh campaign]** run in a campaign created during Act 1. Acts marked **[demo campaign]** use "Demo Campaign (Shadowdark)" (Joe/Limpie/Brynn + seeded content).
+Acts marked **[fresh campaign]** run in a campaign created during Act 1. Acts marked **[demo campaign]** use "Demo Campaign (Shadowdark)" (Joe/Limpie/Brynn + seeded content). Acts 1–14 are written against the **Classic** layout; Act 15 is the War Table parity pass and Acts 16–19 cover surfaces no act reached before.
+
+> **Layout matters from Act 15 on.** The layout is per browser tab via `?layout=wartable` / `?layout=classic`, and changing it needs a REAL navigation — a soft nav keeps whatever the tab loaded with. There is no in-app toggle button. If you're testing WT, verify you're actually in it before recording a single ☐.
 
 ---
 
@@ -173,8 +175,74 @@ Context: 390×844, `hasTouch`, `isMobile`, iPhone UA. Tabs Sheet/Party/Map/Log. 
 - ☐ Tab bar opaque (content must not bleed through — ❌ 2026-06-12)
 - ☐ Nothing requires hover to discover
 
-## Act 15 — Wrap-up
+## Act 15 — War Table parity, side-by-side [demo campaign]
 
-Kill the driver. Write the dated report (structure in SKILL.md), including the **regression diff**: read the most recent `docs/playtests/*-playtest-report.md`, list each of its bugs as fixed/still-present/regressed, then new findings. Present proposed issues in batches; file via `/issue` only after the user reviews.
+**The layout is chosen per browser tab by the `?layout=wartable` URL param** (revert with `?layout=classic`), and switching REQUIRES a real navigation — a soft nav inside the tab keeps the layout it loaded with. There is no masthead toggle. Get this wrong and you'll "test WT" in Classic and see perfect parity that isn't there.
+
+Run **two contexts on the same campaign**: **A = Classic**, **B = War Table**. Do each action in ONE layout and verify the result in the OTHER. That checks two things at once — that WT has the capability at all, and that its actions broadcast identically (a WT-only emit that Classic can't hear is a parity bug even though both screens "work"). Then swap which layout acts. Use `docs/playtests/2026-07-24-wt-parity-matrix.md` as the checklist: work its `GAP` and `UNKNOWN` rows first, spot-check the `PARITY` ones.
+
+- ☐ **Torch (#1870)** — light from B's roster-row slot AND from B's sheet vitals tile; A shows the burn timer counting. Then light from A; B updates. Slot is inert for a non-owner without control in both.
+- ☐ **Take a Rest (#1871)** — exhaust a spell, rest from B's sheet ⋯ menu; the Exhausted pill clears in B **without reopening the sheet**, and A shows the recovered state + the rest row in the log.
+- ☐ **Dice-settle reveal (#1834)** — DM rolls a monster attack in B; the HIT/damage number must NOT appear while dice tumble. Compare against the same roll in A (fixed in #1813).
+- ☐ **Known gap #1886** — the PC-row twin is NOT fixed: a PC's own damage number in `WtActionList` may still reveal early. Confirm it still reproduces; don't file a duplicate.
+- ☐ **Roll log completeness (#1839–#1843)** — in A and B both, confirm rows appear for: character death AND revival, manual gp/sp/cp edits, torch lit + placed (not just burnout), a reaction roll, and combat/session start+end. Log reads as a bracketed narrative.
+- ☐ **Log privacy (#1857)** — DM makes a private roll; it appears in the DM's log in both layouts, in neither player log, and in **neither player export** (↓ MD and ↓ PDF).
+- ☐ **Luck (#1866)** — open the Luck menu on a sheet float dragged flush to the screen's right edge: fully readable, not clipped. Mark-used and give-to-companion both reach A.
+- ☐ **Feedback (#1828)** — exactly ONE "Send feedback" control in the accessibility tree per layout; capture flow works from the survivor.
+- ☐ **Column fold (#1829)** — narrow B toward ~1024px: the outermost column folds to a rail; NO column renders below 300px styled for 300px.
+- ☐ **Known gap #1833** — a handout shared mid-session still opens as "Handout not available." for the player in WT. Confirm, don't re-file.
+- ☐ **Known gap #1830** — the on-map fullscreen⇄windowed toggle was specced and never built. Confirm absent.
+- ☐ Anything in the matrix marked `UNKNOWN` gets an explicit verdict here — that's the point of the column.
+
+## Act 16 — Luck tokens & log reroll [demo campaign]
+
+Never covered by an act before. Luck is `#1755` (tokens) + `#1737` (the log's ↻ Reroll). Exercise both layouts.
+
+- ☐ Luck pip shows the token count; menu offers **Mark as used** and **Give to a companion…**
+- ☐ Giving a token moves it live on every client (donor loses, recipient gains, logged)
+- ☐ DM can grant a token to a character with none (the pip is DM-interactive at zero)
+- ☐ **↻ Reroll** appears on eligible log rows only — attack/check/save/custom/spell with no state change — and is greyed when the character has no token
+- ☐ Reroll spends the token, re-runs the dice, and **supersedes** the old row (struck through, not deleted)
+- ☐ Reroll is absent on rows that changed state (damage, HP edits) — it must not offer a fake undo
+- ☐ Non-owner/non-DM cannot spend someone else's luck
+
+## Act 17 — Avatars: picker, crop & focal point [demo campaign]
+
+`#1692` shipped crop/focal-point authoring; acts never covered it. Reachable from Classic's `CharacterAvatarField` and from the WT sheet's edit mode → **Avatar ▸** expander.
+
+- ☐ Upload a portrait from device; it appears for ALL clients without a reload
+- ☐ Library pick works; the same image can be reused by another character
+- ☐ **Crop + focal point**: set a focal point, save, and confirm the framing holds in every place the avatar renders (roster row, sheet header, combat row, log entry, map token)
+- ☐ Focal point survives a reload and reaches other clients
+- ☐ The WT Avatar ▸ expander offers the same picker as Classic (#1807/#1800), not a reduced one
+- ☐ A very wide and a very tall source image both frame sensibly rather than distorting
+
+## Act 18 — Control delegation [demo campaign]
+
+Never covered. The DM can hand a character's controls to another player ("Transfer control"). This is also where **#1887** lives — a known contradiction worth confirming.
+
+- ☐ DM delegates Brynn to a player who doesn't own her; that player gains interactive controls (rolls, HP, luck, torch)
+- ☐ The owner and other players do NOT gain them; a non-delegate still sees read-only
+- ☐ Delegation is visible — you can tell WHO is driving (note: #1818 tracks showing the controller rather than just the owner; record what's shown today)
+- ☐ **#1887 check** — the delegate presses **Take a Rest**: the client offers it but the server requires owner-or-DM, so expect a **403**. Confirm it still reproduces; the decision (widen the server) is recorded on the issue.
+- ☐ Revoking control returns the sheet to read-only for the delegate, live
+- ☐ Rolls made under delegation attribute to the CHARACTER, not the delegate's own PC
+
+## Act 19 — Admin surfaces [Admin account]
+
+Never covered. Log in as **`Admin`** (fixed UUID wired into `ADMIN_USER_IDS`, `.env.example`); `#704`.
+
+- ☐ `/admin/images` loads for `Admin` and 403s / hides for `DungeonMaster` and players
+- ☐ Image list paginates and shows real usage attribution
+- ☐ Deleting or re-linking an image doesn't orphan a character portrait mid-session
+- ☐ No admin-only control leaks into a normal DM's UI
+
+## Act 20 — Wrap-up
+
+Kill the driver. Write the dated report (structure in SKILL.md), including the **regression diff**.
+
+**Read the previous reports by GLOBBING `docs/playtests/*.md`, not `*-playtest-report.md`.** Reports are named inconsistently by mode — `*-playtest-report.md` (regression), `*-gap-hunt-report.md` (gap-hunt), and one-off names like `2026-07-13-undo-revert-playtest.md`. The narrower glob silently skips every gap-hunt report, which on 2026-07-24 meant the two most recent findings sets were invisible to the diff. Diff against **the most recent report of your own mode** (like-for-like), and **also skim the most recent report of any mode** so a bug found by a different lens doesn't get re-filed as new.
+
+List each prior bug as fixed / still-present / regressed, then new findings. Present proposed issues in batches; file via `/issue` only after the user reviews.
 
 - **Acts-coverage sync:** diff `acts.md` against `docs/CHANGELOG.md` entries since the previous report's date — flag any shipped user-facing feature with no act covering it, and propose the missing act (the #1381 audit lesson applied to playtesting). Report these as a "coverage gaps" list, don't silently skip.
