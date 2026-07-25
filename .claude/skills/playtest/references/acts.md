@@ -127,10 +127,14 @@ Single-target damage + heal (heal respects max HP). Opposed spell (Turn Undead/W
 
 ## Act 10 — AOE [demo campaign]
 
-Joe carries one demo spell per shape. Start a combat with several monsters, place their tokens clustered. Cast each: **Fireball** (circle — click center), **Burning Hands** (cone — origin then direction), **Lightning Bolt** (line), **Stinking Cloud** (cube).
+Joe carries one demo spell per shape. Start a combat with several monsters, **and place the monsters' tokens on the map** — an AoE resolves against *tokens*, so a monster the DM never placed cannot be hit (that is not a bug; #1921). Cast each: **Fireball** (circle — click center), **Burning Hands** (self-centered circle — origin is fixed at the caster's token, nothing to click), **Lightning Bolt** (line).
+
+**Friendly fire is expected on all three** — they are authored `friendly_fire: true` (#944), and for Burning Hands that is RAW: Quickstart p59 says *"creatures within the area of effect take 1d6 damage"*, not *enemies*. The caster themself is always spared (#1378).
 
 - ☐ Shape follows cursor; click locks; in-shape valid-faction tokens highlight; Confirm resolves all at once
-- ☐ Out-of-shape tokens untouched; no friendly fire; Esc cancels placement
+- ☐ Out-of-shape tokens untouched; Esc cancels placement
+- ☐ Allies inside the blast get the amber ring and the Confirm button reads **"⚠ Friendly fire — Confirm (N targets, M allies)"** (#1921)
+- ☐ The caster's own token is neither ringed nor counted in a self-centered blast, and takes no damage (#1378/#1921)
 - ☐ Critical cast doubles damage dice for every target
 - ☐ (Document current limitation: walls don't clip areas — flag if that changed)
 
