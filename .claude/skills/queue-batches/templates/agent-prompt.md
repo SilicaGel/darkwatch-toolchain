@@ -63,6 +63,17 @@ If you hit a decision not covered here, use the **safety valve** — don't guess
 echo "$(date -u +%FT%TZ) {batch_name} ticket=#<N> status=starting" >> {log_path}
 ```
 
+**Then verify the ticket's premise — four checks, each under five minutes.** An issue's *observation* is usually right; its *diagnosis* often isn't, because whoever filed it saw behaviour, not authorship. On 2026-07-26 three of four issues implemented were wrong about something, and one would have shipped a regression if built as written.
+
+1. **Rules-shaped claim? Check RAW** — `/rules-lookup`, or `~/Downloads/Shadowdark_Player_Quickstart_-_Digital.pdf`. Web paraphrases are unreliable, and the exact wording is often the ruling. (#1921 was filed as "AoE hits allies, filter by faction"; the book says a blast damages *"creatures within the area of effect"*, not *enemies* — the stated fix was a regression.)
+2. **"Layout X only" / "subsystem Y" claim? Grep where the component is actually mounted** before accepting the framing. (#1921 was filed as a War Table bug; the component renders only from `MapTab.tsx`, shared by both layouts.)
+3. **Read the ticket's own confound / caveat section** — it often holds the whole explanation. (#1921's said the monsters had no map tokens. That was the answer.)
+4. **Grep the issue number in code and `docs/CHANGELOG.md`** — it may already be fixed. (#1851 had been, by #1827. Three minutes versus a full cycle.)
+
+**If a check says the ticket is wrong: do NOT quietly implement something else.** Log `status=blocked` with a note stating what you found and the citation, and let the orchestrator route it. A reframed ticket beats a wrongly-implemented one.
+
+Full reasoning: `.claude/instructions/implementing-issues.md`.
+
 **While working**:
 - TDD: failing test → implementation → green → commit
 - One commit per ticket (small logical subcommits OK)
