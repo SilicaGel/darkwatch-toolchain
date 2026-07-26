@@ -183,6 +183,13 @@ if [[ ${#LOGS[@]} -gt 0 ]]; then
             failure|cancelled)
               ci_glyph=" ${RED}✗${RESET}"
               ;;
+            timeout)
+              # #1897 — ci-watch.sh is bounded now, so it can report "I gave
+              # up" instead of polling forever. Without a branch here that
+              # state renders as NO glyph, i.e. indistinguishable from "no CI
+              # status" — the watcher's most useful signal, silently dropped.
+              ci_glyph=" ${ORANGE}⏱${RESET}"
+              ;;
           esac
         fi
       else

@@ -454,6 +454,28 @@ echo "{\"sha\":\"$SHA\",\"pr\":$PR,\"batch\":\"$BATCH\",\"status\":\"running\"}"
 
 Run the ci-watch command with `run_in_background: true` and attach a `Monitor` so every emitted line is a notification.
 
+**What it now tells you (#1897).** The watcher is **bounded** — it exits after
+`--timeout-min` (default 45) with `status=timeout` and exit 2 rather than
+polling forever, so it can't orphan and pin the host the way six of them once
+did. On a terminal verdict it also reads the real per-job outcome out of
+`action_task` and prints a `job <name> = <state>` line for each, then reports
+`verified=db`.
+
+**Do not treat `verified=none` as a green light.** It means the DB read
+couldn't run (or `--no-verify` was passed), and the API alone **reports
+skipped jobs as `success`** — so an unverified pass cannot distinguish "every
+gate ran and passed" from "a gate silently didn't run". That happened on
+#1954: `visual` showed green via the API while the database said it was
+skipped, because its `detect` gate had died. Check the per-job lines before
+merging.
+
+### On CI timeout (Monitor fires `status=timeout`)
+
+The watcher gave up; CI itself may still be running. Don't restart it blindly
+— check whether the host is saturated first (`uptime` on the runner), because
+a saturated host kills live jobs and the failure looks like a code failure
+(#1965, #1968). Re-arm with a longer `--timeout-min` once it's quiet.
+
 ### On CI failure (Monitor fires `status=failure`)
 
 1. Fetch the log and diagnose:
