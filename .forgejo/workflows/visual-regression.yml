@@ -33,7 +33,30 @@ jobs:
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
-          fetch-depth: 0
+          fetch-depth: 50
+
+      # #1958 — resolve a merge-base WITHOUT the full-history fetch.
+      #
+      # `fetch-depth: 0` pulls every branch AND every tag at full depth. That
+      # packfile is what blew the budget: 4m59s against a 5-minute job on
+      # PR #1974 (task 13916), and the same shape killed visual-regression's
+      # `detect`. This job only needs a changed-file list, so take a shallow
+      # head and deepen just enough to reach the merge-base.
+      - name: Ensure a merge-base with origin/main
+        run: |
+          set -e
+          git fetch --no-tags --depth=50 origin +refs/heads/main:refs/remotes/origin/main
+          for extra in 150 500 2000; do
+            git merge-base origin/main HEAD >/dev/null 2>&1 && break
+            git fetch --no-tags --deepen="$extra" origin +refs/heads/main:refs/remotes/origin/main
+          done
+          # Fail LOUD if it still can't be reached. A shallow graph makes
+          # `git diff origin/main...HEAD` return NOTHING rather than erroring —
+          # so a guard would pass vacuously, which is worse than a red build.
+          git merge-base origin/main HEAD >/dev/null 2>&1 || {
+            echo "::error::no merge-base with origin/main after deepening — refusing to diff an incomplete graph"
+            exit 1
+          }
 
       - name: Decide whether to run the visual job
         id: decide

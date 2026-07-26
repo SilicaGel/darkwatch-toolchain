@@ -30,21 +30,37 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10 # #1263 — checkout + git diff + node script; ~2-3 min typical
     steps:
-      # fetch-depth: 0 so `git diff origin/main...HEAD` has the history it needs
-      # to compute the merge-base; a shallow clone would make the diff empty.
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
-          fetch-depth: 0
+          fetch-depth: 50
 
       - name: Use Node 22
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: "22"
 
-      # Ensure the base ref is available for the three-dot diff. On Forgejo the
-      # PR base SHA is in the event payload; fetch it so origin/main resolves.
-      - name: Fetch base ref
-        run: git fetch --no-tags --depth=200 origin main || true
+      # #1958 — resolve a merge-base WITHOUT the full-history fetch.
+      #
+      # `fetch-depth: 0` pulls every branch AND every tag at full depth. That
+      # packfile is what blew the budget: 4m59s against a 5-minute job on
+      # PR #1974 (task 13916), and the same shape killed visual-regression's
+      # `detect`. This job only needs a changed-file list, so take a shallow
+      # head and deepen just enough to reach the merge-base.
+      - name: Ensure a merge-base with origin/main
+        run: |
+          set -e
+          git fetch --no-tags --depth=50 origin +refs/heads/main:refs/remotes/origin/main
+          for extra in 150 500 2000; do
+            git merge-base origin/main HEAD >/dev/null 2>&1 && break
+            git fetch --no-tags --deepen="$extra" origin +refs/heads/main:refs/remotes/origin/main
+          done
+          # Fail LOUD if it still can't be reached. A shallow graph makes
+          # `git diff origin/main...HEAD` return NOTHING rather than erroring —
+          # so a guard would pass vacuously, which is worse than a red build.
+          git merge-base origin/main HEAD >/dev/null 2>&1 || {
+            echo "::error::no merge-base with origin/main after deepening — refusing to diff an incomplete graph"
+            exit 1
+          }
 
       # No npm dependencies — the guard is Node built-ins only. PR body/title
       # come from the event payload; the script reads the diff from git itself.
@@ -67,10 +83,30 @@ jobs:
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
-          fetch-depth: 0
+          fetch-depth: 50
 
-      - name: Fetch base ref
-        run: git fetch --no-tags --depth=200 origin main || true
+      # #1958 — resolve a merge-base WITHOUT the full-history fetch.
+      #
+      # `fetch-depth: 0` pulls every branch AND every tag at full depth. That
+      # packfile is what blew the budget: 4m59s against a 5-minute job on
+      # PR #1974 (task 13916), and the same shape killed visual-regression's
+      # `detect`. This job only needs a changed-file list, so take a shallow
+      # head and deepen just enough to reach the merge-base.
+      - name: Ensure a merge-base with origin/main
+        run: |
+          set -e
+          git fetch --no-tags --depth=50 origin +refs/heads/main:refs/remotes/origin/main
+          for extra in 150 500 2000; do
+            git merge-base origin/main HEAD >/dev/null 2>&1 && break
+            git fetch --no-tags --deepen="$extra" origin +refs/heads/main:refs/remotes/origin/main
+          done
+          # Fail LOUD if it still can't be reached. A shallow graph makes
+          # `git diff origin/main...HEAD` return NOTHING rather than erroring —
+          # so a guard would pass vacuously, which is worse than a red build.
+          git merge-base origin/main HEAD >/dev/null 2>&1 || {
+            echo "::error::no merge-base with origin/main after deepening — refusing to diff an incomplete graph"
+            exit 1
+          }
 
       - name: Remind about workflow-change hygiene
         run: |

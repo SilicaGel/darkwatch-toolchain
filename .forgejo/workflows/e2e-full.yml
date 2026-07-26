@@ -440,6 +440,16 @@ jobs:
         if: needs.e2e-full.result == 'failure' && github.event_name != 'pull_request'
         with:
           # git log <last-green>..HEAD needs the merge-base history.
+          #
+          # #1958 — DELIBERATELY still fetch-depth: 0, unlike ship-guard and
+          # visual-regression's `detect`. Those three only need a changed-file
+          # list versus origin/main, so a bounded fetch plus a merge-base
+          # deepen is sufficient. This one walks back to an ARBITRARY earlier
+          # commit (the last green run), and there is no bound that is safe in
+          # general — a deepen loop targeting an unknown depth would either
+          # under-fetch and silently truncate the commit list, or defeat the
+          # point. It also runs only on failure, only off pull_request, and has
+          # a 10-minute budget. Revisit if it starts timing out.
           fetch-depth: 0
 
       - name: Download the e2e-full report artifact
