@@ -56,15 +56,20 @@ set -uo pipefail
 # To update: review `git diff` of .forgejo/workflows/ci.yml, confirm this
 # script still mirrors the `lint-typecheck` + `test` jobs (update the checks
 # below if they changed), then set this to the value preflight prints.
-# Reconciled 2026-07-24 (#1883): the two "Security audit" steps now call
-# scripts/audit-gate.mjs (npm audit + a justified, expiring allowlist) instead
-# of `npm audit --audit-level=high` directly. Severity policy is unchanged.
-# Preflight deliberately does NOT mirror these steps — npm audit reads the LIVE
-# advisory feed, so mirroring it would make preflight non-deterministic and let
-# an unrelated upstream advisory block local work. CI remains the enforcer.
+# Reconciled 2026-07-28 (#2010): the affected tier's `mc` download now goes
+# through scripts/ci/fetch-binary.sh instead of a bare curl. That step belongs
+# to the `smoke` job, which preflight does not mirror — the `lint-typecheck`
+# and `test` jobs are unchanged, so no check below moved.
+# (Previously reconciled 2026-07-24, #1883: the two "Security audit" steps now
+# call scripts/audit-gate.mjs — npm audit plus a justified, expiring allowlist
+# — instead of `npm audit --audit-level=high` directly. Severity policy is
+# unchanged. Preflight deliberately does NOT mirror those steps: npm audit
+# reads the LIVE advisory feed, so mirroring it would make preflight
+# non-deterministic and let an unrelated upstream advisory block local work.
+# CI remains the enforcer.)
 # (Previously reconciled 2026-07-19, #1736 Task 4: WT no-raw-color guard.)
 # (Previously reconciled 2026-07-14, #1360/#1701: smoke spec list.)
-EXPECTED_CI_HASH="aabe00970b674cc71a92dcd1149ac0b864f1c8bfd595add3170bedbb09710ca6"
+EXPECTED_CI_HASH="c5257a9f566e6c0474f1ce30de321a24cec9ce332d4c929ed09589f6db374cdd"
 
 # --- setup ------------------------------------------------------------------
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || {

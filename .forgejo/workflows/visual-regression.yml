@@ -210,8 +210,9 @@ jobs:
             aarch64 | arm64) MINIO_ARCH=linux-arm64 ;;
             *) MINIO_ARCH=linux-amd64 ;;
           esac
-          curl -sSL "https://dl.min.io/server/minio/release/${MINIO_ARCH}/minio" -o /tmp/minio
-          curl -sSL "https://dl.min.io/client/mc/release/${MINIO_ARCH}/mc" -o /tmp/mc
+          # #2010 — retrying helper, not a bare curl (see e2e-full.yml).
+          bash scripts/ci/fetch-binary.sh "https://dl.min.io/server/minio/release/${MINIO_ARCH}/minio" /tmp/minio
+          bash scripts/ci/fetch-binary.sh "https://dl.min.io/client/mc/release/${MINIO_ARCH}/mc" /tmp/mc
           chmod +x /tmp/minio /tmp/mc
           mkdir -p /tmp/minio-data
           /tmp/minio server /tmp/minio-data >/tmp/minio.log 2>&1 &

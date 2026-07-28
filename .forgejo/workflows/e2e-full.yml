@@ -151,8 +151,13 @@ jobs:
             aarch64 | arm64) MINIO_ARCH=linux-arm64 ;;
             *) MINIO_ARCH=linux-amd64 ;;
           esac
-          curl -sSL "https://dl.min.io/server/minio/release/${MINIO_ARCH}/minio" -o /tmp/minio
-          curl -sSL "https://dl.min.io/client/mc/release/${MINIO_ARCH}/mc" -o /tmp/mc
+          # #2010 — via fetch-binary.sh, NOT a bare curl: one corrupted TLS
+          # record on the ~100MB download (curl exit 56, "bad record mac")
+          # killed this job outright twice in 24h, once taking the nightly
+          # deploy gate with it. The helper retries transport failures and
+          # never leaves a truncated file where chmod +x can reach it.
+          bash scripts/ci/fetch-binary.sh "https://dl.min.io/server/minio/release/${MINIO_ARCH}/minio" /tmp/minio
+          bash scripts/ci/fetch-binary.sh "https://dl.min.io/client/mc/release/${MINIO_ARCH}/mc" /tmp/mc
           chmod +x /tmp/minio /tmp/mc
           mkdir -p /tmp/minio-data
           /tmp/minio server /tmp/minio-data >/tmp/minio.log 2>&1 &
@@ -424,6 +429,19 @@ jobs:
     # (only on failure; not on PR-triggered runs, #1623 — the author sees the
     # failing check directly and the suspect list would include unmerged
     # commits) live on every STEP below instead.
+    #
+    # #2011 — every STEP gate below reads `needs.*.result`, NOT
+    # `needs.e2e-full.result`. Under workflow_call (the nightly-deploy path)
+    # Forgejo namespaces the callee's jobs — the logs show `e2e-full.e2e-full`
+    # and `e2e-full.notify-failure` — so the `needs` context has no key called
+    # `e2e-full` and `needs.e2e-full.result` is null even when that job just
+    # failed. It silently skipped every step on all eight nightly reds between
+    # 2026-07-13 and 2026-07-28 (1-4s, reported green), so the rolling issue
+    # only ever heard from the standalone cron. `needs.*` is a wildcard over
+    # the context's VALUES, so it survives the renaming; the explicit
+    # comparison is kept alongside it because that is the form proven to work
+    # on the standalone path. This job has exactly one `needs`, so the wildcard
+    # can't widen what it matches.
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -437,7 +455,7 @@ jobs:
       actions: read
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
-        if: needs.e2e-full.result == 'failure' && github.event_name != 'pull_request'
+        if: ${{ (needs.e2e-full.result == 'failure' || contains(needs.*.result, 'failure')) && github.event_name != 'pull_request' }}
         with:
           # git log <last-green>..HEAD needs the merge-base history.
           #
@@ -453,7 +471,7 @@ jobs:
           fetch-depth: 0
 
       - name: Download the e2e-full report artifact
-        if: needs.e2e-full.result == 'failure' && github.event_name != 'pull_request'
+        if: ${{ (needs.e2e-full.result == 'failure' || contains(needs.*.result, 'failure')) && github.event_name != 'pull_request' }}
         # v4 unsupported on Forgejo's actions backend; pin v3 (see ci.yml).
         uses: actions/download-artifact@9bc31d5ccc31df68ecc42ccf4149144866c47d8a # v3.0.2
         continue-on-error: true # a crash before upload must not muzzle the notify
@@ -462,7 +480,7 @@ jobs:
           path: /tmp/e2e-full-logs
 
       - name: Comment the rolling "e2e-full is red" issue
-        if: needs.e2e-full.result == 'failure' && github.event_name != 'pull_request'
+        if: ${{ (needs.e2e-full.result == 'failure' || contains(needs.*.result, 'failure')) && github.event_name != 'pull_request' }}
         env:
           GH_TOKEN: ${{ github.token }}
           FALLBACK_TOKEN: ${{ secrets.FORGEJO_TOKEN }}

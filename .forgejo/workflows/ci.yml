@@ -616,7 +616,8 @@ jobs:
             aarch64 | arm64) MC_ARCH=linux-arm64 ;;
             *) MC_ARCH=linux-amd64 ;;
           esac
-          curl -sSL "https://dl.min.io/client/mc/release/$MC_ARCH/mc" -o /tmp/mc
+          # #2010 — retrying helper, not a bare curl (see e2e-full.yml).
+          bash scripts/ci/fetch-binary.sh "https://dl.min.io/client/mc/release/$MC_ARCH/mc" /tmp/mc
           chmod +x /tmp/mc
           # `/minio/health/ready` can flip green a beat before client auth is
           # accepted (a recurring e2e-full flake), so retry the alias until it
