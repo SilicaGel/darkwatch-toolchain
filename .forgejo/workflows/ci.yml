@@ -788,6 +788,7 @@ jobs:
             e2e/theme-contrast.spec.ts \
             e2e/773-help-page.spec.ts \
             e2e/1360-undo-revert.spec.ts \
+            e2e/1917-wt-addmap-clickable.spec.ts \
             $EXTRA_SPECS \
             --reporter=line
 
