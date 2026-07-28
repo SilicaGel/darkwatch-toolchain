@@ -45,9 +45,32 @@ jobs:
         # Host executor: system Node 22 — no setup-node, no apt-get. The full
         # checkout matters: vite.config.ts imports ../scripts/app-version.mjs,
         # which reads docs/CHANGELOG.md (capability-test finding, #1337).
+        #
+        # SERVER deps are installed first, even though this job never runs the
+        # server (it ships server/ as source for the container build below).
+        # client/tsconfig.json is `include: ["src"]`, and
+        # client/src/rulesets/shadowdark/schemas.ts imports
+        # server/src/shared/rulesets/shadowdark/schemas.ts — so `tsc` pulls
+        # server sources into the client's program. TypeScript resolves a
+        # bare specifier from the IMPORTING file's directory upward, so the
+        # `zod` inside server/src/shared/** is looked for in
+        # server/node_modules, which the client's own install can never
+        # satisfy no matter what client/package.json declares.
+        #
+        # Without this the build dies on `error TS2307: Cannot find module
+        # 'zod'` — which is what left production on 2026-07-26's build for
+        # three days (deploys red 07-27 and 07-28 while e2e-full was green).
+        # It had been passing only because something was leaving
+        # server/node_modules behind in the runner's workdir; nothing here
+        # ever guaranteed it. This makes the real dependency explicit.
+        #
+        # The deeper fix is for the client not to typecheck server sources at
+        # all — that cross-boundary import is the actual defect. Tracked
+        # separately; this keeps deploys shipping in the meantime.
         run: |
           node --version
-          cd client && npm ci --no-audit --no-fund && npm run build
+          cd server && npm ci --no-audit --no-fund
+          cd ../client && npm ci --no-audit --no-fund && npm run build
 
       - name: Sync client dist + marketing site + server source into place
         run: |
