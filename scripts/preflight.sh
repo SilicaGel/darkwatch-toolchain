@@ -22,6 +22,20 @@
 #   - e2e-full.yml         → full nightly Playwright suite (whole tests/e2e)
 #   - lighthouse.yml       → Lighthouse CI
 #
+# DATABASE LANES (#1984)
+#   The integration step runs against `darkwatch_int`, its own database inside
+#   darkwatch-maria — NOT the dev database. A concurrent dev server, /qa-check
+#   run or local e2e session can no longer perturb it (that collision cost a
+#   diagnosis cycle on 2026-07-26: preflight went red on int tests while a
+#   qa-check run drove the same DB, and all 1069 passed on an immediate re-run).
+#   Rebuild it with `cd server && npm run test:int:reset`.
+#
+#   The DEV database (`darkwatch`) is deliberately long-lived and dirty, and
+#   nothing here resets it. That is the only lane where repeat-run bugs can
+#   surface — CI seeds fresh every run and is structurally blind to them (#1949
+#   shipped green through every PR until a local repeat run caught it). Don't
+#   "fix" it by making every lane pristine.
+#
 # DRIFT GUARD
 #   This script pins a SHA-256 of ci.yml. If ci.yml changes, preflight fails
 #   until EXPECTED_CI_HASH below is reconciled — see the "ci.yml drift guard"
@@ -269,27 +283,40 @@ run_check "coverage-bot script tests" npm run test:scripts
 
 # --- 4. integration tests + schema verify (test job — needs the DB) ---------
 echo "${BOLD}integration (needs the DB)${RESET}"
-DB_PORT="$(grep -E '^DB_PORT=' server/.env 2>/dev/null | head -1 | cut -d= -f2 | tr -d ' ')"
-DB_PORT="${DB_PORT:-3397}"
+envval() { grep -E "^$1=" server/.env 2>/dev/null | head -1 | cut -d= -f2- | tr -d ' '; }
+DB_PORT="$(envval DB_PORT)"; DB_PORT="${DB_PORT:-3397}"
+
+# #1984 — verify db-schema.ts against the INTEGRATION database, not the dev one.
+# db-schema.ts is supposed to match a cleanly-migrated schema, which is what
+# darkwatch_int is by construction and what CI checks. The dev database is
+# explicitly allowed to drift — another worktree's migration lands there and
+# stays. Checking against dev is how a green CI + red local happens for reasons
+# that have nothing to do with the branch (observed: character_conditions.
+# rounds_total from an unrelated worktree failed BOTH this check and every int
+# file). `npm run db:verify` falls back to a hardcoded dev URL, so pass one.
+INT_DB_NAME_PF="${INT_DB_NAME:-darkwatch_int}"
+INT_DB_USER="$(envval DB_USER)";     INT_DB_USER="${INT_DB_USER:-darkwatch}"
+INT_DB_PASS="$(envval DB_PASSWORD)"; INT_DB_PASS="${INT_DB_PASS:-darkwatch_dev}"
+INT_DB_URL="mysql://${INT_DB_USER}:${INT_DB_PASS}@127.0.0.1:${DB_PORT}/${INT_DB_NAME_PF}"
+
 if [ "$SKIP_INT" -eq 1 ]; then
   note_skip "Kysely schema verify" "--skip-int"
   note_skip "server integration tests" "--skip-int"
 elif (echo > "/dev/tcp/127.0.0.1/$DB_PORT") 2>/dev/null; then
   int_before="${#FAIL[@]}"
-  run_check "Kysely schema verify" bash -c "cd server && npm run db:verify"
+  run_check "Kysely schema verify" bash -c "cd server && DATABASE_URL='$INT_DB_URL' npm run db:verify"
   run_check "server integration tests" bash -c "cd server && npm run test:int"
   if [ "${#FAIL[@]}" -gt "$int_before" ]; then
-    echo "  ${YELLOW}hint:${RESET} darkwatch-maria can drift from a clean migrate+seed if a feature-branch"
-    echo "        worktree applied migrations that aren't on the current checkout, or if seed data has"
-    echo "        diverged. CI runs against a clean container, so a green CI + red local on the same"
-    echo "        commit usually means local-state drift, not a code bug (see #769)."
+    echo "  ${YELLOW}hint:${RESET} the int lane runs against its own ${BOLD}darkwatch_int${RESET} database (#1984), so a"
+    echo "        concurrent dev / qa-check / e2e session is no longer a plausible cause. It can still"
+    echo "        drift from a clean migrate+seed if a feature-branch worktree applied migrations that"
+    echo "        aren't on the current checkout. CI runs against a clean container, so a green CI + red"
+    echo "        local on the same commit usually means local-state drift, not a code bug (see #769)."
     echo
-    echo "        First try additive realignment (cheap, preserves data):"
-    echo "          ${DIM}cd server && npm run db:migrate && npm run seed:core && npm run seed:shadowdark${RESET}"
-    echo "        If that doesn't fix it (extra tables/columns from a feature branch are still around),"
-    echo "        nuke and reseed:"
+    echo "        Rebuild the int database (drops + remigrates + reseeds ONLY darkwatch_int):"
     echo "          ${DIM}cd server && npm run test:int:reset${RESET}"
-    echo "        (only resets the maria volume — leaves darkwatch-minio alone.)"
+    echo "        Your dev data in ${BOLD}darkwatch${RESET} is untouched by that — and it is meant to stay"
+    echo "        long-lived and dirty (it's the only lane that catches repeat-run bugs; see #1949)."
   fi
 else
   echo "  ${RED}✗ darkwatch-maria not reachable on 127.0.0.1:$DB_PORT${RESET}"
