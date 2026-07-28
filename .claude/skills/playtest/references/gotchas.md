@@ -2,6 +2,17 @@
 
 Every entry here cost real time in the 2026-06-12 baseline run. Read all of it before writing driver snippets.
 
+## Which layout am I in? (verify before recording ANY result)
+
+- **The layout is per browser TAB, chosen by the `?layout=wartable` URL param** (`?layout=classic` reverts). There is **no in-app toggle** — no masthead button, nothing in a menu.
+- **Switching requires a REAL navigation** (`page.goto`). The mode resolves once, on mount, from a `useState` lazy initializer (`client/src/hooks/useLayoutMode.tsx`) — no effect watches the URL, so a soft nav / `history.pushState` keeps whatever the tab loaded with. It is also written through to `sessionStorage["dw-layout"]`, so a tab that once loaded `?layout=wartable` **stays** War Table on subsequent in-app navigation even to URLs without the param.
+- **Verification trick — do this before recording a single ☐:** check for the `wt-stage` element.
+  ```js
+  const inWT = await page.locator('[data-testid=wt-stage]').count() > 0;
+  ```
+  It is present in the War Table for **both** roles (`WarTableDmView.tsx`, `WarTablePlayerView.tsx` both mount `<WtStage>`) and absent in Classic.
+- This is the single easiest way to produce a **confidently wrong parity report** — "tested the War Table" while sitting in Classic, seeing perfect parity that isn't there. Assume nothing from the URL you *meant* to open; assert `wt-stage`.
+
 ## Driver & snippets
 
 - Snippets are **plain JS** run as an async function body — `return` sends a JSON result back; `log()` lines come back in the response. No TS syntax.
@@ -59,7 +70,7 @@ docker exec darkwatch-maria mariadb -udarkwatch -pdarkwatch_dev darkwatch -e "SQ
 ## Misc app behavior to expect
 
 - Pre-login 401s in the console are normal (`/me` probes). The Invite button copies silently — grant `clipboard-read` on the context and read `navigator.clipboard.readText()`.
-- New campaigns: wizard returns to the dashboard; re-open the campaign by name (`lib.openCampaignByName`).
+- New campaigns: the wizard navigates **straight into the new campaign view** (#1210) — there is no return-to-dashboard step to wait for, and no need to re-open the campaign by name.
 - A 🌙 Dark map with no lit torch is **solid black for players** — that's correct, not a bug.
 - Players' "Bring a Character" picker only lists characters not in another campaign; seed players' existing characters are taken by the Demo Campaign, so they get the create-new flow.
 - AOE/area spells: the demo wizard **Joe in "Demo Campaign (Shadowdark)"** carries one per shape (Fireball circle, Burning Hands cone, Lightning Bolt line, Stinking Cloud cube) — use that campaign for the AOE act instead of building a new caster.

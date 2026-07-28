@@ -4,14 +4,31 @@ name: Visual Regression (per-PR gate)
 # BEFORE merge. The spec (tests/e2e/visual-regression.spec.ts) is also nightly-only
 # (e2e-full.yml); this adds a per-PR run so a migration regression is caught pre-merge.
 #
+# #1936 — the War Table pixel spec (tests/e2e/1736-wt-visual.spec.ts) now rides this
+# same gate. It was the flagship surface's only pixel coverage and ran NOWHERE
+# pre-merge: it is nightly-only, and deliberately excluded from the affected-tier
+# smoke (a pixel spec doesn't belong in the smoke container), while this workflow
+# targeted visual-regression.spec.ts by name and had never heard of it. So a WT
+# restyle could land unchallenged. `detect` now decides a SPEC LIST rather than a
+# yes/no, and the single `visual` job runs whichever specs the diff earned —
+# reusing one ~10-minute app bringup instead of paying it twice.
+#
+# Trigger sets (see the `decide` step):
+#   - Classic spec: client CSS / styles, its own spec, the freeze helper.
+#   - WT spec:      the same CSS + freeze harness (shared), PLUS the WT sources
+#                   (pages/wartable, components/wt, rulesets/*/components/wt,
+#                   layoutMode) and its own spec file.
+#   - Either the `run-visual` label or a manual dispatch forces BOTH.
+#
 # Gating is decided in the `detect` job (NOT a top-level `paths:` filter) so the
 # `run-visual` label can force a run on a PR whose changed files wouldn't otherwise
 # match (e.g. a .tsx layout change). `detect` always completes, so a non-matching PR
 # shows a fast green run + a skipped `visual` job — never a perpetually-pending check.
 #
-# The `visual` job mirrors e2e-full.yml's app bringup verbatim (single shard) and runs
-# ONLY the visual spec. Baselines are platform-specific; regenerate them with
-# scripts/regen-visual-baselines.sh (Linux CI image), never a bare --update on macOS.
+# The `visual` job mirrors e2e-full.yml's app bringup verbatim (single shard).
+# Baselines are platform-specific; regenerate them with
+# scripts/regen-visual-baselines.sh (Linux CI image), never a bare --update on macOS
+# (`--spec e2e/1736-wt-visual.spec.ts` for the WT set).
 
 on:
   pull_request:
@@ -30,6 +47,8 @@ jobs:
     timeout-minutes: 5
     outputs:
       should-run: ${{ steps.decide.outputs.should-run }}
+      # #1936 — space-separated Playwright spec paths for the `visual` job.
+      specs: ${{ steps.decide.outputs.specs }}
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
@@ -58,34 +77,69 @@ jobs:
             exit 1
           }
 
-      - name: Decide whether to run the visual job
+      - name: Decide which visual specs to run
         id: decide
         env:
           HAS_LABEL: ${{ contains(github.event.pull_request.labels.*.name, 'run-visual') }}
           EVENT: ${{ github.event_name }}
         run: |
           set -e
+          CLASSIC="e2e/visual-regression.spec.ts"
+          WT="e2e/1736-wt-visual.spec.ts"
+
+          # The label / manual dispatch is the "I want the full picture" escape
+          # hatch, so it forces BOTH specs regardless of the diff (#1936).
           if [ "$EVENT" = "workflow_dispatch" ] || [ "$HAS_LABEL" = "true" ]; then
             echo "should-run=true" >> "$GITHUB_OUTPUT"
-            echo "trigger: event=$EVENT run-visual-label=$HAS_LABEL → running"
+            echo "specs=$CLASSIC $WT" >> "$GITHUB_OUTPUT"
+            echo "trigger: event=$EVENT run-visual-label=$HAS_LABEL → running BOTH visual specs"
             exit 0
           fi
+
           git fetch origin main --quiet || true
           CHANGED=$(git diff --name-only origin/main...HEAD || true)
           echo "changed files vs origin/main:"; echo "$CHANGED"
+
+          SPECS=""
+          # Classic: any client CSS, the spec itself, or the shared freeze harness.
           if echo "$CHANGED" | grep -qE '^client/src/.*\.css$|^client/src/styles/|^tests/e2e/visual-regression\.spec\.ts$|^tests/helpers/freeze\.ts$'; then
+            SPECS="$CLASSIC"
+            echo "→ Classic visual spec (client CSS / harness change)"
+          fi
+          # War Table: the same CSS + freeze harness (both are shared with the WT
+          # surface — wartable.css and wt-*.css live under client/src/styles, and
+          # the WT spec imports freezeForSnapshot too), PLUS the WT sources and
+          # the WT spec itself. Keep these globs in step with the `wartable` area
+          # in tests/e2e/spec-areas.json.
+          if echo "$CHANGED" | grep -qE '^client/src/.*\.css$|^client/src/styles/|^tests/helpers/freeze\.ts$|^client/src/pages/wartable/|^client/src/components/wt/|^client/src/rulesets/[^/]+/components/wt/|^client/src/hooks/useLayoutMode|^client/src/lib/layoutMode|^tests/e2e/1736-wt-visual\.spec\.ts$'; then
+            SPECS="$SPECS $WT"
+            echo "→ War Table visual spec (WT source / CSS / harness change)"
+          fi
+          SPECS=$(echo "$SPECS" | xargs || true)   # collapse leading/duplicate spaces
+
+          if [ -n "$SPECS" ]; then
             echo "should-run=true" >> "$GITHUB_OUTPUT"
-            echo "client CSS / harness change detected → running"
+            echo "specs=$SPECS" >> "$GITHUB_OUTPUT"
+            echo "running: $SPECS"
           else
             echo "should-run=false" >> "$GITHUB_OUTPUT"
-            echo "no client CSS / harness change and no run-visual label → skipping visual job"
+            echo "specs=" >> "$GITHUB_OUTPUT"
+            echo "no visual-relevant change and no run-visual label → skipping visual job"
           fi
 
   visual:
     needs: detect
     if: needs.detect.outputs.should-run == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # #1936 — raised 30 → 40. Measured on the Linux CI image: the Classic spec's
+    # FULL 13-theme sweep (312 shots, what the `run-visual` label and dispatch
+    # ask for) is 13.2 min of Playwright, and the WT spec adds 1.6 min — on top
+    # of this job's ~10 min of bringup (three npm ci, two builds, migrate, seed,
+    # MinIO download). That heavy path was already close to 30 before the WT
+    # spec joined it, and the runner is a shared VM, so the old ceiling risked
+    # spurious timeout-reds on exactly the PRs that asked for the most coverage.
+    # The default 4-theme path is ~6 min of Playwright and never came near it.
+    timeout-minutes: 40
     # #969 — prebuilt CI image (Node 22 + Chromium + Playwright deps baked).
     container:
       image: forge.example.com/aaron/darkwatch-ci-playwright:1.61.1
@@ -259,7 +313,7 @@ jobs:
           PLAYWRIGHT_BROWSERS_PATH: /ms-playwright
         run: cd tests && npm ci --no-audit --no-fund
 
-      - name: Run visual-regression spec
+      - name: Run visual specs
         env:
           E2E_SERVER_URL: "http://localhost:3001"
           TEST_HOOK_SECRET: e2e-test-hook-secret
@@ -267,8 +321,23 @@ jobs:
           # Default = the 4-theme representative subset (see DEFAULT_THEMES in the
           # spec). The `run-visual` label or a manual dispatch opts into the full
           # 13-theme sweep — use that pre-release or when a change is theme-scoped.
+          # Read by visual-regression.spec.ts only; the WT spec is theme-agnostic.
           VISUAL_ALL_THEMES: ${{ (contains(github.event.pull_request.labels.*.name, 'run-visual') || github.event_name == 'workflow_dispatch') && '1' || '' }}
-        run: cd tests && ./node_modules/.bin/playwright test e2e/visual-regression.spec.ts --reporter=line
+          # #1936 (same trap as #1581 in e2e-full.yml) — 1736-wt-visual.spec.ts's
+          # loot shot writes campaign_loot through tests/helpers/db.ts, which falls
+          # back to 127.0.0.1:3397 (the local-dev address) when DB_* is unset. That
+          # INSERT is not catch-guarded, so without these the WT spec fails here.
+          DB_HOST: mariadb
+          DB_PORT: "3306"
+          DB_USER: ${{ secrets.CI_DB_USER }}
+          DB_PASSWORD: ${{ secrets.CI_DB_PASSWORD }}
+          DB_NAME: ${{ secrets.CI_DB_NAME }}
+          SPECS: ${{ needs.detect.outputs.specs }}
+        # $SPECS is intentionally unquoted: it is a space-separated spec list that
+        # must word-split into separate Playwright arguments. playwright.config.ts
+        # pins `workers: 1`, so the two specs run sequentially and cannot stomp
+        # each other's shared-campaign setup.
+        run: cd tests && ./node_modules/.bin/playwright test $SPECS --reporter=line
 
       - name: Upload diff artifacts on failure
         if: failure()
