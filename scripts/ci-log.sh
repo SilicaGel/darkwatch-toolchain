@@ -9,8 +9,13 @@
 #
 # Requires:
 #   - $FORGEJO_TOKEN in env
-#   - ssh access to aaron@pi4 (the Forgejo host)
+#   - ssh access to the Forgejo host (default `aaron@pi4`)
 #   - ssh user has sudo-without-password OR rights to read actions_log/ + gitea.db
+#
+# AWAY FROM THE LAN (#2023): `pi4` is a LAN shortname and won't resolve. Set
+# either variable to the tailnet address — no edit to this script:
+#   CI_LOG_HOST=aaron@100.64.0.1 scripts/ci-log.sh --failed
+#   PI_SSH_HOST=... (already set in server/.env.production for the same reason)
 #
 # Event types (#1119): this works for ANY trigger — pull_request, push,
 # workflow_dispatch, schedule. The earlier belief that "non-PR runs can't be
@@ -27,7 +32,14 @@
 set -euo pipefail
 
 API="https://forge.example.com/api/v1/repos/aaron/darkwatch"
-PI_HOST="aaron@pi4"
+# #2023 — `pi4` is a LAN shortname: it resolves at home and nowhere else, so
+# every log fetch failed the moment you were off the LAN. The workaround was to
+# copy this script somewhere and sed the host to the Tailscale IP by hand, which
+# is tribal knowledge rather than a fix. `PI_SSH_HOST` is honoured because
+# server/.env.production already defines it, pinned to the tailnet address
+# precisely so remote access works — reuse that rather than inventing a second
+# variable to keep in sync. Default is unchanged, so at home nothing differs.
+PI_HOST="${CI_LOG_HOST:-${PI_SSH_HOST:-aaron@pi4}}"
 LOG_DIR="/home/ci/services/forgejo/data/gitea/actions_log/aaron/darkwatch"
 DB_PATH="/home/ci/services/forgejo/data/gitea/gitea.db"
 

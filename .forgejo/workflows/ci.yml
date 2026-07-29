@@ -285,6 +285,26 @@ jobs:
       - name: Type check + build client
         run: cd client && npm run build
 
+      # #2022 — `tests/` is a whole TypeScript project (144 .ts files, 109 e2e
+      # specs) and this is its only typecheck. It used to live in `smoke`, which
+      # meant a type error in a spec waited behind MariaDB + MinIO + seed +
+      # server build + Vite before it surfaced, and — because preflight mirrors
+      # THIS job and not `smoke` — no local gate covered it at all. PR #2021 hit
+      # exactly that: preflight green twice, then CI red on a `for...of` over a
+      # NodeList (tests/tsconfig.json has no `downlevelIteration`, client's does).
+      #
+      # It is a pure static check: no DB, no browser, no running app, ~2s. It
+      # belongs in the fast job, and putting it here is what makes preflight
+      # cover it automatically rather than via a bespoke check that can drift.
+      #
+      # No `--ignore-scripts` needed: tests/ has no postinstall, so this does not
+      # pull Playwright browsers (they're baked into the smoke job's container).
+      - name: Install tests dependencies (typecheck only — no browsers)
+        run: cd tests && npm ci --no-audit --no-fund
+
+      - name: Type check tests (specs + helpers + smoke-walk)
+        run: cd tests && npm run typecheck
+
   # ---------------------------------------------------------------------------
   # test — server unit + integration + client unit + coverage-bot scripts.
   # All four coverage datasets land in this one job so the diff-coverage PR
@@ -738,8 +758,9 @@ jobs:
           PLAYWRIGHT_BROWSERS_PATH: /ms-playwright
         run: cd tests && npm ci
 
-      - name: Typecheck tests/ (specs + helpers + smoke-walk)
-        run: cd tests && npm run typecheck
+      # (The tests/ typecheck moved to `lint-typecheck` in #2022 — it is a pure
+      # static check and does not need this job's stack. `npm ci` above stays:
+      # smoke still needs the deps to actually run Playwright.)
 
       - name: Smoke — run critical specs (+ affected nightly-only tier, #1621)
         id: smoke_e2e

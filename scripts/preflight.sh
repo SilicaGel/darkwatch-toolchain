@@ -56,10 +56,13 @@ set -uo pipefail
 # To update: review `git diff` of .forgejo/workflows/ci.yml, confirm this
 # script still mirrors the `lint-typecheck` + `test` jobs (update the checks
 # below if they changed), then set this to the value preflight prints.
-# Reconciled 2026-07-28 (#2010): the affected tier's `mc` download now goes
+# Reconciled 2026-07-28 (#2022): the tests/ typecheck moved OUT of the `smoke`
+# job and into `lint-typecheck` (plus a `cd tests && npm ci` to feed it), so
+# preflight now mirrors it — see the "tests typecheck" check below.
+# (Previously reconciled 2026-07-28 (#2010): the affected tier's `mc` download now goes
 # through scripts/ci/fetch-binary.sh instead of a bare curl. That step belongs
 # to the `smoke` job, which preflight does not mirror — the `lint-typecheck`
-# and `test` jobs are unchanged, so no check below moved.
+# and `test` jobs are unchanged, so no check below moved.)
 # (Previously reconciled 2026-07-24, #1883: the two "Security audit" steps now
 # call scripts/audit-gate.mjs — npm audit plus a justified, expiring allowlist
 # — instead of `npm audit --audit-level=high` directly. Severity policy is
@@ -69,7 +72,7 @@ set -uo pipefail
 # CI remains the enforcer.)
 # (Previously reconciled 2026-07-19, #1736 Task 4: WT no-raw-color guard.)
 # (Previously reconciled 2026-07-14, #1360/#1701: smoke spec list.)
-EXPECTED_CI_HASH="c5257a9f566e6c0474f1ce30de321a24cec9ce332d4c929ed09589f6db374cdd"
+EXPECTED_CI_HASH="40d82a0c5c1f0f6c08a5133c633490a67a3efc9265b63aed7e7413615b58bce8"
 
 # --- setup ------------------------------------------------------------------
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || {
@@ -277,6 +280,14 @@ run_check "prettier format" npm run format:check
 echo "${BOLD}typecheck + build${RESET}"
 run_check "server typecheck/build" bash -c "cd server && npm run build"
 run_check "client typecheck/build" bash -c "cd client && npm run build"
+# #2022 — tests/ is 144 .ts files / 109 e2e specs whose ONLY typecheck used to
+# sit in ci.yml's `smoke` job, which preflight deliberately does not mirror. So
+# a type error in a spec passed every local gate and surfaced only after CI had
+# built the whole stack (PR #2021: preflight green twice, then red on a
+# `for...of` over a NodeList — tests/tsconfig.json has no `downlevelIteration`).
+# The step now lives in `lint-typecheck`, so mirroring it here keeps preflight
+# honest by construction rather than by a bespoke exception.
+run_check "tests typecheck" bash -c "cd tests && npm run typecheck"
 
 # --- 3. unit tests + script tests (test job) --------------------------------
 # CI runs these with --coverage to feed the diff-coverage PR comment; preflight

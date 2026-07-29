@@ -61,6 +61,15 @@ jobs:
     # #1623 — on a PR, run ONLY when the run-e2e-full label is present. Every
     # non-PR trigger (nightly workflow_call, midday cron, manual dispatch) has
     # github.event_name != 'pull_request', so those always run.
+    #
+    # ⚠ DO NOT "tidy" this into a thin caller workflow with a gated `uses:` job.
+    # **Forgejo does not honour `if:` on a reusable-workflow (`uses:`) job.** That
+    # was the first attempt at #1623 — a separate e2e-full-label.yml whose caller
+    # job was `uses: e2e-full.yml` behind `if: needs.detect.outputs.should-run`.
+    # The gate was silently ignored and the whole suite ran on an unlabeled PR.
+    # The gate only works as a NORMAL-job `if:`, inlined here, which is why this
+    # workflow owns its own `pull_request` trigger instead of being wrapped.
+    # (Same reason visual-regression.yml gates its `visual` job in-place.)
     if: ${{ github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'run-e2e-full') }}
     runs-on: ubuntu-latest
     timeout-minutes: 75 # #1263 — entire suite (3 shards, 2 Vite restarts); ~40-60 min typical
