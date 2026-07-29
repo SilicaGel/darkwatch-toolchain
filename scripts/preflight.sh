@@ -385,6 +385,24 @@ run_check "WT raw colors" node scripts/check-wt-raw-colors.mjs
 echo "${BOLD}WT type floor (#1736)${RESET}"
 run_check "WT type floor" node scripts/check-wt-type-floor.mjs
 
+# --- 10. ROADMAP staleness heartbeat (warn-only, #1398) ---------------------
+# docs/ROADMAP.md is an INTENT doc — it can't be derived or guarded like the
+# docs that mirror code, so it rots silently. This surfaces that drift.
+#
+# Deliberately NOT a run_check: the script exits 0 whether the doc is fresh or
+# stale (warn-only by design — the cadence is human-owned), so run_check would
+# swallow the warning behind an "OK" and the backstop would be invisible. Print
+# its output directly instead, and never touch PASS/FAIL — this cannot fail
+# preflight, by design.
+echo "${BOLD}docs cadence (#1398)${RESET}"
+roadmap_out="$(node scripts/check-roadmap-staleness.mjs 2>&1)"
+if printf '%s' "$roadmap_out" | grep -q 'WARNING'; then
+  printf '  %-34s %sWARN%s\n' "▶ roadmap staleness" "$YELLOW" "$RESET"
+  echo "$DIM"; printf '%s\n' "$roadmap_out" | sed 's/^/      | /'; echo "$RESET"
+else
+  printf '  %-34s %sOK%s\n' "▶ roadmap staleness" "$GREEN" "$RESET"
+fi
+
 # --- summary ----------------------------------------------------------------
 echo
 echo "${BOLD}━━━ Summary ━━━${RESET}"
