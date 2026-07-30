@@ -154,44 +154,32 @@ Only once the acceptance walk passes do you proceed to:
    ```
 4. Move to the next ticket.
 
-## Before you finish: run the structural preflight
+## Before you finish: do NOT run preflight
 
-After your last ticket is committed (and before you write the final report), run
-the repo's preflight gate so the orchestrator doesn't discover at ship time the
-checks that `npm test` + a build don't cover:
+⛔ **Do not run `scripts/preflight.sh`, in any form.** The orchestrator owns that
+gate and runs it the moment you return. You running it too is duplicated work on
+the critical path — and it is the single biggest cause of parked batch agents.
 
-```bash
-bash scripts/preflight.sh --skip-int
-```
+On 2026-07-29 **both** batch agents backgrounded their preflight, returned to the
+harness to wait for output, and stopped. A stopped agent does not resume, and its
+backgrounded shell dies with it, so each parked forever on a gate that was no
+longer running. Patching this instruction to "foreground only" moved compliance
+to 2-of-3 — still not a fix, because the pull toward backgrounding a
+several-minute command is structural, not a lapse. So the gate left your hands.
 
-⛔ **Run this in the FOREGROUND. Never with `run_in_background`, never with
-`&`, never piped to a file you intend to poll.** It takes several minutes and
-the temptation to background it is exactly the trap: on 2026-07-29 **both**
-batch agents backgrounded their preflight, returned to the harness to wait for
-output, and stopped. A stopped agent does not resume — its backgrounded shell
-died with it, so each one parked forever on a gate that was no longer running,
-and the orchestrator had to discover this by reading the process table and run
-the gate by hand. Block on the command and read its output directly.
+The asymmetry that settles it: **the orchestrator can safely background
+preflight and you cannot.** Its session persists across the wait and a Monitor
+wakes it on completion; your shell dies when you return. Same command, routine
+for it, a trap for you.
 
-Equally: **do not end your turn while preflight is pending.** If you find
-yourself about to say "waiting for preflight to finish, will report after" —
-that sentence means you have already made the mistake. Run it, wait for it,
-report the result in the same turn.
+So: commit your last ticket, write your final report, append the final log line,
+and return. Your `npm test` baseline deliberately does **not** cover knip, madge,
+the `Record<string, unknown>` budget, feature-inventory drift, test-assertion
+loosening, eslint or prettier — that's expected. Don't chase them.
 
-`--skip-int` is **mandatory here**: the integration + `db:verify` checks hit the
-**shared** dev DB (port 3397) that every parallel worktree points at — running
-them concurrently across batches corrupts each other's DB state. So you run
-everything *except* those; the orchestrator runs the full preflight (with the DB
-checks) serially at ship time. This is exactly the set of gates batch agents
-have historically skipped and then failed in CI: **knip** (dead code / unused
-exports), **madge** (import cycles), the **Record<string, unknown> budget**,
-**feature-inventory drift**, **test-assertion loosening**, plus eslint /
-prettier / tsc / unit tests.
-
-If preflight reports a failure, fix it and re-run until the non-int checks are
-green (or explicitly skipped). Fold the fixes into the relevant ticket's commit
-(or a small `fix:` commit if it spans several). Do **not** declare the batch
-done with a red structural preflight.
+If preflight then fails on your work, the orchestrator continues you via
+`SendMessage` with the failure text. Your context is still warm at that point,
+which makes you the right agent to *fix* it — just not the one to discover it.
 
 **Escape-hatch markers** — a few gates are PR-title-driven for genuinely-justified
 cases (the orchestrator adds these to the PR title at ship time; you just *flag*

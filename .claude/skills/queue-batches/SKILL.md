@@ -1,8 +1,8 @@
 ---
 name: queue-batches
 description: Use whenever the user invokes `/queue-batches` or `/queue-batches NxM` (e.g. `/queue-batches 3x5`), or says "queue up some batches", "kick off parallel work on some tickets", "run N groups of M issues in parallel".
-version: 1.1.0
-last_changed: 2026-07-29
+version: 1.2.0
+last_changed: 2026-07-30
 ---
 
 # Queue Batches
@@ -149,29 +149,64 @@ A background agent's task-notification fires whenever it stops — including whe
 it stops *mid-gate*. On 2026-07-29 two agents returned saying, in effect,
 *"still waiting on the background preflight; I'll report when it finishes"* —
 and there was no preflight. Each had backgrounded it, and the shell died with
-the agent. Both would have waited forever.
+the agent. Both would have waited forever. Agents no longer run preflight at all
+(see 5.5), but the failure *shape* generalises to any long command an agent is
+tempted to background.
 
 **Never take an agent's own account of its state at face value.** When an agent
 returns, check the log's last line first:
 
-- Last line is `ticket=all status=done` → genuinely finished.
+- Last line is `ticket=all status=done` → genuinely finished; go to 5.5.
 - Anything else → it parked. Establish what's actually running before doing
   anything else:
 
   ```bash
   ps aux | rg "<batch-name>" | rg -v "rg "     # your own `tail -f` monitor will show up — ignore it
-  ps aux | rg "preflight.sh" | rg -v "rg "
   ```
 
   A lone `tail -n 0 -f …/<batch>.log` and its parent `zsh` **is your monitor,
-  not the agent's work**. If nothing else is running, the gate is gone: run
-  `bash scripts/preflight.sh` yourself in that worktree, foreground, and append
-  the batch's own `status=done` line with a note recording that you ran it.
+  not the agent's work**. If nothing else is running, whatever it claimed to be
+  waiting on is gone — continue it with `SendMessage` telling it exactly that,
+  or finish the remaining tickets yourself.
 
-By the time every agent has returned, nothing is contending for the shared dev
-DB — so prefer the **full** preflight (no `--skip-int`) when you run it, which
-also covers the Kysely schema verify and integration tests the agents had to
-skip. That is the run ship-time needs anyway.
+### 5.5. Preflight gate — the ORCHESTRATOR runs this, never the agent
+
+The moment a batch logs `ticket=all status=done`, run the full preflight in that
+batch's worktree:
+
+```bash
+(cd .worktrees/<batch-name> && bash scripts/preflight.sh)
+```
+
+**You may background this** (`run_in_background: true` + `Monitor`) — and should,
+so you stay responsive to the other batches. That is safe *here* and unsafe in an
+agent: your session survives the wait and the Monitor wakes you; a returned
+agent's shell dies with it. That asymmetry is the entire reason this step lives
+with you. Merely *telling* agents to run it in the foreground moved compliance
+from 0-of-2 to 2-of-3 — the pull toward backgrounding a several-minute command is
+structural, not a lapse, so the gate moved instead.
+
+**Full, not `--skip-int`** — even while other batches are still working. Agents
+run `npm test`, which uses `server/vitest.config.ts` and excludes
+`**/*.int.test.ts`, so nothing in flight touches the int DB. The only thing that
+needs serialising is preflight-against-preflight: **one batch's preflight at a
+time.** A green full run here is exactly the run `/ship` Step 1.5 wants, so that
+step will have nothing left to find.
+
+If it fails:
+
+- **Mechanical** (prettier, eslint, lockfile) → fix it yourself; faster than a
+  round trip.
+- **Anything arising from the agent's own diff** (knip dead code, feature-inventory
+  rows, test-assertion loosening, a red unit test) → `SendMessage` the failing
+  output back to *that* agent. Its context is still warm, which makes it the
+  right one to repair it. Discovery moved to you; repair did not.
+- **An escape-hatch marker is the honest answer** (`[allow-test-loosening]`,
+  `[allow-record-bleed]`, `[allow-inventory-drift]`) → the agent should have
+  flagged it with a justification in its final report. Carry it to the PR title
+  at ship time.
+
+Never open a PR for a batch whose preflight is red.
 
 On question / `status=blocked` → surface to user with the batch name as a tag:
 
