@@ -56,9 +56,12 @@ set -uo pipefail
 # To update: review `git diff` of .forgejo/workflows/ci.yml, confirm this
 # script still mirrors the `lint-typecheck` + `test` jobs (update the checks
 # below if they changed), then set this to the value preflight prints.
-# Reconciled 2026-07-28 (#2022): the tests/ typecheck moved OUT of the `smoke`
+# Reconciled 2026-07-29 (#1670): `smoke` job's hardcoded spec list gained
+# e2e/1670-layout-flip.spec.ts. That's the `smoke` job, not `lint-typecheck` /
+# `test`, so no check below moved — hash bump only.
+# (Previously reconciled 2026-07-28 (#2022): the tests/ typecheck moved OUT of the `smoke`
 # job and into `lint-typecheck` (plus a `cd tests && npm ci` to feed it), so
-# preflight now mirrors it — see the "tests typecheck" check below.
+# preflight now mirrors it — see the "tests typecheck" check below.)
 # (Previously reconciled 2026-07-28 (#2010): the affected tier's `mc` download now goes
 # through scripts/ci/fetch-binary.sh instead of a bare curl. That step belongs
 # to the `smoke` job, which preflight does not mirror — the `lint-typecheck`
@@ -72,7 +75,7 @@ set -uo pipefail
 # CI remains the enforcer.)
 # (Previously reconciled 2026-07-19, #1736 Task 4: WT no-raw-color guard.)
 # (Previously reconciled 2026-07-14, #1360/#1701: smoke spec list.)
-EXPECTED_CI_HASH="40d82a0c5c1f0f6c08a5133c633490a67a3efc9265b63aed7e7413615b58bce8"
+EXPECTED_CI_HASH="156182d65eb08784a54216ad7d6ae64e5246a24381c12702fd47b725e924044f"
 
 # --- setup ------------------------------------------------------------------
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || {
