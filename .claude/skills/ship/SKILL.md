@@ -1,8 +1,8 @@
 ---
 name: ship
 description: Use when a development branch is ready to merge — the user invokes `/ship`, says "ship it", "ship this branch", or "open the PR". Handles the full docs + PR housekeeping for this repo; read the body before acting, the PR-body protocol has hard rules.
-version: 1.1.0
-last_changed: 2026-07-20
+version: 1.2.0
+last_changed: 2026-07-30
 ---
 
 # ship
@@ -342,6 +342,31 @@ Verify: device — keyboard-occlusion + visualViewport resize can't be reproduce
 ### Halting rule
 
 After interactive confirmation, if **any** `Ready #N` is missing a plan or escape hatch, **do not call Step 5**. Empty has to be a blocker — soft warnings get ignored, and the protocol's only value comes from the halt.
+
+## Step 4.6: Every deferred item needs a tracker — HALT if one doesn't have one
+
+A PR body that says a finding was *deliberately not fixed* reads as though that finding is parked somewhere. **Usually it isn't.** On 2026-07-30, PR #2071 shipped with a "Deliberately not fixed" section naming two findings: one existed only inside the body of the issue that PR was closing (so it would have died when that issue closed), and the other had never been filed at all. Aaron caught it by asking *"I assume there is an issue tracking these things somewhere?"* — nothing in this skill did.
+
+**Before opening the PR, scan the body you are about to post** for any section or phrase deferring work — the usual shapes are `## Deliberately not fixed`, `## Known gaps`, `## Not fixed here`, `## Out of scope`, `## Scope notes`, `## Follow-ups`, or inline prose like *"left for a separate pass"*, *"filed separately"*, *"worth a follow-up"*, *"noted but not addressed"*, *"a future ticket"*.
+
+For **each** deferred item, it must be one of:
+
+1. **An explicit `#N`** to an issue that exists and is **open** — verify it, don't trust the number you typed:
+   ```bash
+   curl -sS -H "Authorization: token $FORGEJO_TOKEN" \
+     "https://forge.example.com/api/v1/repos/aaron/darkwatch/issues/N" \
+     | jq -r '"#\(.number) [\(.state)] \(.title)"'
+   ```
+   A `closed` state is a fail, not a pass — it means the tracker is gone.
+2. **A newly filed issue** — file it now via `/issue`, then cite the number.
+
+**"It's mentioned in the issue this PR closes" does NOT count.** That is precisely the #2071 failure: the issue is about to move to `status/qa` and then close, taking the note with it. If a finding is going to outlive the ticket that surfaced it, it needs its own ticket.
+
+**HALT if any deferred item lacks a tracker.** Same reasoning as the test-plan halt above: a soft warning here gets skipped, and the whole value is in refusing to proceed. Filing the issue takes a minute; recovering a finding nobody wrote down takes an archaeology session, if it happens at all.
+
+Two things worth carrying into the issue you file:
+- **Say plainly when a report is thin.** If nobody has characterised the thing, write that into the body and make "reproduce and describe it" the first task. A vague ticket presented as actionable wastes the next person's time; a vague ticket that admits it doesn't.
+- **Note if this PR changed the ground under it.** If the code around the deferred finding moved in this same PR, say so — otherwise someone fixes it against the screenshot rather than the current code (#2076 had exactly this hazard: the element it describes was portaled to a new containing block by the very PR that deferred it).
 
 ## Step 5: Open the PR via Forgejo API
 

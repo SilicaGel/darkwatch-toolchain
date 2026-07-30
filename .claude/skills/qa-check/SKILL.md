@@ -1,8 +1,8 @@
 ---
 name: qa-check
 description: Use whenever the user invokes `/qa-check` (optionally `/qa-check <number>` for one issue), says "QA the qa issues", "check status/qa", "go through the qa list", "verify what's in qa", or asks "what's ready to close?" in a QA context — verifies open `status/qa` Forgejo issues.
-version: 1.0.0
-last_changed: 2026-07-05
+version: 1.1.0
+last_changed: 2026-07-30
 ---
 
 # QA Check
@@ -83,6 +83,20 @@ curl -sS -H "Authorization: token $FORGEJO_TOKEN" \
 ```
 
 If the result is empty, expand the PR search window (`limit=50`, paginate if needed). If still empty, this issue was closed without a referencing PR (manual close, API close, or a pre-#766 ship) — proceed to Step 2 with no plan.
+
+### While you have the PR body: check what it deferred
+
+You've already fetched the closing PR. **Before closing the issue, scan that same body for deferred work** — `Deliberately not fixed`, `Known gaps`, `Not fixed here`, `Out of scope`, `Follow-ups`, or inline prose like *"left for a separate pass"* / *"noted but not addressed"*:
+
+```bash
+grep -inE "deliberately not fixed|known gap|not fixed here|out of scope|follow-?up|left for|noted but not|separate pass" "$TMP/qa-pr-${N}.txt"
+```
+
+For each deferred item, confirm it carries a live `#N` — and **verify the issue is open**, since a number that resolves to a closed issue is a dead tracker, not a live one.
+
+**This is the last line of defence, and it exists because the first one leaked.** `/ship` Step 4.6 is supposed to catch this at PR time; on 2026-07-30 PR #2071 shipped two untracked findings anyway. QA is where it actually costs something: **closing the issue is the moment an untracked finding becomes unrecoverable**, because the note describing it usually lives in the issue body you're about to close.
+
+**Treat an untracked deferred item as `partial`, not `pass`** — the shipped work may be perfectly verified, but closing would destroy a finding. File the missing issue via `/issue` first (say plainly in the body if the report is thin and nobody has characterised it), then close. Surface it in the report so the user sees what was nearly lost, rather than silently fixing it.
 
 If a PR body was found, extract the `### #<N>` block from its `## Test plans` section:
 
