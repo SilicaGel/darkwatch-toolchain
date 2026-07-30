@@ -1,8 +1,8 @@
 ---
 name: queue-batches
 description: Use whenever the user invokes `/queue-batches` or `/queue-batches NxM` (e.g. `/queue-batches 3x5`), or says "queue up some batches", "kick off parallel work on some tickets", "run N groups of M issues in parallel".
-version: 1.0.0
-last_changed: 2026-07-05
+version: 1.1.0
+last_changed: 2026-07-29
 ---
 
 # Queue Batches
@@ -101,6 +101,7 @@ Show the triage: N batches × M tickets, zones, brief rationale per batch. Wait 
 Before dispatching, for each batch:
 - `git -C /path/to/darkwatch fetch origin main`
 - `git -C /path/to/darkwatch worktree add .worktrees/<batch-name> -b feat/<batch-name> origin/main`
+- **Provision the worktree: `cd .worktrees/<batch-name> && bash scripts/worktree-init.sh`.** A fresh worktree has no `.env` files and none of the four `node_modules` — this symlinks the former and copy-on-write-clones the latter in ~2s. Skipping it forces every agent into a multi-minute `npm ci` ×4, and an `npm install` inside a worktree corrupts the CoW clone. The agent prompt tells agents **not** to install anything, so this step is what makes that true.
 - Ensure `/tmp/queue-status/` exists; create empty `<batch-name>.log`
 - Pre-seed the log with a `ticket=#N status=queued` line for each ticket in the batch (smallest-first order). The statusline's second line reads this to render all tickets as `○` before agents start.
 - Render the prompt from `templates/agent-prompt.md` with placeholders filled
@@ -141,6 +142,36 @@ On every Monitor notification, parse the log line (format defined below), re-ren
 | final `ticket=all status=done` | The ship-batch task's children should already all be `completed` by this point; nothing extra |
 
 Match tasks to ticket numbers via the `[<batch>] #<N>` prefix in the subject.
+
+### An agent that returns without a `ticket=all status=done` line has PARKED, not finished
+
+A background agent's task-notification fires whenever it stops — including when
+it stops *mid-gate*. On 2026-07-29 two agents returned saying, in effect,
+*"still waiting on the background preflight; I'll report when it finishes"* —
+and there was no preflight. Each had backgrounded it, and the shell died with
+the agent. Both would have waited forever.
+
+**Never take an agent's own account of its state at face value.** When an agent
+returns, check the log's last line first:
+
+- Last line is `ticket=all status=done` → genuinely finished.
+- Anything else → it parked. Establish what's actually running before doing
+  anything else:
+
+  ```bash
+  ps aux | rg "<batch-name>" | rg -v "rg "     # your own `tail -f` monitor will show up — ignore it
+  ps aux | rg "preflight.sh" | rg -v "rg "
+  ```
+
+  A lone `tail -n 0 -f …/<batch>.log` and its parent `zsh` **is your monitor,
+  not the agent's work**. If nothing else is running, the gate is gone: run
+  `bash scripts/preflight.sh` yourself in that worktree, foreground, and append
+  the batch's own `status=done` line with a note recording that you ran it.
+
+By the time every agent has returned, nothing is contending for the shared dev
+DB — so prefer the **full** preflight (no `--skip-int`) when you run it, which
+also covers the Kysely schema verify and integration tests the agents had to
+skip. That is the run ship-time needs anyway.
 
 On question / `status=blocked` → surface to user with the batch name as a tag:
 
@@ -279,4 +310,8 @@ All overridable via user input during plan approval.
 - **Forgetting to launch `tail -f` + Monitor.** Without those, you're flying blind between completions.
 - **Letting the agent push.** Bake "no push" into the prompt every single time.
 - **Not handling `status=failed` distinctly.** A failure needs user attention immediately, not a status-table update.
+- **Believing an agent's "I'm done" over its log.** Check the last log line for `ticket=all status=done`; anything else means it parked mid-gate (see the section above). Two of two agents did this on 2026-07-29.
+- **Forgetting to provision the worktree.** Without `scripts/worktree-init.sh` the agent has no `.env` and no `node_modules`, and will try to `npm install` its way out — which corrupts the CoW clone.
+- **Reading a baseline red as pre-existing.** Concurrent batches saturate the box; timeout failures under load are artifacts. Re-run the single test once it's quiet and compare messages.
+- **Skipping the file blocklist when another session is live.** If a design/refactor lane is running in its own worktree, name the files it owns in every agent prompt — path collisions surface as merge conflicts hours later, not at dispatch.
 

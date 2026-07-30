@@ -18,23 +18,35 @@ I'm dispatching you as a background sub-agent to work through a queue of Darkwat
 ## Setup (do this first, before anything else)
 
 ```bash
-cd /path/to/darkwatch
-git fetch origin main
-
-# Worktree already created by orchestrator; just cd into it
+# Worktree already created AND provisioned by the orchestrator; just cd into it
 cd {worktree_path}
 
-# Install + baseline
-(cd server && npm install)
-(cd client && npm install)
-(cd server && npm test) && (cd client && npm test)
+# Baseline. NOTE: this repo has NO npm workspaces — you must cd into each
+# package. Client tests REQUIRE `-- --run` or vitest hangs forever in watch mode.
+(cd server && npm test)
+(cd client && npm run test -- --run)
 
 # Ensure log file exists (orchestrator created it but empty)
 mkdir -p /tmp/queue-status
 touch {log_path}
 ```
 
+⛔ **Do NOT run `npm install` or `npm ci` anywhere in the worktree.** The
+orchestrator already ran `scripts/worktree-init.sh`, which symlinks the env
+files and provisions all four `node_modules` as copy-on-write clones (~2s).
+Installing over that corrupts the clone and costs minutes for nothing. If a
+package genuinely appears to be missing, **safety-valve** — do not "fix" it
+with an install.
+
 Record the baseline test counts. You'll report deltas at the end.
+
+⚠️ **A baseline failure is not automatically a pre-existing failure.** Several
+batches run concurrently, so the box can be heavily oversubscribed while
+everyone's baseline runs at once (one real run hit load average 88 on 12
+cores). Under that, timeout-sensitive specs fail spuriously. Before recording
+anything as pre-existing: re-run that single test on its own once load settles,
+and compare failure **messages**, not just pass/fail counts. Red on both sides
+is not proof of pre-existing.
 
 ## Tickets (execute in this order)
 
@@ -149,8 +161,22 @@ the repo's preflight gate so the orchestrator doesn't discover at ship time the
 checks that `npm test` + a build don't cover:
 
 ```bash
-scripts/preflight.sh --skip-int
+bash scripts/preflight.sh --skip-int
 ```
+
+⛔ **Run this in the FOREGROUND. Never with `run_in_background`, never with
+`&`, never piped to a file you intend to poll.** It takes several minutes and
+the temptation to background it is exactly the trap: on 2026-07-29 **both**
+batch agents backgrounded their preflight, returned to the harness to wait for
+output, and stopped. A stopped agent does not resume — its backgrounded shell
+died with it, so each one parked forever on a gate that was no longer running,
+and the orchestrator had to discover this by reading the process table and run
+the gate by hand. Block on the command and read its output directly.
+
+Equally: **do not end your turn while preflight is pending.** If you find
+yourself about to say "waiting for preflight to finish, will report after" —
+that sentence means you have already made the mistake. Run it, wait for it,
+report the result in the same turn.
 
 `--skip-int` is **mandatory here**: the integration + `db:verify` checks hit the
 **shared** dev DB (port 3397) that every parallel worktree points at — running
