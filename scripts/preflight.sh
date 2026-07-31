@@ -22,13 +22,23 @@
 #   - e2e-full.yml         → full nightly Playwright suite (whole tests/e2e)
 #   - lighthouse.yml       → Lighthouse CI
 #
-# DATABASE LANES (#1984)
-#   The integration step runs against `darkwatch_int`, its own database inside
-#   darkwatch-maria — NOT the dev database. A concurrent dev server, /qa-check
-#   run or local e2e session can no longer perturb it (that collision cost a
-#   diagnosis cycle on 2026-07-26: preflight went red on int tests while a
-#   qa-check run drove the same DB, and all 1069 passed on an immediate re-run).
+# DATABASE LANES (#1984, #2062)
+#   The integration step runs against its own database inside darkwatch-maria —
+#   NOT the dev database. A concurrent dev server, /qa-check run or local e2e
+#   session can no longer perturb it (that collision cost a diagnosis cycle on
+#   2026-07-26: preflight went red on int tests while a qa-check run drove the
+#   same DB, and all 1069 passed on an immediate re-run).
+#
+#   #2062 — that database is now PER CHECKOUT, because #1984 only stopped
+#   EXTERNAL writers. Two worktrees running preflight at once still shared one
+#   `darkwatch_int` and interleaved writes on the same tables (observed in PR
+#   #2079). The primary checkout keeps `darkwatch_int`; a linked worktree gets
+#   `darkwatch_int_<slug>`. Nothing to remember — the first `test:int` in a new
+#   worktree builds its database automatically (~7s, once).
+#
 #   Rebuild it with `cd server && npm run test:int:reset`.
+#   Reclaim databases whose worktree is gone: `cd server && npm run db:int:reap`
+#   (dry run; add `-- --delete` to act).
 #
 #   The DEV database (`darkwatch`) is deliberately long-lived and dirty, and
 #   nothing here resets it. That is the only lane where repeat-run bugs can
@@ -313,7 +323,16 @@ DB_PORT="$(envval DB_PORT)"; DB_PORT="${DB_PORT:-3397}"
 # that have nothing to do with the branch (observed: character_conditions.
 # rounds_total from an unrelated worktree failed BOTH this check and every int
 # file). `npm run db:verify` falls back to a hardcoded dev URL, so pass one.
-INT_DB_NAME_PF="${INT_DB_NAME:-darkwatch_int}"
+# #2062 — the name is DERIVED, not hardcoded: the primary checkout keeps
+# `darkwatch_int`, a linked worktree gets `darkwatch_int_<slug>`. Two worktrees
+# running preflight at once no longer interleave writes on one database (the
+# int-vs-int case #1984 left open — observed in PR #2079). The rule lives in
+# server/scripts/int-db-name.mjs so bash and vitest.int.config.ts cannot drift;
+# an explicit INT_DB_NAME/DB_NAME still wins, which is how CI is unaffected.
+INT_DB_NAME_PF="$(cd server && node scripts/int-db-name.mjs)" || {
+  echo "${RED}FATAL:${RESET} could not resolve the integration database name" >&2
+  exit 1
+}
 INT_DB_USER="$(envval DB_USER)";     INT_DB_USER="${INT_DB_USER:-darkwatch}"
 INT_DB_PASS="$(envval DB_PASSWORD)"; INT_DB_PASS="${INT_DB_PASS:-darkwatch_dev}"
 INT_DB_URL="mysql://${INT_DB_USER}:${INT_DB_PASS}@127.0.0.1:${DB_PORT}/${INT_DB_NAME_PF}"
@@ -326,8 +345,9 @@ elif (echo > "/dev/tcp/127.0.0.1/$DB_PORT") 2>/dev/null; then
   run_check "Kysely schema verify" bash -c "cd server && DATABASE_URL='$INT_DB_URL' npm run db:verify"
   run_check "server integration tests" bash -c "cd server && npm run test:int"
   if [ "${#FAIL[@]}" -gt "$int_before" ]; then
-    echo "  ${YELLOW}hint:${RESET} the int lane runs against its own ${BOLD}darkwatch_int${RESET} database (#1984), so a"
-    echo "        concurrent dev / qa-check / e2e session is no longer a plausible cause. It can still"
+    echo "  ${YELLOW}hint:${RESET} the int lane runs against its own ${BOLD}${INT_DB_NAME_PF}${RESET} database (#1984/#2062), so"
+    echo "        neither a concurrent dev / qa-check / e2e session NOR another worktree's int run is a"
+    echo "        plausible cause — this checkout owns that database outright. It can still"
     echo "        drift from a clean migrate+seed if a feature-branch worktree applied migrations that"
     echo "        aren't on the current checkout. CI runs against a clean container, so a green CI + red"
     echo "        local on the same commit usually means local-state drift, not a code bug (see #769)."
