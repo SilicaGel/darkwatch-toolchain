@@ -71,6 +71,49 @@ test("ignores changes in non-test files", () => {
   assert.deepEqual(analyzeDiff(diff), []);
 });
 
+// #1986 — a comment-only edit that happens to mention expect()/matchers must
+// not read as a deleted or downgraded assertion. Mirrors the #1982 fix for
+// check-record-type-budget.mjs: comment lines are stripped before counting.
+test("does NOT flag a comment-only reword mentioning expect() (#1986)", () => {
+  const diff = diffFor(
+    "src/foo.test.ts",
+    "-// We expect(row).toBe(1) here because the panel owns the title.\n" +
+      "+// The panel owns the title, so the count is pinned; toBeDefined() would not do.",
+  );
+  assert.deepEqual(analyzeDiff(diff), []);
+});
+
+test("does NOT flag a comment-only reword mentioning a strong/weak matcher pair (#1986)", () => {
+  // Heuristic (b) was not reproducible as a false positive per the ticket's own
+  // investigation, but it shares the same unfiltered input — pin it as safe
+  // rather than assuming so by luck.
+  const diff = diffFor(
+    "src/foo.test.ts",
+    "-  // used to assert toEqual({a:1}) here\n+  // now effectively toBeDefined() per the refactor",
+  );
+  assert.deepEqual(analyzeDiff(diff), []);
+});
+
+test("a real deleted assertion is still caught even with comment-stripping (#1986 guard-still-guards)", () => {
+  const diff = diffFor(
+    "src/foo.test.ts",
+    "   const r = run();\n-  expect(r.total).toBe(11);\n   cleanup();",
+  );
+  const f = analyzeDiff(diff);
+  assert.equal(f.length, 1);
+  assert.equal(f[0].kind, "deleted-assertion");
+});
+
+test("a declaration with a trailing comment still counts (#1986)", () => {
+  const diff = diffFor(
+    "src/foo.test.ts",
+    "   const r = run();\n-  expect(r.total).toBe(11); // was the old total\n   cleanup();",
+  );
+  const f = analyzeDiff(diff);
+  assert.equal(f.length, 1);
+  assert.equal(f[0].kind, "deleted-assertion");
+});
+
 test("evaluate: findings without the marker fail", () => {
   const r = evaluate({
     findings: [{ file: "a.test.ts", kind: "deleted-assertion", detail: "x" }],

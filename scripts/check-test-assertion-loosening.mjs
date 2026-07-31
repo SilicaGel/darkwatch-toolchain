@@ -50,10 +50,19 @@ const hasMatcher = (line, names) => names.some((m) => line.includes(`.${m}(`));
 const countExpects = (lines) =>
   lines.reduce((n, l) => n + (l.match(/\bexpect\s*\(/g)?.length ?? 0), 0);
 
+// A line whose first non-whitespace characters open a comment (`//`, `*` block
+// continuation, `/*` block opener) is prose, not code — skip it. A line like
+// `expect(x).toBe(1); // why` is real code with a trailing comment and still
+// counts, since the *first* non-whitespace char is `e`, not a comment marker.
+// Mirrors the #1982 fix for check-record-type-budget.mjs's COMMENT_LINE.
+const COMMENT_LINE = /^\s*(\/\/|\/\*|\*)/;
+
 /**
  * Parse a unified diff into per-test-file `{ removed[], added[] }` (content
- * lines, `+`/`-` stripped). Non-test files are dropped. Multiple diff blocks for
- * the same file accumulate.
+ * lines, `+`/`-` stripped, comment-only lines dropped). Non-test files are
+ * dropped. Multiple diff blocks for the same file accumulate. Comment lines
+ * are filtered here — at the shared parsing step — because this output feeds
+ * both heuristics (a) deleted-assertion and (b) matcher-downgrade (#1986).
  */
 function parseTestFileChanges(diff) {
   const byFile = new Map();
@@ -68,8 +77,13 @@ function parseTestFileChanges(diff) {
     }
     if (raw.startsWith("diff --git") || raw.startsWith("--- ")) continue;
     if (!keep || !file) continue;
-    if (raw.startsWith("+")) byFile.get(file).added.push(raw.slice(1));
-    else if (raw.startsWith("-")) byFile.get(file).removed.push(raw.slice(1));
+    if (raw.startsWith("+")) {
+      const line = raw.slice(1);
+      if (!COMMENT_LINE.test(line)) byFile.get(file).added.push(line);
+    } else if (raw.startsWith("-")) {
+      const line = raw.slice(1);
+      if (!COMMENT_LINE.test(line)) byFile.get(file).removed.push(line);
+    }
   }
   return byFile;
 }
