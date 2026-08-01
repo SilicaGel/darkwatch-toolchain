@@ -812,6 +812,7 @@ jobs:
             e2e/1360-undo-revert.spec.ts \
             e2e/1917-wt-addmap-clickable.spec.ts \
             e2e/1670-layout-flip.spec.ts \
+            e2e/2114-wave1-wt-chrome.spec.ts \
             $EXTRA_SPECS \
             --reporter=line
 
