@@ -417,6 +417,18 @@ run_check "WT type floor" node scripts/check-wt-type-floor.mjs
 # swallow the warning behind an "OK" and the backstop would be invisible. Print
 # its output directly instead, and never touch PASS/FAIL — this cannot fail
 # preflight, by design.
+# #2084 — worktree heartbeat. Same shape as the roadmap staleness check below:
+# warn-only, printed directly, can NEVER fail preflight. Read-only (git +
+# tracker lookups); it removes nothing.
+echo "${BOLD}worktrees (#2084)${RESET}"
+wt_out="$(node scripts/worktree-tidy.mjs --count 2>&1)"
+if printf '%s' "$wt_out" | grep -q 'WARNING'; then
+  printf '  %-34s %sWARN%s\n' "▶ reclaimable worktrees" "$YELLOW" "$RESET"
+  echo "$DIM"; printf '%s\n' "$wt_out" | sed 's/^/      | /'; echo "$RESET"
+else
+  printf '  %-34s %sOK%s\n' "▶ reclaimable worktrees" "$GREEN" "$RESET"
+fi
+
 echo "${BOLD}docs cadence (#1398)${RESET}"
 roadmap_out="$(node scripts/check-roadmap-staleness.mjs 2>&1)"
 if printf '%s' "$roadmap_out" | grep -q 'WARNING'; then
