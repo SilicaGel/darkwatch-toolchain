@@ -684,6 +684,12 @@ jobs:
           NODE_ENV: test
           ALLOW_TEST_HOOKS: "true"
           TEST_HOOK_SECRET: e2e-test-hook-secret
+          # #2116 — the seeded `Admin` account's id is fixed (ADMIN_FIXED_ID in
+          # server/src/seeds/core.ts, pinned by seeds.int.test.ts), but without
+          # this the server treats it as an ordinary user and every admin route
+          # renders its "no admin access" notice. That is why 2116-wave3's two
+          # admin tests passed locally (where .env sets it) and failed here.
+          ADMIN_USER_IDS: ad000000-0000-7000-8000-000000000001
           JWT_SECRET: e2e-test-secret
           CLIENT_URL: http://localhost:5173
           # See e2e-full.yml — disable per-user/per-IP socket caps for CI runs
@@ -814,6 +820,7 @@ jobs:
             e2e/1670-layout-flip.spec.ts \
             e2e/2114-wave1-wt-chrome.spec.ts \
             e2e/2115-wave2-wt-chrome.spec.ts \
+            e2e/2116-wave3-wt-chrome.spec.ts \
             $EXTRA_SPECS \
             --reporter=line
 

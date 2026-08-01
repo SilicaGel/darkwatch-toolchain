@@ -85,7 +85,7 @@ set -uo pipefail
 # CI remains the enforcer.)
 # (Previously reconciled 2026-07-19, #1736 Task 4: WT no-raw-color guard.)
 # (Previously reconciled 2026-07-14, #1360/#1701: smoke spec list.)
-EXPECTED_CI_HASH="a837caeb58d43f2780ecd94e2206671e781d0e313d25a01acf7afcde877a5a91"
+EXPECTED_CI_HASH="dcd612c117f1965abb9fcb917edfca9f9ae020501b2c33033385f1fac42ad6be"
 
 # --- setup ------------------------------------------------------------------
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || {
