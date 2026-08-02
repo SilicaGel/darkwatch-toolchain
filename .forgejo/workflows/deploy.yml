@@ -126,6 +126,7 @@ jobs:
           DB_USER: ${{ secrets.DB_USER }}
           DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
           JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          TOTP_ENCRYPTION_KEY: ${{ secrets.TOTP_ENCRYPTION_KEY }}
           CLIENT_URL: ${{ secrets.CLIENT_URL }}
           EXTRA_ALLOWED_ORIGINS: ${{ secrets.EXTRA_ALLOWED_ORIGINS }}
           WAITLIST_PUBLIC_URL: ${{ secrets.WAITLIST_PUBLIC_URL }}
@@ -153,6 +154,7 @@ jobs:
             printf 'DB_USER=%s\n' "$DB_USER"
             printf 'DB_PASSWORD=%s\n' "$DB_PASSWORD"
             printf 'JWT_SECRET=%s\n' "$JWT_SECRET"
+            printf 'TOTP_ENCRYPTION_KEY=%s\n' "$TOTP_ENCRYPTION_KEY"
             printf 'CLIENT_URL=%s\n' "$CLIENT_URL"
             printf 'EXTRA_ALLOWED_ORIGINS=%s\n' "$EXTRA_ALLOWED_ORIGINS"
             printf 'WAITLIST_PUBLIC_URL=%s\n' "$WAITLIST_PUBLIC_URL"
@@ -209,3 +211,34 @@ jobs:
           sudo -n install -m 644 -o root -g root deploy/Caddyfile /etc/caddy/Caddyfile
           sudo -n systemctl reload caddy
           echo "Caddy reloaded with repo Caddyfile."
+
+      - name: Verify the deployed server actually booted (#2141)
+        # `docker compose up -d` returns as soon as the container is CREATED,
+        # not when the app inside it works — so a server that dies on boot and
+        # restarts forever reports a perfectly green deploy. That is exactly
+        # what happened on 2026-08-01: v0.192.0 crash-looped 10,616 times on a
+        # missing TOTP_ENCRYPTION_KEY and production was down for 35 hours with
+        # nothing red anywhere to say so.
+        #
+        # Ordered LAST, after Caddy, so this is a pure verdict on a fully
+        # deployed stack. It deliberately does NOT roll back — a red job here
+        # means "what you just shipped is broken", and the logs below say why.
+        # Hitting :8080 (the server's published port) rather than going through
+        # Caddy keeps this an answer about the APP, not the proxy.
+        run: |
+          echo "Waiting for the server to report healthy..."
+          for i in $(seq 1 40); do
+            if BODY=$(curl -fsS --max-time 5 http://localhost:8080/health 2>/dev/null); then
+              echo "Healthy after ~$((i * 3))s: $BODY"
+              exit 0
+            fi
+            sleep 3
+          done
+          echo "::error::Server did not become healthy within 120s — the deploy is live but BROKEN."
+          echo "--- docker ps ---"
+          docker ps --filter name=darkwatch-server --format '{{.Names}}\t{{.Status}}' || true
+          echo "--- restart count ---"
+          docker inspect darkwatch-server --format 'RestartCount={{.RestartCount}}' || true
+          echo "--- last 60 log lines ---"
+          docker logs darkwatch-server --tail 60 2>&1 || true
+          exit 1
