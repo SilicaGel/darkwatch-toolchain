@@ -230,6 +230,15 @@ jobs:
           NODE_ENV: test
           ALLOW_TEST_HOOKS: "true"
           TEST_HOOK_SECRET: e2e-test-hook-secret
+          # #2116/#2149 — the seeded `Admin` account's id is fixed (ADMIN_FIXED_ID
+          # in server/src/seeds/core.ts); without this the server treats it as an
+          # ordinary user and every admin route renders its "no admin access"
+          # notice. ci.yml's smoke job gained this line when 2116-wave3 was
+          # written; this lane never did, and e2e-full is skipped on PRs — so the
+          # four admin specs had never run in CI at all until the 2026-08-02
+          # nightly, where they failed shard 2 and blocked the deploy gate.
+          # Keep in sync with ci.yml's smoke job.
+          ADMIN_USER_IDS: ad000000-0000-7000-8000-000000000001
           JWT_SECRET: e2e-test-secret
           CLIENT_URL: http://localhost:5173
           # Same socket-cap relaxation as ci.yml's smoke job (#388): the suite runs as one
