@@ -1,8 +1,8 @@
 ---
 name: qa-check
 description: Use whenever the user invokes `/qa-check` (optionally `/qa-check <number>` for one issue), says "QA the qa issues", "check status/qa", "go through the qa list", "verify what's in qa", or asks "what's ready to close?" in a QA context — verifies open `status/qa` Forgejo issues.
-version: 1.1.0
-last_changed: 2026-07-30
+version: 1.2.0
+last_changed: 2026-08-03
 ---
 
 # QA Check
@@ -54,6 +54,37 @@ qa-check-specific rule:
 - **Strip `status/qa` on every close:** `DELETE /issues/{n}/labels/38` (label id 38 = `status/qa`). The label means "awaiting verification" — once verified-and-closed, the label is misleading and clutters future audits. Forgejo silently 204s on already-absent labels, so run it unconditionally — a "wontfix" / "duplicate" / "scope-changed" close shouldn't leave the label behind either.
 
 ## Flow
+
+### Step 0 — Prove the environment before trusting a single result
+
+**Run this FIRST, every pass, before fetching the queue:**
+
+```bash
+npm run qa:preflight
+```
+
+It fails loudly on the two states that silently invalidate an entire pass:
+
+- **a checkout behind `origin/main`** — on 2026-08-03 the tree was six commits
+  behind, so fifteen of twenty-four issues under verification had shipped in PRs
+  that weren't present at all. Reading the source for #2099 showed the pre-fix
+  CSS still in place: one grep away from reporting a shipped fix as "not done".
+- **a dev server that isn't running this code** — `:3000` was held by a
+  46-hour-old orphan `tsx watch` from a worktree that had since been deleted.
+  Specs ran green against code nobody was looking at.
+
+Neither announces itself. A stale checkout looks clean; a stale server answers
+200 exactly like a current one. The script compares the running server's
+`commit`/`root` (dev-only fields on `/health`) against the working tree, so a
+mismatch is a hard failure rather than a silent wrong answer.
+
+**If it reports a blocking problem, fix that before anything else** — usually
+`git merge --ff-only origin/main` followed by `restart-local-dev`. Do not start
+verifying issues against an environment that just told you it is lying.
+
+A green run still leaves warnings worth reading (uncommitted tracked files, a
+server up for 12+ hours). Neither blocks, but both are worth a glance when a
+result later looks strange.
 
 ### Step 1 — Fetch the QA queue
 
@@ -420,6 +451,7 @@ All commands run as `cd tests && npx tsx qa-check/tools/qa.ts <cmd>`.
 
 | Tool | Example |
 |------|---------|
+| qa:preflight | `npm run qa:preflight` — **Step 0**; proves the checkout and the running servers are current |
 | qa seed | `cd tests && npx tsx qa-check/tools/qa.ts seed all` |
 | qa reach | `cd tests && npx tsx qa-check/tools/qa.ts reach TwoFactorSettings --kind component` |
 | qa db check | `cd tests && npx tsx qa-check/tools/qa.ts db check --tables roll_log` (manual) |
@@ -444,7 +476,7 @@ Copy the relevant template to `tests/qa-check/<N>/spec.ts`, rename the test, upd
 
 - **Single-issue mode.** `/qa-check 269` → fetch just that issue, run its applicable mode, present a one-section report. Same close walkthrough.
 - **Forgejo unreachable.** Fail loudly with the curl error. Don't fall back to local guesses; the user needs to know the API isn't responding.
-- **Dev server is down (or on the wrong version).** Down is a *fixable obstacle*, not a code-read license (see "Obstructed surface ≠ no surface"): **`restart-local-dev` first, then drive.** Only if it genuinely won't start after that do you drop to code-only mode for the would-have-been-Playwright issues — and flag them as unverified-pending (visual), not closed.
+- **Dev server is down (or on the wrong version).** `npm run qa:preflight` (Step 0) detects this mechanically now — it compares the server's reported `commit`/`root` against the working tree. Down is a *fixable obstacle*, not a code-read license (see "Obstructed surface ≠ no surface"): **`restart-local-dev` first, then drive.** Only if it genuinely won't start after that do you drop to code-only mode for the would-have-been-Playwright issues — and flag them as unverified-pending (visual), not closed.
 - **Issue body is one line of "see slack thread."** No useful hints. Classify visual-only and ask the user for the relevant artifact in the clarifying-question section.
 
 ## Why this design
