@@ -1,7 +1,7 @@
 {
   "$comment": [
     "Advisories that do NOT gate CI, with a written justification and a hard expiry.",
-    "Adding an entry here is a deliberate, reviewable act — never a silent suppression.",
+    "Adding an entry here is a deliberate, reviewable act \u2014 never a silent suppression.",
     "",
     "Rules enforced by scripts/audit-gate.mjs:",
     "  - An entry suppresses ONLY the named advisory in the named workspace.",
@@ -21,6 +21,22 @@
       "issue": 1883,
       "expires": "2026-10-31",
       "reason": "RSC-mode-only CSRF bypass. Darkwatch is a Vite SPA using react-router in DECLARATIVE mode (BrowserRouter + Routes/Route); it does not use React Server Components. Verified no RSC surface exists in client/src: no unstable_RSC, createCallServer, RSCHydratedRouter, and no @vitejs/plugin-rsc dependency. The vulnerable code path is therefore unreachable in this application. No fix is available on the React 18 line: react-router 7.18.1 is the last 7.x and is in the vulnerable range, while every 8.x release requires React >=19.2.7. Clearing this properly means a React 18 -> 19 upgrade, tracked in the issue above."
+    },
+    {
+      "ghsa": "GHSA-52f5-9888-hmc6",
+      "package": "tmp",
+      "workspaces": ["."],
+      "issue": 2159,
+      "expires": "2026-11-30",
+      "reason": "Dev-only, and the offered 'fix' is destructive. tmp reaches this repo ONLY through @lhci/cli@0.15.1 (its own tmp@0.1.0, plus tmp@0.0.33 via inquirer@6.5.2 -> external-editor). npm's fixAvailable is @lhci/cli@0.1.0 flagged isSemVerMajor \u2014 a DOWNGRADE of Lighthouse CI to a 2019-era release, so `npm audit fix --force` would break the Lighthouse jobs to silence this. The root workspace has zero runtime dependencies (\"dependencies\": {}), so nothing here is installed in the production image or reachable by a user; the advisory is exercised only when Lighthouse CI runs, in CI, over our own inputs. Clearing it properly needs @lhci/cli to modernise inquirer, or for us to drop @lhci/cli \u2014 tracked in the issue above."
+    },
+    {
+      "ghsa": "GHSA-8cvf-q4jm-h6q8",
+      "package": "js-yaml",
+      "workspaces": ["."],
+      "issue": 2159,
+      "expires": "2026-11-30",
+      "reason": "Dev-only, and no override is safe. js-yaml@3.14.2 is pulled solely by @lhci/utils@0.15.1 (under @lhci/cli). The vulnerable range is <=3.14.2, so clearing it means forcing 4.x/5.x onto a 3.x consumer \u2014 and js-yaml 4 REMOVED safeLoad/safeDump, the exact API a 3.x caller uses, so the override would likely break lhci at runtime rather than fix it. Same containment as the tmp entry above: the root workspace ships nothing (\"dependencies\": {}), and this code path only runs when Lighthouse CI does. Tracked in the issue above."
     }
   ]
 }

@@ -76,6 +76,11 @@ set -uo pipefail
 # through scripts/ci/fetch-binary.sh instead of a bare curl. That step belongs
 # to the `smoke` job, which preflight does not mirror — the `lint-typecheck`
 # and `test` jobs are unchanged, so no check below moved.)
+# (Reconciled 2026-08-03, #2159: `lint-typecheck` gained a THIRD "Security
+# audit" step covering the ROOT workspace, which had never been gated and had
+# quietly accumulated eight high advisories. Preflight still does NOT mirror
+# any of the three, for the same live-feed reason given in the 2026-07-24 note
+# below — a third one changes nothing about that. No check below moved.)
 # (Previously reconciled 2026-07-24, #1883: the two "Security audit" steps now
 # call scripts/audit-gate.mjs — npm audit plus a justified, expiring allowlist
 # — instead of `npm audit --audit-level=high` directly. Severity policy is
@@ -85,7 +90,7 @@ set -uo pipefail
 # CI remains the enforcer.)
 # (Previously reconciled 2026-07-19, #1736 Task 4: WT no-raw-color guard.)
 # (Previously reconciled 2026-07-14, #1360/#1701: smoke spec list.)
-EXPECTED_CI_HASH="dcd612c117f1965abb9fcb917edfca9f9ae020501b2c33033385f1fac42ad6be"
+EXPECTED_CI_HASH="209ed0f22f98f38fad252c4cc9c9bbd4e70af1e9e00a5e72e88940e5793cd133"
 
 # --- setup ------------------------------------------------------------------
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || {

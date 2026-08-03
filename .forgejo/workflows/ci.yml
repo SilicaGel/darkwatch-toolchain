@@ -173,6 +173,22 @@ jobs:
       # GHSA in a named workspace, with a written justification and a hard expiry
       # (past it the gate goes red again, forcing re-review). Severity policy is
       # unchanged: high + critical gate, moderate/low do not.
+      # #2159 — the ROOT workspace is gated too. It was omitted when this gate
+      # was written, on the reasoning that it carries no runtime dependencies
+      # ("dependencies": {} — 14 devDependencies), so nothing in it reaches the
+      # production image. True, but the consequence was that root accumulated
+      # advisories silently and nobody learned about them until someone ran
+      # audit-gate.mjs by hand — eight had piled up by 2026-08-03, including one
+      # whose only offered "fix" was a destructive downgrade of Lighthouse CI.
+      # Gating it means a PR that adds a vulnerable dev tool says so at PR time,
+      # which is the whole point of the gate; genuinely unfixable ones go in the
+      # allowlist with an expiry, as tmp and js-yaml now are.
+      - name: Security audit (root)
+        run: |
+          if node scripts/audit-gate.mjs .; then exit 0; fi
+          if [ "${{ github.event_name }}" = "pull_request" ]; then exit 1; fi
+          echo "::warning::npm audit (root) found high-severity advisories — advisory on main (not blocking)."
+
       - name: Security audit (server)
         run: |
           if node scripts/audit-gate.mjs server; then exit 0; fi
