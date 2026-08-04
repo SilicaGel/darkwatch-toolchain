@@ -532,6 +532,45 @@ jobs:
     # affected tier can append up to 20 nightly-only specs (+MinIO + all-tier
     # seed) on PRs touching a mapped area, so allow headroom above the base.
     timeout-minutes: 45
+    env:
+      # The PR smoke set, in ONE place (#2167). It is passed to both shard
+      # steps below; duplicating the list inline would let the two halves drift
+      # apart silently.
+      #
+      # It has to live in this file as literal `e2e/*.spec.ts` text: both
+      # scripts/check-e2e-tiers.mjs and scripts/affected-e2e.mjs regex the smoke
+      # set straight out of ci.yml (`/e2e\/[\w.-]+\.spec\.ts/g` into a Set) so
+      # their idea of "what smoke runs" cannot drift from what actually runs.
+      # Moving this to an external file would silently break both.
+      #
+      # character-creation.spec is excluded (#490) — confirmed in run 743 to be
+      # a real step-3 PATCH waiter race, separate from the Zod cascade that #501
+      # fixed. Re-enable only after the underlying race is investigated and the
+      # waiter is hardened (or the wizard's debounce is stabilised).
+      SMOKE_SPECS: >-
+        e2e/a11y.spec.ts
+        e2e/dashboard.spec.ts
+        e2e/death-timer.spec.ts
+        e2e/crit-banner.spec.ts
+        e2e/campaign-creation.spec.ts
+        e2e/level-up.spec.ts
+        e2e/condition-expiry.spec.ts
+        e2e/dm-player-visibility.spec.ts
+        e2e/character-sheet-ownership-gating.spec.ts
+        e2e/picker-commits.spec.ts
+        e2e/combat-damage.spec.ts
+        e2e/1522-combat-core-cluster.spec.ts
+        e2e/1531-morale-raw-logging.spec.ts
+        e2e/rest-button.spec.ts
+        e2e/spell-exhaustion.spec.ts
+        e2e/theme-contrast.spec.ts
+        e2e/773-help-page.spec.ts
+        e2e/1360-undo-revert.spec.ts
+        e2e/1917-wt-addmap-clickable.spec.ts
+        e2e/1670-layout-flip.spec.ts
+        e2e/2114-wave1-wt-chrome.spec.ts
+        e2e/2115-wave2-wt-chrome.spec.ts
+        e2e/2116-wave3-wt-chrome.spec.ts
     # #969 — run inside the prebuilt CI image (Node 22 + Chromium + Playwright
     # system deps baked). No apt install-deps, no browser download, no
     # actions/setup-node. Pinned to the @playwright/test version; rebuilt by
@@ -784,7 +823,28 @@ jobs:
       # static check and does not need this job's stack. `npm ci` above stays:
       # smoke still needs the deps to actually run Playwright.)
 
-      - name: Smoke — run critical specs (+ affected nightly-only tier, #1621)
+      # Memory (#2167): smoke is sharded into 2 with a Vite restart between them,
+      # for the same reason e2e-full.yml shards into 3 — a single long-lived Vite
+      # preview accumulates heap across test contexts and gets OOM-killed
+      # mid-suite in the capped container. Do NOT "simplify" this back into one
+      # invocation, and do NOT reach for a bigger --max-old-space-size instead:
+      # the accumulation is unbounded, so a larger cap moves the cliff rather
+      # than removing it.
+      #
+      # Measured when this landed: e2e-full runs ~148 tests per shard and is
+      # green; smoke was running ~168 through ONE Vite process — more per
+      # process than the job that was sharded specifically to avoid this. The
+      # base set is 135 tests / 23 files, plus up to 20 more specs from the
+      # affected tier (#1621), so the run grows without anyone deciding to grow
+      # it. Two shards puts each half around 84, well under e2e-full's
+      # demonstrated-safe 148, with room for smoke to roughly double first.
+      #
+      # Two, not three: Playwright shards by FILE here (workers: 1, not
+      # fullyParallel), and on the base set a 3-way split degenerates to
+      # 45 / 90 / 0 — an empty third shard, a wasted restart, and worse balance
+      # than 2-way's 69 / 66. theme-contrast.spec.ts alone is 52 tests in one
+      # file and cannot be split at all, which floors how fine this can usefully go.
+      - name: Smoke — run critical specs, shard 1/2 (+ affected nightly-only tier, #1621)
         id: smoke_e2e
         env:
           E2E_SERVER_URL: "http://localhost:3001"
@@ -803,41 +863,67 @@ jobs:
           # Affected tier (#1621): nightly-only specs whose area this PR's diff
           # touches (tests/e2e/spec-areas.json), plus any e2e spec the PR modifies
           # directly (self-tier). Empty on docs/infra PRs → exactly the base smoke
-          # set below (zero cost). Run from the repo root (reads spec-areas.json +
+          # set (zero cost). Run from the repo root (reads spec-areas.json +
           # git diff) BEFORE `cd tests`. Diagnostics go to stderr (shown in log);
-          # stdout is the machine list, appended unquoted for word-splitting.
+          # stdout is the machine list, used unquoted for word-splitting.
+          #
+          # Resolved ONCE and persisted: shard 2/2 must be computed over the
+          # identical file list, or the two halves would be sharding different
+          # sets and could drop or double-run specs.
           EXTRA_SPECS=$(node scripts/affected-e2e.mjs)
+          echo "$EXTRA_SPECS" > /tmp/smoke-extra-specs.txt
           echo "Affected-tier extra specs: ${EXTRA_SPECS:-(none)}"
-          # character-creation.spec is excluded (#490) — confirmed in run 743
-          # to be a real step-3 PATCH waiter race, separate from the Zod
-          # cascade that #501 fixed. Re-enable only after the underlying race
-          # is investigated and the waiter is hardened (or the wizard's
-          # debounce is stabilised).
           cd tests && ./node_modules/.bin/playwright test \
-            e2e/a11y.spec.ts \
-            e2e/dashboard.spec.ts \
-            e2e/death-timer.spec.ts \
-            e2e/crit-banner.spec.ts \
-            e2e/campaign-creation.spec.ts \
-            e2e/level-up.spec.ts \
-            e2e/condition-expiry.spec.ts \
-            e2e/dm-player-visibility.spec.ts \
-            e2e/character-sheet-ownership-gating.spec.ts \
-            e2e/picker-commits.spec.ts \
-            e2e/combat-damage.spec.ts \
-            e2e/1522-combat-core-cluster.spec.ts \
-            e2e/1531-morale-raw-logging.spec.ts \
-            e2e/rest-button.spec.ts \
-            e2e/spell-exhaustion.spec.ts \
-            e2e/theme-contrast.spec.ts \
-            e2e/773-help-page.spec.ts \
-            e2e/1360-undo-revert.spec.ts \
-            e2e/1917-wt-addmap-clickable.spec.ts \
-            e2e/1670-layout-flip.spec.ts \
-            e2e/2114-wave1-wt-chrome.spec.ts \
-            e2e/2115-wave2-wt-chrome.spec.ts \
-            e2e/2116-wave3-wt-chrome.spec.ts \
+            $SMOKE_SPECS \
             $EXTRA_SPECS \
+            --shard=1/2 \
+            --reporter=line
+
+      # Lifted from e2e-full.yml's between-shard step — same mechanism, already
+      # proven in that job. Kill hard, wait for the port to actually free, then
+      # relaunch: a `vite preview` that is still holding 5173 makes the next
+      # shard fail on connect rather than on anything real.
+      - name: Smoke — restart Vite preview (between shards 1→2, #2167)
+        env:
+          API_PROXY_URL: "http://localhost:3001"
+          NODE_OPTIONS: "--max-old-space-size=512"
+        run: |
+          pkill -9 -f "vite preview" 2>/dev/null || true
+          fuser -k 5173/tcp 2>/dev/null || true
+          PIDS=$(lsof -t -i :5173 2>/dev/null || true)
+          [ -n "$PIDS" ] && kill -9 $PIDS 2>/dev/null || true
+          for i in $(seq 1 15); do
+            if ! curl -s -o /dev/null -m 1 http://localhost:5173; then break; fi
+            echo "Waiting for port 5173 to free... ($i/15)"
+            sleep 1
+          done
+          sleep 2
+          cd client && ./node_modules/.bin/vite preview >/tmp/vite.log 2>&1 &
+          echo $! > /tmp/vite.pid
+          for i in $(seq 1 30); do
+            curl -s -o /dev/null http://localhost:5173 && break || true
+            echo "Waiting for new Vite... ($i/30)"
+            sleep 2
+            [ "$i" -eq 30 ] && echo "Vite never came back up" && exit 1
+          done
+
+      - name: Smoke — run critical specs, shard 2/2 (+ affected nightly-only tier, #1621)
+        env:
+          E2E_SERVER_URL: "http://localhost:3001"
+          TEST_HOOK_SECRET: e2e-test-hook-secret
+          PLAYWRIGHT_BROWSERS_PATH: /ms-playwright
+          DB_HOST: mariadb
+          DB_PORT: "3306"
+          DB_USER: ${{ secrets.CI_DB_USER }}
+          DB_PASSWORD: ${{ secrets.CI_DB_PASSWORD }}
+          DB_NAME: ${{ secrets.CI_DB_NAME }}
+        run: |
+          # Reuse shard 1's resolved list verbatim — see the note there.
+          EXTRA_SPECS=$(cat /tmp/smoke-extra-specs.txt 2>/dev/null || true)
+          cd tests && ./node_modules/.bin/playwright test \
+            $SMOKE_SPECS \
+            $EXTRA_SPECS \
+            --shard=2/2 \
             --reporter=line
 
       - name: Dump server and vite logs on failure

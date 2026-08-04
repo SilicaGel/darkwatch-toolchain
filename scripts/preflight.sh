@@ -66,9 +66,15 @@ set -uo pipefail
 # To update: review `git diff` of .forgejo/workflows/ci.yml, confirm this
 # script still mirrors the `lint-typecheck` + `test` jobs (update the checks
 # below if they changed), then set this to the value preflight prints.
-# Reconciled 2026-07-29 (#1670): `smoke` job's hardcoded spec list gained
+# Reconciled 2026-08-04 (#2167): `smoke` now runs in two Playwright shards with
+# a Vite restart between them, and its spec list moved into a job-level
+# SMOKE_SPECS env var so both shards read one copy. That's the `smoke` job, not
+# `lint-typecheck` / `test`, so no check below moved — hash bump only. (The list
+# is still literal `e2e/*.spec.ts` text in ci.yml, which is what
+# check-e2e-tiers.mjs and affected-e2e.mjs regex out of it.)
+# (Previously reconciled 2026-07-29 (#1670): `smoke` job's hardcoded spec list gained
 # e2e/1670-layout-flip.spec.ts. That's the `smoke` job, not `lint-typecheck` /
-# `test`, so no check below moved — hash bump only.
+# `test`, so no check below moved — hash bump only.)
 # (Previously reconciled 2026-07-28 (#2022): the tests/ typecheck moved OUT of the `smoke`
 # job and into `lint-typecheck` (plus a `cd tests && npm ci` to feed it), so
 # preflight now mirrors it — see the "tests typecheck" check below.)
@@ -90,7 +96,7 @@ set -uo pipefail
 # CI remains the enforcer.)
 # (Previously reconciled 2026-07-19, #1736 Task 4: WT no-raw-color guard.)
 # (Previously reconciled 2026-07-14, #1360/#1701: smoke spec list.)
-EXPECTED_CI_HASH="209ed0f22f98f38fad252c4cc9c9bbd4e70af1e9e00a5e72e88940e5793cd133"
+EXPECTED_CI_HASH="737a5f49d6258dc1500231c08c3b3a094ee223678976074572f478ab435a2a02"
 
 # --- setup ------------------------------------------------------------------
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || {
