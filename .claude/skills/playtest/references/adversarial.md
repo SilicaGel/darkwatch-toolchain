@@ -10,6 +10,13 @@ Use the same driver/harness as `SKILL.md`. **Read `gotchas.md` first.** Run in a
 **custom-ports sandbox** (this mode intends to corrupt state) and a **fresh
 campaign** created through the UI; never reset the shared DB.
 
+**Server-authoritative is the standard.** Every vector asks the same question:
+does the SERVER refuse, or was the client the only thing stopping you? A client
+guard is not a defense — a vector that succeeds over the wire is ❌ even when
+the UI would never have offered it. Where a fix widened a *client* guard only
+(the #1947/#1987 armed-blast affordance work is the recent pattern), the wire
+path is exactly what this mode exists to check.
+
 ## Wire helpers (in `tests/playtest/lib.ts`)
 
 - `lib.rawFetch(sess, method, path, body?)` → `{ status, ok, body }` — authenticated
@@ -67,6 +74,9 @@ A **zero-finding run is a pass** — report "N vectors, all defended."
 - ☐ **A3** DM `initiative:next` while a player resolves an attack — round/turn desync?
 - ☐ **A4** Two DMs (control-transfer) drive the same PC at once.
 - ☐ **A5** Concurrent token drag to different cells on two clients — convergence?
+- ☐ **A6** **Luck double-spend**: two clients emit `luck:reroll` for the same character's last token simultaneously — one must win, one must be refused, and the balance can never go negative or spend once for two rerolls (#1755/#1737).
+- ☐ **A7** **Luck reroll racing its own resolution** (#1869/#2026): reroll a failed cast while a second client re-casts that spell; reroll a death save while the DM heals/revives the same PC. The transaction must refuse (`not_dying`, or a failed un-exhaust) **and keep the token** — a spent token with no applied effect is the failure mode both features were built to avoid.
+- ☐ **A8** **AoE `rollId` reuse**: replay a `spell:area-resolve` with an already-consumed `rollId`, and fire two placements from one armed cast — the second must be refused, not double-applied (#1553/#1560).
 
 ### Surface B — Authz / ownership bypass (`emit` / `emitAwait` / `rawFetch`)
 - ☐ **B1** `emitAwait('player:roll-attack', … , 'player:roll-attack:ack')` for a character you don't own → must reply `error: "forbidden"`. Use a **well-formed** `player:roll-attack` payload — the real schema fields (`characterId`, `attackName`, `atkDice`, `dmgDice`, `monsterId`, `campaignId`, `combatId`) — with `characterId` set to a character owned by a **different** user. Confirmed to return `{ ok: false, error: "forbidden" }`. Do not send a minimal/bogus payload — that trips schema validation and surfaces as a generic `error` event, not the ownership `:ack`. (#1177)
@@ -74,6 +84,9 @@ A **zero-finding run is a pass** — report "N vectors, all defended."
 - ☐ **B3** Player emits a DM-only event (`initiative:begin`, fog reveal, give loot) → rejected.
 - ☐ **B4** Cross-player token move over the wire (bypass the client guard entirely).
 - ☐ **B5** Act on **another campaign's** entity by ID (horizontal priv-esc).
+- ☐ **B6** **Destructive campaign routes as a non-DM** (#1848): `rawFetch` `DELETE /api/campaigns/:id` and `GET /api/campaigns/:id/export` as a player and as a non-member — both must reject. The export is the higher-value target: it returns members, characters and the whole roll log in one response, so a leak here beats any per-entity read.
+- ☐ **B7** **Delegation scope** (#1887): holding control of ONE character must not unlock actions on another. Take a Rest / luck / HP on a character you were never delegated → rejected, while the delegated one succeeds.
+- ☐ **B8** **DM-private leakage over the wire**: fetch session/recap/export endpoints as a player and assert `notes` is `null` (#1736/#1787), and that a DM private roll appears in no player payload or export (#1857).
 
 ### Surface C — Stale state / reconnect / expiry
 - ☐ **C1** Act after session-cookie expiry — graceful re-auth or silent 401 swallow? (#1281)

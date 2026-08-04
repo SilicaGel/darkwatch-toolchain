@@ -449,6 +449,21 @@ else
   printf '  %-34s %sOK%s\n' "▶ roadmap staleness" "$GREEN" "$RESET"
 fi
 
+# Playtest acts heartbeat — same script, same warn-only rules. acts.md is the
+# regression-playtest script; it drifted 35 releases behind the app once
+# (2026-07-25 → 2026-08-03) because nothing watched it between playtest runs.
+# The wrap-up act's coverage sync bumps "Last reviewed:" when it reconciles
+# acts against the CHANGELOG.
+acts_out="$(node scripts/check-roadmap-staleness.mjs \
+  --file .claude/skills/playtest/references/acts.md \
+  --label "playtest-acts" --weeks 4 2>&1)"
+if printf '%s' "$acts_out" | grep -q 'WARNING'; then
+  printf '  %-34s %sWARN%s\n' "▶ playtest-acts staleness" "$YELLOW" "$RESET"
+  echo "$DIM"; printf '%s\n' "$acts_out" | sed 's/^/      | /'; echo "$RESET"
+else
+  printf '  %-34s %sOK%s\n' "▶ playtest-acts staleness" "$GREEN" "$RESET"
+fi
+
 # --- summary ----------------------------------------------------------------
 echo
 echo "${BOLD}━━━ Summary ━━━${RESET}"

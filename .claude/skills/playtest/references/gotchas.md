@@ -4,8 +4,10 @@ Every entry here cost real time in the 2026-06-12 baseline run. Read all of it b
 
 ## Which layout am I in? (verify before recording ANY result)
 
-- **The layout is per browser TAB, chosen by the `?layout=wartable` URL param** (`?layout=classic` reverts). There is **no in-app toggle** — no masthead button, nothing in a menu.
-- **Switching requires a REAL navigation** (`page.goto`). The mode resolves once, on mount, from a `useState` lazy initializer (`client/src/hooks/useLayoutMode.tsx`) — no effect watches the URL, so a soft nav / `history.pushState` keeps whatever the tab loaded with. It is also written through to `sessionStorage["dw-layout"]`, so a tab that once loaded `?layout=wartable` **stays** War Table on subsequent in-app navigation even to URLs without the param.
+- **The War Table is the DEFAULT since #1670** — you get it with no URL param at all. `?layout=classic` is the opt-out. Resolution order (`client/src/hooks/useLayoutMode.tsx`): `?layout=` → `sessionStorage["dw-layout"]` → the mirrored account preference (`localStorage`) → the default (WT).
+- **There ARE in-app switches now**: "Switch to Classic" in the top nav and in the WT account menu; both reload. The preference is saved **server-side per account**, so a fresh login inherits it — never assume a new session starts in the default.
+- **Switching still requires a REAL navigation** (`page.goto`). The mode resolves once, on mount, in a `useState` lazy initializer — no effect watches the URL, so a soft nav / `history.pushState` keeps whatever the tab loaded with. An **explicit** `?layout=` is written through to `sessionStorage["dw-layout"]`, so a tab that once loaded `?layout=classic` **stays** Classic on later in-app navigation to param-less URLs. (Only an explicit param writes through — a defaulted resolution deliberately doesn't pin, or a first visit would freeze the default forever.)
+- **Consequence for a fresh sandbox:** the very first load on a brand-new browser profile renders the default even when the account has a stored preference — it arrives from the server a moment later and applies from the *next* load (documented known limitation of #1670). Don't file that as a bug; do account for it by asserting the layout rather than trusting the first paint.
 - **Verification trick — do this before recording a single ☐:** check for the `wt-stage` element.
   ```js
   const inWT = await page.locator('[data-testid=wt-stage]').count() > 0;
@@ -29,6 +31,8 @@ Every entry here cost real time in the 2026-06-12 baseline run. Read all of it b
 
 ## Selectors that actually work
 
+> **Most of this section was written against Classic, which is no longer the default.** In a War Table tab, prefer the `wt-*` test-ids (`wt-stage`, `wt-party-roster`, `wt-roster-row`, `wt-character-sheet[data-character-id]`, `wt-log-row`, `wt-combat-panel`, `wt-torch-slot`, `wt-sheet-menu-*`, `wt-panels-menu-*`, `wt-command-rail`, `wt-maps-drawer`) — they're stable and role-neutral. `docs/feature-inventory.md`'s test-id column is the fastest lookup for a surface you haven't driven before. The Classic notes below still apply in a `?layout=classic` tab.
+
 - **Login:** `input#username`, `input[type=password]`, submit button — see `lib.login`.
 - **Dice tray buttons: use the stable `title` attributes** — `button[title="Add a d6"]` etc. Their text changes after clicking ("d6" → "d6\n1" count badge), so anchored regexes like `/^d6$/` stop matching after the first click. The tray's one-click `d20 ADV` / `d20 DIS` shortcuts also have distinguishing titles.
 - **Stat checks roll from the SHEET tiles, not the party card.** Card ability cells (`div[class*=abilityCell]`) *open the sheet*; the rollable tiles are on the opened sheet ("STR16+3"). Card labels are DOM-text `Str` (uppercased only by CSS), so `getByText("STR", { exact: true })` times out against cards.
@@ -41,7 +45,9 @@ Every entry here cost real time in the 2026-06-12 baseline run. Read all of it b
 - **NEVER click a "confirm-ish" `.last()` button blind.** "End Session" sits near "End Combat" in the header; the baseline run ended the session by accident this way. Match exact text.
 - **Escape is overloaded** — it cancels pickers (a condition picked but not applied is LOST), disarms attacks, closes sheets. Close modals via their ✕; verify state after (e.g. condition badge present *after* picker closed).
 - **Handout modals have NO ✕-text button** and the close control differs by role: DM = `button[aria-label="Close on my screen"]`, players = `button[aria-label="Close handout"]`. A lingering handout overlay blocks every click on that client — close it before doing anything else.
-- DM tabs (Party/Combat/Scene/Tools) are buttons matching `text=/^Party$/i` etc.; use `{ force: true }` (small hit areas).
+- DM tabs (Party/Combat/Scene/Tools) are buttons matching `text=/^Party$/i` etc.; use `{ force: true }` (small hit areas). **Classic only** — the WT has no such tab bar; its panels are docked/floated/pilled, and a *missing* panel is restored from **Panels ▾** (`wt-panels-menu-trigger`), not by finding a tab.
+- **A WT panel you can't find may simply be closed, not broken.** Before filing "X is gone", open Panels ▾ and check whether its row is unticked (`wt-panels-menu-item-<id>`). The DM's Combat row is legitimately `available: false` out of combat.
+- **`wt-panel-` prefix selectors must exclude `wt-panel-resize-*`** — a loose prefix match picks up resize handles and has bitten two specs.
 
 ## Dice & determinism
 

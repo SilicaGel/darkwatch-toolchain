@@ -4,6 +4,8 @@ The aim is **gaps over bugs**: find what's *missing, unobvious, or below expecta
 
 Use the same driver/harness as `SKILL.md` (custom-ports sandbox recommended for long runs). Read `gotchas.md` first. Play in a **fresh campaign created through the UI**; never reset the shared DB.
 
+**The War Table is the default layout since #1670** — a first-time human lands in it, so run every persona and job there. Classic is the fallback a user reaches via a "Switch to Classic" control or `?layout=classic`; treat Classic-only findings as lower-priority unless the gap is that the *switch itself* is unfindable.
+
 ---
 
 ## How to run it
@@ -35,6 +37,9 @@ Pursue each as the relevant persona, acting only on what's visible:
 4. **Run first combat** (DM) — start a session, add monsters, start combat, **make a monster attack a player**, apply damage.
 5. **Set a scene** — upload/choose a map, make it active, reveal it, move/measure/annotate tokens.
 6. **Find help / rules** — as a confused newcomer, where do I learn how any of this works?
+7. **Come back for session two** — resume the campaign: does the recap orient you? Can you rest, level up, spend the XP you earned, and pick up where you left off? (Retention lives or dies here, and first-run jobs structurally never reach it.)
+8. **Bring in a latecomer mid-session** — a new player joins while the table is live: do they appear for everyone without reloads, land on the map, and get oriented?
+9. **Wrap up a session** (DM) — end it, get the recap, export what you'd want to keep. Then: what would you prep for next week, and can you do that prep now, outside a live session?
 
 For each: can a newcomer *discover* the path, *complete* it, and does it *feel* right?
 
@@ -66,21 +71,37 @@ If time is short, prioritize the **extremes** (mobile + 4K). Log layout problems
 
 ---
 
+## Systematic sweeps (find the gaps nobody thought to look for)
+
+Personas and jobs find gaps on the paths you *chose to walk*. These sweeps are enumerative — they walk paths chosen by the app's own surface area, which is where the unimagined gaps live:
+
+- **Help-vs-reality:** read the in-app help page end to end and verify every control, button, and flow it promises actually exists on screen — and the reverse: pick the 5 most prominent controls you used today and check help mentions them. (Real catch of this class: help described a GM Tools button after the panel was removed — #2135.)
+- **Empty-state census:** visit every screen/panel/tab you can reach with **zero data behind it** (new account, no campaigns, no characters, empty log, no maps, empty loot, no sessions). Each empty state either guides ("add your first…") or is a dead wall — log the walls. (Mind the env-caveats guard below: unseeded *dev galleries* are environment, not product.)
+- **Interruption & recovery:** mid-flow reload (character wizard step 3, combat setup half-filled, map upload in flight), browser back button, an expired/re-used invite link, a session that ends while a player is mid-roll. Does state survive, and does whatever was lost *say* it was lost?
+- **Settings census:** open every settings surface (account, campaign, per-panel ⚙) and for each option ask: would a user know what it does from its label alone, and does changing it visibly do that? An option nobody can decode is a gap even when it works.
+
+Time-box the sweeps (they're enumerative, they can eat a run); a partial sweep with its cut-line documented beats skipping the category.
+
+---
+
 ## Rules-correctness lens (ruleset-scoped)
 
 Determine the **campaign's ruleset** first (today the only ruleset is **Shadowdark**; structure findings so other rulesets can plug in their own checklist later — tag rules findings with the ruleset). Apply the matching checklist; a divergence from RAW is a finding (class: dead-end if the option is missing, awkward/feel or a bug if the math is wrong).
 
 ### Shadowdark checklist (RAW)
 
-> **Before asserting a "known divergence," check the issue's current state** (open/closed) — cited issues (e.g. #1456 starting gold, #1467 stat method) may already be fixed, in which case the checklist must verify the *corrected* behavior, not re-report the old bug.
+**The oracle is the `rules-lookup` skill** — the local rulebook corpus with page citations. Answer every RAW question through it and cite the page in the finding; never assert RAW from memory or a web paraphrase (web paraphrases have been wrong before). shadowdarklings.net remains a useful *second* opinion for generator output, not the source of truth.
 
-- **Starting gold** = `2d6 × 5` gp (10–60, avg 35). *(Known divergence: code rolled `3d6×10` — #1456.)*
-- **Stat rolling** = `3d6` in order is RAW; the app also offers 3d6-assign / 4d6-drop / standard array — the **campaign's chosen method should be honored** by character creation. *(Known divergence — #1467.)*
+> **Before asserting a "known divergence," check the issue's current state** (open/closed) — a cited issue may be fixed, in which case the checklist must verify the *corrected* behavior, not re-report the old bug.
+
+- **Starting gold** = `2d6 × 5` gp (10–60, avg 35). *(#1456 — fixed; the log label prints the real dice since #1923. Verify the corrected behavior.)*
+- **Prices & gear slots** — spot-check shop prices and slot costs against the corpus cost table. *(#1707 fixed six prices and #1955 made slots quantity-aware; a pinning test guards the catalog — the lens verifies the UI end.)*
+- **Stat rolling** = `3d6` in order is RAW; the app also offers 3d6-assign / 4d6-drop / standard array — the **campaign's chosen method should be honored** by character creation. *(#1467 — check state.)*
 - **Ancestries** (core): Human, Elf, Dwarf, Halfling, Half-Orc, Goblin. **Classes** (core): Fighter, Priest, Thief, Wizard.
 - **HP** = roll class hit die + CON mod at level 1 (min 1).
-- **Crawling Kit** affordance for low-gold characters; carry limit = STR (or 10).
+- **Crawling Kit** affordance for low-gold characters; carry limit = max(STR, 10).
 - **Light/torch** economy, deity/alignment, backgrounds present and sensible.
-- Cross-check against the official generator (shadowdarklings.net) when a number looks off, and cite the RAW source in the finding.
+- **Crit semantics**: only an attack roll's natural 20 is a *critical hit*; a nat 20 on a check or save just succeeds maximally *(#2049 — the app now draws this distinction; verify it holds where you roll)*.
 
 > Other rulesets (OSE, etc.): add a sibling checklist here when the ruleset ships; key the lens off the campaign's ruleset slug so the right RAW applies.
 

@@ -68,6 +68,7 @@ PLAYTEST_CLIENT_URL=http://localhost:5273 PLAYTEST_SERVER_URL=http://localhost:3
 - Play in a **fresh campaign** created through the UI (tests the wizard too). Never reset the shared dev DB. Seed accounts: `DungeonMaster`, `Adventurer`, `Rook`, `Sylva` / `password`.
 - Force dice (`lib.forceRoll`) only where determinism matters (crits, dying, stabilize DCs); roll naturally otherwise.
 - DB pokes (port 3397, container `darkwatch-maria`) are allowed to *create test conditions* (backdating torches, granting XP) — never to skip verifying a UI flow that's the thing under test.
+- **RAW questions go to the `rules-lookup` skill** (local rulebook corpus, page citations) — never memory, never a web paraphrase. Anything the app computes from the rules (gold, prices, slots, HP, damage, crits, light durations) is checked against the corpus answer, and the citation goes in the report.
 - Keep going past bugs. Capture evidence (screenshot + DB state + console error), note it, move on.
 - **Batch issues at the end.** Write the report first (`docs/playtests/YYYY-MM-DD-playtest-report.md`), diff against the most recent previous report (fixed / regressed / new), present proposed issues to the user, file via `/issue` only after review. Each proposed issue should name its **epic milestone + phase** (per the 3-axis model — see the `/issue` skill); anything genuinely unclassified goes to the **Triage** milestone. **Verify before filing a suspected bug** — reproduce the smallest path (and check server-vs-client) so a UI symptom isn't filed as the wrong root cause.
 

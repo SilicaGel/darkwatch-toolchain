@@ -1,10 +1,14 @@
 # Playtest acts
 
+**Last reviewed:** 2026-08-03 <!-- bump when you sync acts against the changelog (wrap-up act); preflight's docs-cadence heartbeat warns when this goes stale -->
+
 Run all acts for a full playthrough, or the subset the user names (`/playtest combat themes`). Acts assume the driver is running and `gotchas.md` has been read. Screenshot prefix per act keeps `/tmp/playtest/` navigable (`01-`, `02-`, …). Every ☐ is an expected behavior: verify it explicitly and record ✅ / ❌ / ⚠️ (partial) with evidence.
 
-Acts marked **[fresh campaign]** run in a campaign created during Act 1. Acts marked **[demo campaign]** use "Demo Campaign (Shadowdark)" (Joe/Limpie/Brynn + seeded content). Acts 1–14 are written against the **Classic** layout; Act 15 is the War Table parity pass and Acts 16–19 cover surfaces no act reached before.
+**RAW is checked with the `rules-lookup` skill**, not from memory or the web. Any ☐ that asserts a number — gold, prices, slots, HP, damage dice, light durations — cites the corpus answer (with page) in your notes. If the app and the corpus disagree, that's a finding even if the ☐ "passes" mechanically.
 
-> **Layout matters from Act 15 on.** The layout is per browser tab via `?layout=wartable` / `?layout=classic`, and changing it needs a REAL navigation — a soft nav keeps whatever the tab loaded with. There is no in-app toggle button. If you're testing WT, verify you're actually in it before recording a single ☐.
+Acts marked **[fresh campaign]** run in a campaign created during Act 1. Acts marked **[demo campaign]** use "Demo Campaign (Shadowdark)" (Joe/Limpie/Brynn + seeded content). Acts 1–14 were authored against the **Classic** layout; Act 15 is the layout parity pass, and Acts 16–21 cover surfaces no earlier act reached.
+
+> **The War Table is the DEFAULT layout since #1670 (v0.191.0)** — the app opens in WT for everyone, the choice is saved per **account** (server-side), and there are two in-app switches (top nav + the WT account menu). The `?layout=classic` / `?layout=wartable` URL param still exists as a per-tab override that beats the saved preference, and still needs a REAL navigation to change. For Acts 1–14: run them in the default (WT) where the flow exists; use `?layout=classic` when a step's described chrome is Classic-specific. Always verify which layout a tab is actually in before recording a ☐.
 
 ---
 
@@ -13,13 +17,20 @@ Acts marked **[fresh campaign]** run in a campaign created during Act 1. Acts ma
 DM: campaign wizard (name, description, cadence, player counts, stat method — vary the method between runs). Invite link via clipboard. Players join; create three characters by different paths: full manual wizard (fighter), 🎲 Roll Me Up, manual caster (pick **Light** + an offensive + a control spell).
 
 - ☐ Wizard steps advance/back cleanly; campaign appears on dashboard
+- ☐ A half-finished character draft survives a reload — resume banner offers continuing it; Cancel discards
 - ☐ Invite link works for all players (no re-prompt for logged-in users)
 - ☐ Creation rolls appear in the table log labeled "(creating)" with per-die breakdowns
 - ☐ Stats step: dice animate; Suggest arranges class-optimally; Reroll All works
 - ☐ Shop: prices charge correctly, change breaks across gp/sp/cp, unaffordable items disable
+- ☐ **Starting gold is RAW**: `2d6 × 5` gp (#1456), and the log label shows the real dice and the real ×5 with arithmetic that equals its own total (#1923) — confirm the formula via `rules-lookup`
+- ☐ **Gold reconciles at every step**: rolled − spent = held, never negative; 🎲 Roll Me Up cannot overspend its own roll (#1922)
+- ☐ **Spot-check 3+ shop prices against `rules-lookup`** (the #1707 audit found six wrong — a pinning test now guards the catalog, but the act verifies the UI end of it)
+- ☐ **Gear slots are quantity-aware** (#1955): `ceil(qty ÷ per-slot)` — Rations ×3 = 1 slot (RAW), ×4 = 2; chainmail 2 slots, plate 3, greatsword/greataxe/bastard sword 2, mithral chainmail 1 (v0.195.0); carry limit = max(STR, 10)
 - ☐ Review step matches what was chosen; Create lands the character in the party for ALL clients in realtime
+- ☐ **Campaign's stat method is honored** by creation (#1467 — check the issue's state first; verify the *current* contract, don't re-report a fixed bug)
 - ☐ Regression #1197: no zero-cost items purchasable (Mithral Chainmail)
-- ☐ Regression #1194/#11: torches stack — gear list shows ×N with −/+ controls
+- ☐ Regression #1194/#11: torches stack — gear list shows ×N with −/+ controls — but storage is per-instance: N torches = N `character_gear` rows, each with its own burn timer (#1957/#829)
+- ☐ A player who joins mid-session appears for every connected client without a reload (#2027)
 - ☐ New character's purchased armor: equipped or clearly prompted? (open issue — note state)
 
 ## Act 2 — Dice & roll visibility [fresh campaign]
@@ -27,7 +38,9 @@ DM: campaign wizard (name, description, cadence, player counts, stat method — 
 Quick-tray multi-die build (2d6+1d20), stat-click rolls (open the sheet — tiles there roll; card cells don't), ADV/DIS via sheet pill-toggle + stat-tile click (verify both-trials-shown with discard struck through), DM private roll → player must NOT see it → Share toggle → player must see the next one. Typed expression roll (`1d20+3`).
 
 - ☐ Tray builds expressions by clicking dice; Roll fires and resets
-- ☐ ADV log shows `[a, b] → kept`; DIS keeps lower
+- ☐ ADV log shows `[a, b] → kept` with the discarded die struck (#2035); DIS keeps lower
+- ☐ **Nat-20 semantics are RAW (#2049/#2035)**: a nat 20 on a check/save gets a "NAT 20" marker, NOT "CRIT" (critical is attack-only); a DIS roll that *discards* a 20 must not flag at all — force `[20, 7]` under DIS and confirm no marker
+- ☐ Log rows show relative time at the default panel width; exact local time on hover (#2081)
 - ☐ DM ONLY badge on private rolls; players' logs never show them
 - ☐ Share toggle flips visibility for subsequent rolls (and persists per campaign)
 - ☐ Dice color matches character color, i.e. the avatar/log-name color (known ❌ 2026-06-12 — recheck)
@@ -38,12 +51,13 @@ Quick-tray multi-die build (2d6+1d20), stat-click rolls (open the sheet — tile
 Light a torch from card AND sheet. Verify stack decrement (UI + `character_gear`). Backdate `light_source_lit_at` (see gotchas) + reload the owner → expiry broadcast. Cast the **Light spell** (caster) — confirm the already-lit confirmation prompt when applicable. DM cycles each atmosphere effect (fog/fire/rain/snow/embers/darkness) and one combination; screenshot a *player* view each time. End/start session to test pause/resume.
 
 - ☐ Lighting decrements the stack by exactly 1; pip disables only at 0 torches
+- ☐ **Extinguish works (#1956)**: clicking a lit pip puts the torch out and it keeps its remaining burn — relight later in the session resumes from where it stopped
 - ☐ Countdown visible on card+sheet for owner, DM, and other players
 - ☐ Expiry: "TORCH IS OUT" + darkness slam reaches EVERY connected client; logged; darkness persists until DM clears
 - ☐ Light spell creates a light source on success; failed cast leaves existing light untouched
 - ☐ Atmosphere syncs to all clients; intensity sliders work; state survives a player reload
 - ☐ Session end pauses all lit sources (⏸ + frozen countdown on every client, `light_source_paused_at` set)
-- ☐ Regression #1198: "Resume torches (N paused)" appears for the DM **without a reload**; resuming unfreezes everyone
+- ☐ Regression #1198: torches auto-resume when the DM starts a session (#1359); the manual fallback **"Resume torches (N paused)" now lives in Session ▾** (moved there when Scene & Tools was retired, #1919) and appears only while some torch is paused — no reload needed
 - ☐ Crawl Round (out of combat!) decrements torches 10 min + logs wandering check — note WHERE the button lives
 
 ## Act 4 — Maps, vision & fog [fresh campaign]
@@ -56,8 +70,10 @@ Generate or reuse a gridded dungeon image (canvas-draw trick in `tests/playtest/
 - ☐ Union vision: a torchless player sees by an ally's light
 - ☐ ☀ Lit: no torch needed but radius+walls still mask
 - ☐ Fog memory persists where a PC has been (shared across party, survives reload); Clear fog resets
+- ☐ An enemy token that slips out of vision leaves a last-seen "ghost" for players; the DM view is unaffected (#929)
 - ☐ DM sightline overlay tracks live token/torch changes
-- ☐ Reveal-all 👁 (#1259): whole map shown to players — no fog/vision math, monster-hiding off
+- ☐ Reveal-all 👁 (#1259): whole map shown to players — no fog/vision math, monster-hiding off; a **lit + revealed** map renders clear, not fog-washed (#2038)
+- ☐ Map stays sharp after a zoom ends — tokens, labels, HP bars and the image redraw crisp instead of stretching a cached picture (#2080)
 - ☐ Preview player view (#1283): DM map flips to the merged party view (read-only, hidden monsters gone); resets on map switch
 - ☐ Live drag visible on other clients (~30 Hz); drag-lock at 50% opacity for observers
 - ☐ Server rejects cross-player token moves (token doesn't move, no error spam)
@@ -79,7 +95,7 @@ Walls mode: trace a room (Esc commits), endpoint snap (start a new wall from an 
 
 Ruler (distance + Near/Close/Far/Distant bands; private per user). Pointer (broadcast dot with name; auto-fade) — also hold-to-draw a stroke that fades. Grid editor (cell size + origin; tokens must not shift). Spawn point (set; activate a *new* map; party clusters there). Focus mode (Expand/Esc). Token right-click: Rotate, Resize (presets + drag handle), Remove. Custom token: upload an image, place, verify palette persistence across maps. **DM Light tool**: place/drag/remove a standalone map light (torch / continual-flame, adjustable radius). **Drop lit torch**: a player drops a carried lit torch from their card → light lands on the map at the token.
 
-- ☐ Ruler bands correct (≤1 Near, ≤3 Close, ≤10 Far); not visible to others
+- ☐ Ruler bands correct (≤1 Near, ≤3 Close, ≤10 Far); measuring is private **while dragging**, but a **placed** measurement broadcasts to the whole table in the sender's colour and persists until cleared — survives tool-switch AND disconnect; one per user; DM can clear any/all (#1351)
 - ☐ Pointer dot appears on all clients with the pointer's name, fades ~2 s after stillness; hold-to-draw stroke broadcasts + fades (#994)
 - ☐ Grid changes broadcast (~200 ms debounce) and never move tokens
 - ☐ Spawn affects first-arrival only; revisits restore prior positions
@@ -99,6 +115,9 @@ Start Combat modal: Party tab select-all, Bestiary search (add 2× same creature
 - ☐ Damage clamps at 0 HP; dead monsters un-targetable
 - ☐ Combat state survives a player reload mid-fight
 - ☐ Map tokens bound to combat monsters track HP/death live (DM-only HP bar)
+- ☐ **Hide/reveal a monster (#1077)**: hidden monster vanishes from player payloads (tracker, banner, log — its rolls go DM-only) and auto-reveals when a PC's map vision reaches its token
+- ☐ **Weapon range on the map (#925)**: with an attack armed, out-of-range tokens dim; clicking one gets an in-app "Attack anyway / Cancel" confirm and attacking anyway rolls at auto-DIS — verify the band math against `rules-lookup`
+- ☐ **Class/weapon mechanics**: Thief's Backstab per-row toggle arms the derived `BACKSTAB` line; a thrown weapon shows both its melee and `(THROWN)` ranged lines; Elf Farsight choice (+1 ranged vs +1 spellcasting) actually lands on the right rolls (#1504/#1612/#1614)
 
 ## Act 8 — Combat deep [fresh campaign]
 
@@ -123,6 +142,7 @@ Single-target damage + heal (heal respects max HP). Opposed spell (Turn Undead/W
 - ☐ Mishap d12 animates on every client; effect auto-applies in Auto mode (condition/damage verifiable)
 - ☐ Prompt and Manual modes behave per setting
 - ☐ Exhausted spells show state and block re-cast; Rest restores
+- ☐ **Use a scroll**: consumable cast rolls the spell and removes the scroll from gear on success
 - ☐ Magic Missile rolls with intrinsic advantage (❌ 2026-06-12 — recheck)
 
 ## Act 10 — AOE [demo campaign]
@@ -136,7 +156,9 @@ Joe carries one demo spell per shape. Start a combat with several monsters, **an
 - ☐ Allies inside the blast get the amber ring and the Confirm button reads **"⚠ Friendly fire — Confirm (N targets, M allies)"** (#1921)
 - ☐ The caster's own token is neither ringed nor counted in a self-centered blast, and takes no damage (#1378/#1921)
 - ☐ Critical cast doubles damage dice for every target
-- ☐ (Document current limitation: walls don't clip areas — flag if that changed)
+- ☐ **Walls clip areas now** — the server hit-set respects line-of-effect (#950/#1560) AND the live preview runs the same wall check (#1858): a monster behind a solid wall neither rings nor takes damage; an open door lets the blast through
+- ☐ While a blast is armed, **no single-target affordance competes**: tokens don't pulse "click me" (#1947) and CombatBanner pills don't light (#1987) — the shape is the only targeting affordance
+- ☐ A combat monster with **no token on the active map** can't be hit, and the confirm step says so: "N of M monsters have no token on this map" (#2086)
 
 ## Act 11 — Loot, handouts, recap & AI
 
@@ -147,6 +169,8 @@ Loot: DM + **player** add catalog and custom items; DM Give to… a character (l
 - ☐ Recap modal shows correct highlights from the actual session
 - ☐ AI recap streams, saves, shows next session; sensible content; Edit autosaves
 - ☐ Log exports download and contain the session's rolls
+- ☐ **DM Notes** (Classic panel / WT Notes panel): create, autosave (watch the saving→saved whisper), session tagging, delete; players never see them — including in session exports
+- ☐ **Idle auto-end (#896)**: backdate the session's last activity 2h+ (DB) → sweep ends it, DM gets a "Session auto-ended" notice, `ended_at` = last activity +5min
 
 ## Act 12 — Level-up & character lifecycle
 
@@ -156,6 +180,8 @@ XP to threshold (DB + owner reload is fine), Level Up button (owner-only), modal
 - ☐ HP gain = die + CON (min 1) and the LOG TOTAL includes the modifier (display bug 2026-06-12)
 - ☐ Level/XP/HP-max update for all clients; "Level up" row in log
 - ☐ Talent table roll on odd levels; choices apply to stats
+- ☐ **Level-up spell picks**: a caster leveling into new Spells Known (or rolling Learn a Spell) gets the picker, and the picks land on the sheet
+- ☐ **Lifetime stats "History" panel (#45)**: expands with real numbers from the session just played (hit rate, crits, damage, near-deaths); owner + DM only — another player gets a 403, not a leak
 - ☐ Export→import round-trip preserves stats/gear/spells
 
 ## Act 13 — Themes & readability
@@ -178,18 +204,21 @@ Context: 390×844, `hasTouch`, `isMobile`, iPhone UA. Tabs Sheet/Party/Map/Log. 
 - ☐ Armed attack survives the tab switch; strip doubles as target picker
 - ☐ Tab bar opaque (content must not bleed through — ❌ 2026-06-12)
 - ☐ Nothing requires hover to discover
+- ☐ **Mobile DM spot-check** (never covered): the DM's bottom tab bar (Party/Combat/Scene/Map/Log, #215) works, and combat start auto-switches the DM to the Combat tab
 
-## Act 15 — War Table parity, side-by-side [demo campaign]
+## Act 15 — Layout parity, side-by-side [demo campaign]
 
-**The layout is chosen per browser tab by the `?layout=wartable` URL param** (revert with `?layout=classic`), and switching REQUIRES a real navigation — a soft nav inside the tab keeps the layout it loaded with. There is no masthead toggle. Get this wrong and you'll "test WT" in Classic and see perfect parity that isn't there.
+**Since #1670 (v0.191.0) the War Table is the default and Classic is the fallback** — the parity question has flipped direction: it's now Classic that must keep hearing what WT broadcasts, because a mixed table (one player on the Classic escape hatch) is the supported configuration. The layout is saved per **account**; the per-tab `?layout=classic` / `?layout=wartable` URL override still exists, beats the saved preference, and still requires a REAL navigation to change. Verify which layout each tab is actually in before recording a single ☐. Note the Retire Classic waves (#2114–#2116) restyled every page *outside* a live campaign in the WT idiom — the side-by-side comparison only exists on the campaign screen now.
 
-Run **two contexts on the same campaign**: **A = Classic**, **B = War Table**. Do each action in ONE layout and verify the result in the OTHER. That checks two things at once — that WT has the capability at all, and that its actions broadcast identically (a WT-only emit that Classic can't hear is a parity bug even though both screens "work"). Then swap which layout acts. Use `docs/playtests/2026-07-24-wt-parity-matrix.md` as the checklist: work its `GAP` and `UNKNOWN` rows first, spot-check the `PARITY` ones.
+Run **two contexts on the same campaign**: **A = Classic** (via `?layout=classic`), **B = War Table** (the default). Do each action in ONE layout and verify the result in the OTHER. That checks two things at once — that both layouts have the capability, and that actions broadcast identically (a WT-only emit that Classic can't hear is a parity bug even though both screens "work"). Then swap which layout acts. Use `docs/playtests/2026-07-24-wt-parity-matrix.md` as the checklist: work its `GAP` and `UNKNOWN` rows first, spot-check the `PARITY` ones — and note the matrix predates the default flip, so read its Classic-first framing accordingly.
+
+- ☐ **Layout switching itself (#1670)**: "Switch to Classic" in the top nav AND in the WT account menu both reload into the other layout; the choice survives a browser restart (account-level); signing out clears it for the next user; `?layout=` overrides everything for that tab only
 
 - ☐ **Torch (#1870)** — light from B's roster-row slot AND from B's sheet vitals tile; A shows the burn timer counting. Then light from A; B updates. Slot is inert for a non-owner without control in both.
 - ☐ **Take a Rest (#1871)** — exhaust a spell, rest from B's sheet ⋯ menu; the Exhausted pill clears in B **without reopening the sheet**, and A shows the recovered state + the rest row in the log.
 - ☐ **Dice-settle reveal (#1834)** — DM rolls a monster attack in B; the HIT/damage number must NOT appear while dice tumble. Compare against the same roll in A (fixed in #1813).
-- ☐ **Known gap #1886** — the PC-row twin is NOT fixed: a PC's own damage number in `WtActionList` may still reveal early. Confirm it still reproduces; don't file a duplicate.
-- ☐ **Roll log completeness (#1839–#1843)** — in A and B both, confirm rows appear for: character death AND revival, manual gp/sp/cp edits, torch lit + placed (not just burnout), a reaction roll, and combat/session start+end. Log reads as a bracketed narrative.
+- ☐ **Regression #1886** — fixed in v0.190.2 (with a @durable reproducer since v0.190.6): a PC's own damage number in `WtActionList` must NOT reveal while dice tumble. Verify the fix holds.
+- ☐ **Roll log completeness (#1839–#1843, #1797, #1844)** — in A and B both, confirm rows appear for: character death AND revival, manual gp/sp/cp edits, torch lit + placed (not just burnout), a reaction roll, combat/session start+end, **a damage row naming its target** (#1797), and **NPC/monster HP + condition edits** (#1844). Log reads as a bracketed narrative.
 - ☐ **Log privacy (#1857)** — DM makes a private roll; it appears in the DM's log in both layouts, in neither player log, and in **neither player export** (↓ MD and ↓ PDF).
 - ☐ **Luck (#1866)** — open the Luck menu on a sheet float dragged flush to the screen's right edge: fully readable, not clipped. Mark-used and give-to-companion both reach A.
 - ☐ **Feedback (#1828)** — exactly ONE "Send feedback" control in the accessibility tree per layout; capture flow works from the survivor.
@@ -207,7 +236,11 @@ Never covered by an act before. Luck is `#1755` (tokens) + `#1737` (the log's �
 - ☐ DM can grant a token to a character with none (the pip is DM-interactive at zero)
 - ☐ **↻ Reroll** appears on eligible log rows only — attack/check/save/custom/spell with no state change — and is greyed when the character has no token
 - ☐ Reroll spends the token, re-runs the dice, and **supersedes** the old row (struck through, not deleted)
-- ☐ Reroll is absent on rows that changed state (damage, HP edits) — it must not offer a fake undo
+- ☐ On a state-changing row whose character IS holding a token, the control stays visible but greyed, reading **"Changed game state — can't luck-reroll"** (#1869) — monster rolls/event lines stay quiet
+- ☐ **A failed cast CAN be luck-rerolled (#1869, v0.183.0)**: token spent, spell un-exhausted, dice re-run, old row struck — one indivisible action; if the un-exhaust fails, the whole thing is called off and the token is NOT spent. A cast that also dealt damage or applied a condition still can't be rerolled
+- ☐ **A death-save/stabilize reroll re-resolves the check (#2026, v0.195.0)**: a rerolled success brings the PC back at 1 HP / clears Dying on the stabilize target; a still-failed reroll changes nothing; if the character stopped Dying in the meantime the reroll is refused and the token kept. The death *timer* is never rerollable (settled decision, not a gap)
+- ☐ Nat-20 flag on a rerolled ADV/DIS roll respects the kept die (shares the corrected #2049 helper)
+- ☐ A server-refused luck spend/restore or Take a Rest **says so** — no silently-closing menu (v0.195.0)
 - ☐ Non-owner/non-DM cannot spend someone else's luck
 
 ## Act 17 — Avatars: picker, crop & focal point [demo campaign]
@@ -220,6 +253,7 @@ Never covered by an act before. Luck is `#1755` (tokens) + `#1737` (the log's �
 - ☐ Focal point survives a reload and reaches other clients
 - ☐ The WT Avatar ▸ expander offers the same picker as Classic (#1807/#1800), not a reduced one
 - ☐ A very wide and a very tall source image both frame sensibly rather than distorting
+- ☐ Clicking a portrait in the WT enlarges it full-size (#2087, v0.195.1 — was Classic-only for a while)
 
 ## Act 18 — Control delegation [demo campaign]
 
@@ -228,7 +262,7 @@ Never covered. The DM can hand a character's controls to another player ("Transf
 - ☐ DM delegates Brynn to a player who doesn't own her; that player gains interactive controls (rolls, HP, luck, torch)
 - ☐ The owner and other players do NOT gain them; a non-delegate still sees read-only
 - ☐ Delegation is visible — you can tell WHO is driving (note: #1818 tracks showing the controller rather than just the owner; record what's shown today)
-- ☐ **#1887 check** — the delegate presses **Take a Rest**: the client offers it but the server requires owner-or-DM, so expect a **403**. Confirm it still reproduces; the decision (widen the server) is recorded on the issue.
+- ☐ **#1887 — FIXED (v0.182.0)** — the delegate presses **Take a Rest** and it now **works**; a campaign member with NO delegation is still refused, and holding control of one character unlocks nobody else. Verify the fix, both halves.
 - ☐ Revoking control returns the sheet to read-only for the delegate, live
 - ☐ Rolls made under delegation attribute to the CHARACTER, not the delegate's own PC
 
@@ -237,11 +271,50 @@ Never covered. The DM can hand a character's controls to another player ("Transf
 Never covered. Log in as **`Admin`** (fixed UUID wired into `ADMIN_USER_IDS`, `.env.example`); `#704`.
 
 - ☐ `/admin/images` loads for `Admin` and 403s / hides for `DungeonMaster` and players
+- ☐ `/admin/feedback` (#749): paginated list of submitted feedback for `Admin`; 403 for everyone else — submit one via the feedback modal first and find it here
 - ☐ Image list paginates and shows real usage attribution
 - ☐ Deleting or re-linking an image doesn't orphan a character portrait mid-session
 - ☐ No admin-only control leaks into a normal DM's UI
 
-## Act 20 — Wrap-up
+## Act 20 — War Table panels, layout & roster [demo campaign]
+
+The panel system got a full wave of work (#1919, #1950, #2003, #2017, #2057–#2061, #2112) and no act ever covered it. Drive as the DM at desktop width unless a ☐ says otherwise.
+
+- ☐ **Panels ▾ (#1919)**: ✕-close Dice, then restore it from the masthead menu — it returns to the home the *current screen size's* defaults dictate (right column on desktop, bottom-band pill narrow), not wherever it last sat; menu shows a check against what's on screen
+- ☐ **Default layouts derive from screen width (#1950)**: narrow (<1440), desktop, wide (≥2560) produce different arrangements; "Reset layout" re-derives; hand-arranged layouts are never touched by upgrades
+- ☐ Floats open at sensible sizes and **cascade** — a second character sheet never buries the first (#1950)
+- ☐ **Resize honesty**: a panel's resize handle resizes THAT panel (#2059); dragging past content height fills the space with panel, no dead gap below (#2081 wave); a docked sheet doesn't resize itself when you switch its tabs (#2061)
+- ☐ **Drop targets tell the truth**: a dragged panel lands where the outline promised, including floor docks (#2112, v0.191.9)
+- ☐ **Z-order**: the maps drawer opens above docked panels (#2057); a band panel opens above floating panels (#2017)
+- ☐ Clicking your **own** (auto-selected) character in the Party roster opens the sheet — the alphabetically-first-own-character dead click is fixed (#2003)
+- ☐ **Fallen toggle (#2043/#1709)**: appears for DM AND players once someone has died; it's a personal per-browser preference — one client collapsing the fallen changes nothing for anyone else
+- ☐ **Presence (#1765)**: masthead shows dot + `N/M` (online over total, "away" doesn't count); click names everyone DM-first; Esc/click-away dismisses
+- ☐ An action row with pending damage applies it from a click **anywhere on the row**, including the word "Apply" (#2081)
+- ☐ Talent dropdowns and remove × are inert outside edit mode, for the DM too; in read mode a choice talent shows its current value as plain text (#2040)
+- ☐ **GM Tools panel is GONE (v0.195.1)** — nothing opens it; note that in-app help still describes it (#2135 tracks that, don't re-file)
+- ☐ **WT map modes**: the user menu's picker offers Fullscreen ⇄ Windowed and the map survives the switch without unmounting (canvas state intact); **"As panel" is deliberately hidden** (#2016 — misbehaving, under investigation; don't file its absence)
+- ☐ **WT Command Rail** (replaces Classic's map toolbar in WT): idle-collapses to one button; player sees Pointer · Ruler, DM adds the Build group (Token/Wall/Light/Fog/Grid/Spawn); arming a tool lights it gold and shows the bottom-center Mode HUD; the armed attack/spell "Click a target." instruction shows for BOTH roles (#2080)
+- ☐ **WT Map settings panel** (DM band panel): Ambient, Fog (Revealed), Movement, Preview toggles drive the same state Acts 4–5 verified from Classic — flip one here, confirm a Classic tab sees it
+- ☐ **WT theme picker**: Storm Glass ⇄ Torchlit from /settings card AND the WT user menu, live with no navigation (#2113/#2115); a Classic-fallback viewer gets the 13-theme picker instead, never both
+- ☐ **Classic-bleed sweep** (Aaron, 2026-08-03): in a WT tab that never asked for Classic, NOTHING should render Classic chrome or styling — screenshot every panel, float and page you visit and judge each visually. This includes **embedded** components inside WT panels, not just whole pages. Known bleeds, confirmed still present at this review — **both already tracked, do NOT re-file; confirm and add evidence to the existing issue**: **(a)** the player Party dock nests Classic's read-only `NpcPanel` (`WarTablePlayerView.tsx`) → **#1959**; **(b)** the Session ▾ Atmosphere float's body IS Classic's `AtmospherePanel` (zero `--wt-*` tokens — WT themes don't touch it), and the Session recaps float hosts `PastSessionsPanel` the same way → **#2169**. The map **canvas** is shared by architecture and exempt, but its chrome is not — Classic's `MapToolbar` appearing anywhere in WT would be bleed (WT chrome is the Command Rail/palettes/drawer). `DiceTray` is exempt (chromeless 3D-dice canvas overlay, nothing layout-styled). The **phone** surface deliberately falls back to Classic — out of scope here (#2073/#2074 track it)
+
+## Act 21 — Account & campaign settings [fresh campaign]
+
+Settings surfaces that no act reached: dice presets, UI scale, campaign management. Run AFTER the fresh campaign's other acts — the delete check destroys it.
+
+- ☐ **Dice presets (#1366/#1437)**: pick a 3D-dice preset from account settings; it applies across characters AND campaigns (account-level); the chosen material/color shows on the next roll for the roller and matches on observers' clients
+- ☐ **UI scale (#1950/#2001/#2016)**: the WT user-menu **− N% +** stepper (85–150%) rescales panel content live with crisp text; **the map never scales** (pan/zoom + pointer math intact at every step); the choice sticks per device
+- ☐ Theme and UI scale follow you **off** the campaign screen — dashboard/settings render with them too (#2113)
+- ☐ **Campaign settings reachability (#1848/#1677)**: **Export JSON** downloads `<campaign-name>.json` with members, characters and roll log; **Danger Zone → Delete campaign** confirms, soft-deletes, redirects to dashboard (do this LAST — it kills the fresh campaign)
+- ☐ **Guest invites (#1849)**: desktop DM-actions Invite Player has an "Allow guest join (no account required)" checkbox; the WT session menu / party-dock / mobile ☰ invites are still account-only (#2107 — known gap, don't re-file)
+- ☐ **Feedback modal (#1822)**: opening it captures a screenshot and shows a thumbnail preview of what it attached; the indicator itself never appears in its own capture
+- ☐ **2FA**: enable TOTP from account settings, sign out, sign back in with the code (never covered by an act; secrets are encrypted at rest since #1233 — server-side, nothing visual to check)
+- ☐ **Guest join**: mint a guest-allowed invite, open it logged-out, join with display name only — the guest lands in the campaign without an account
+- ☐ **Campaign archive → restore** from the dashboard (archived campaigns collapse under a toggle); update a campaign cover image and see it on the card
+- ☐ **Account recovery flows** (never covered; needs email capture — note as env-caveat if the dev mailbox isn't wired): forgot password → reset via token; forgot username; change password (other sessions die with the session-expired banner, current one survives); change email (link goes to the NEW inbox, notice to the OLD)
+- ☐ **Creature gallery CRUD** (any signed-in user, nav link since #2114): create a custom creature, edit it, clone a built-in, delete it; it's usable in Start Combat's Bestiary tab
+
+## Act 22 — Wrap-up
 
 Kill the driver. Write the dated report (structure in SKILL.md), including the **regression diff**.
 
@@ -249,4 +322,4 @@ Kill the driver. Write the dated report (structure in SKILL.md), including the *
 
 List each prior bug as fixed / still-present / regressed, then new findings. Present proposed issues in batches; file via `/issue` only after the user reviews.
 
-- **Acts-coverage sync:** diff `acts.md` against `docs/CHANGELOG.md` entries since the previous report's date — flag any shipped user-facing feature with no act covering it, and propose the missing act (the #1381 audit lesson applied to playtesting). Report these as a "coverage gaps" list, don't silently skip.
+- **Acts-coverage sync:** diff `acts.md` against `docs/CHANGELOG.md` entries since this file's **Last reviewed:** date — flag any shipped user-facing feature with no act covering it, and propose the missing act (the #1381 audit lesson applied to playtesting). Report these as a "coverage gaps" list, don't silently skip. Every few syncs, ALSO diff against **`docs/feature-inventory.md`** (the enumerated surface list, CI-guarded by #856) — a changelog window structurally misses surfaces that predate it, which is how account recovery, the creature gallery and mobile-DM went uncovered for months (caught 2026-08-03). **Then bump the `Last reviewed:` line at the top of this file** — preflight's docs-cadence heartbeat watches it, and the sync (not the report) is what earns the bump.
