@@ -1,6 +1,6 @@
 # Playtest acts
 
-**Last reviewed:** 2026-08-03 <!-- bump when you sync acts against the changelog (wrap-up act); preflight's docs-cadence heartbeat warns when this goes stale -->
+**Last reviewed:** 2026-08-04 <!-- bump when you sync acts against the changelog (wrap-up act); preflight's docs-cadence heartbeat warns when this goes stale -->
 
 Run all acts for a full playthrough, or the subset the user names (`/playtest combat themes`). Acts assume the driver is running and `gotchas.md` has been read. Screenshot prefix per act keeps `/tmp/playtest/` navigable (`01-`, `02-`, …). Every ☐ is an expected behavior: verify it explicitly and record ✅ / ❌ / ⚠️ (partial) with evidence.
 
@@ -14,7 +14,7 @@ Acts marked **[fresh campaign]** run in a campaign created during Act 1. Acts ma
 
 ## Act 1 — Setup & creation [fresh campaign]
 
-DM: campaign wizard (name, description, cadence, player counts, stat method — vary the method between runs). Invite link via clipboard. Players join; create three characters by different paths: full manual wizard (fighter), 🎲 Roll Me Up, manual caster (pick **Light** + an offensive + a control spell).
+DM: campaign wizard — **3 steps** (Name & Description / Cadence & Players / Image & Game Type; ruleset + stat method live on step 3). Vary the stat method between runs. Character creation is **5 steps for a non-caster, 6 for a caster** (the Starting Spells step is `whenVisible`-gated on class) — the header reads `Step N of <visible count>`, so don't hardcode a total. Invite link via clipboard. Players join; create three characters by different paths: full manual wizard (fighter), 🎲 Roll Me Up, manual caster (pick **Light** + an offensive + a control spell).
 
 - ☐ Wizard steps advance/back cleanly; campaign appears on dashboard
 - ☐ A half-finished character draft survives a reload — resume banner offers continuing it; Cancel discards
@@ -29,7 +29,7 @@ DM: campaign wizard (name, description, cadence, player counts, stat method — 
 - ☐ Review step matches what was chosen; Create lands the character in the party for ALL clients in realtime
 - ☐ **Campaign's stat method is honored** by creation (#1467 — check the issue's state first; verify the *current* contract, don't re-report a fixed bug)
 - ☐ Regression #1197: no zero-cost items purchasable (Mithral Chainmail)
-- ☐ Regression #1194/#11: torches stack — gear list shows ×N with −/+ controls — but storage is per-instance: N torches = N `character_gear` rows, each with its own burn timer (#1957/#829)
+- ☐ Regression #1194/#11 + #1957/#829: stackable gear (rations etc.) shows **×N with −/+ controls**, but torches are **per-instance** — buying 2 torches yields **two separate `Torch` rows**, not `Torch ×2`, because each carries its own burn timer. Seeing two rows is correct, not a duplicate-row bug.
 - ☐ A player who joins mid-session appears for every connected client without a reload (#2027)
 - ☐ New character's purchased armor: equipped or clearly prompted? (open issue — note state)
 
@@ -296,7 +296,13 @@ The panel system got a full wave of work (#1919, #1950, #2003, #2017, #2057–#2
 - ☐ **WT Command Rail** (replaces Classic's map toolbar in WT): idle-collapses to one button; player sees Pointer · Ruler, DM adds the Build group (Token/Wall/Light/Fog/Grid/Spawn); arming a tool lights it gold and shows the bottom-center Mode HUD; the armed attack/spell "Click a target." instruction shows for BOTH roles (#2080)
 - ☐ **WT Map settings panel** (DM band panel): Ambient, Fog (Revealed), Movement, Preview toggles drive the same state Acts 4–5 verified from Classic — flip one here, confirm a Classic tab sees it
 - ☐ **WT theme picker**: Storm Glass ⇄ Torchlit from /settings card AND the WT user menu, live with no navigation (#2113/#2115); a Classic-fallback viewer gets the 13-theme picker instead, never both
-- ☐ **Classic-bleed sweep** (Aaron, 2026-08-03): in a WT tab that never asked for Classic, NOTHING should render Classic chrome or styling — screenshot every panel, float and page you visit and judge each visually. This includes **embedded** components inside WT panels, not just whole pages. Known bleeds, confirmed still present at this review — **both already tracked, do NOT re-file; confirm and add evidence to the existing issue**: **(a)** the player Party dock nests Classic's read-only `NpcPanel` (`WarTablePlayerView.tsx`) → **#1959**; **(b)** the Session ▾ Atmosphere float's body IS Classic's `AtmospherePanel` (zero `--wt-*` tokens — WT themes don't touch it), and the Session recaps float hosts `PastSessionsPanel` the same way → **#2169**. The map **canvas** is shared by architecture and exempt, but its chrome is not — Classic's `MapToolbar` appearing anywhere in WT would be bleed (WT chrome is the Command Rail/palettes/drawer). `DiceTray` is exempt (chromeless 3D-dice canvas overlay, nothing layout-styled). The **phone** surface deliberately falls back to Classic — out of scope here (#2073/#2074 track it)
+- ☐ **Classic-bleed sweep** (Aaron, 2026-08-03): in a WT tab that never asked for Classic, nothing should look or behave like Classic — screenshot every panel, float and page you visit and judge each visually, **embedded** components inside WT panels included.
+
+  **Judge composition, not colour.** A hosted Classic component usually *themes fine*, because it styles from the semantic tokens (`--text-primary`, `--gold`, `--space-*`) that the WT themes redefine — so "its CSS has no `--wt-*` tokens" proves nothing on its own. That inference produced a wrong issue on 2026-08-03 (#2169: the Atmosphere float was claimed theme-deaf, then shown live to follow Torchlit completely). **Test it the only way that settles it: switch Storm Glass ⇄ Torchlit and compare screenshots of the same surface.** What actually goes wrong is composition — a duplicated title, doubled chrome, a Classic layout idiom in a WT frame.
+
+  Known, both tracked — **confirm and add evidence; do NOT re-file**: **(a)** the player Party dock nests Classic's read-only `NpcPanel` (`WarTablePlayerView.tsx`) → **#1959**; **(b)** the Atmosphere float renders its title twice — the WT float header *and* the panel's own `ATMOSPHERE` heading → **#2169** (the `PastSessionsPanel` twin is still unverified — check it and say which way it goes).
+
+  Exempt: the map **canvas** (one live instance reparented across modes) and `DiceTray` (chromeless full-screen overlay). *Not* exempt — Classic's `MapToolbar` appearing anywhere in WT would be real bleed, since WT's map chrome is the Command Rail / palettes / drawer. The **phone** surface is deliberately Classic (#2073/#2074) and out of scope.
 
 ## Act 21 — Account & campaign settings [fresh campaign]
 
