@@ -268,7 +268,9 @@ Never covered. The DM can hand a character's controls to another player ("Transf
 
 ## Act 19 — Admin surfaces [Admin account]
 
-Never covered. Log in as **`Admin`** (fixed UUID wired into `ADMIN_USER_IDS`, `.env.example`); `#704`.
+Log in as **`Admin`** — `lib.ACCOUNTS.admin` (added 2026-08-04; before that the act named an account the harness could not authenticate, so it had never been runnable). Fixed UUID wired into `ADMIN_USER_IDS`, `.env.example`; `#704`.
+
+> **Adding an act and extending the driver are ONE change.** If a new act names an account, fixture or campaign the harness can't reach, it is dead on arrival — check `tests/playtest/lib.ts` when you write the act, not when someone tries to run it.
 
 - ☐ `/admin/images` loads for `Admin` and 403s / hides for `DungeonMaster` and players
 - ☐ `/admin/feedback` (#749): paginated list of submitted feedback for `Admin`; 403 for everyone else — submit one via the feedback modal first and find it here
