@@ -24,6 +24,7 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, mkdtempSync, renameSync, rmSync } from "node:fs";
 import { join, basename, resolve as resolvePath } from "node:path";
+import { pathToFileURL } from "node:url";
 import { tmpdir } from "node:os";
 import {
   classifyAll,
@@ -222,15 +223,19 @@ function contentAlreadyInMain(branch) {
 }
 
 /**
- * Uncommitted changes in a worktree, tracked files only.
- *
- * `--porcelain` without `--untracked-files=no` counts every stray build
- * artifact and log, which would park most worktrees in `unknown` forever. What
- * matters is work `--force` would actually destroy: modified or staged files.
+ * Uncommitted changes in a worktree: everything `worktree remove --force`
+ * would destroy — modified, staged, AND untracked files (#2185). Gitignored
+ * artifacts (node_modules, logs) are already excluded from plain
+ * `--porcelain`; the one non-work untracked file tidy itself expects,
+ * the `.darkwatch-origin` stamp (#2126), is filtered here so a stamped
+ * worktree doesn't read as dirty forever.
  */
-function countDirty(path) {
-  const out = gitQuiet("-C", path, "status", "--porcelain", "--untracked-files=no");
-  return out ? out.split("\n").filter(Boolean).length : 0;
+export function countDirty(path) {
+  const out = gitQuiet("-C", path, "status", "--porcelain");
+  return out
+    .split("\n")
+    .filter(Boolean)
+    .filter((line) => line.slice(3) !== ".darkwatch-origin").length;
 }
 
 /**
@@ -463,10 +468,13 @@ async function main() {
   return failed === 0 ? 0 : 1;
 }
 
-main().then(
-  (code) => process.exit(code),
-  (err) => {
-    console.error("worktree-tidy failed:", err);
-    process.exit(1);
-  },
-);
+// Import-safe for worktree-tidy.test.mjs — only run when invoked as a script.
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().then(
+    (code) => process.exit(code),
+    (err) => {
+      console.error("worktree-tidy failed:", err);
+      process.exit(1);
+    },
+  );
+}
