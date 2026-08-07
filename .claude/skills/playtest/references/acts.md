@@ -339,10 +339,29 @@ Settings surfaces that no act reached: dice presets, UI scale, campaign manageme
 - ☐ **Campaign settings reachability (#1848/#1677)**: **Export JSON** downloads `<campaign-name>.json` with members, characters and roll log; **Danger Zone → Delete campaign** confirms, soft-deletes, redirects to dashboard (do this LAST — it kills the fresh campaign)
 - ☐ **Guest invites (#1849)**: desktop DM-actions Invite Player has an "Allow guest join (no account required)" checkbox; the WT session menu / party-dock / mobile ☰ invites are still account-only (#2107 — known gap, don't re-file)
 - ☐ **Feedback modal (#1822)**: opening it captures a screenshot and shows a thumbnail preview of what it attached; the indicator itself never appears in its own capture
-- ☐ **2FA**: enable TOTP from account settings, sign out, sign back in with the code (never covered by an act; secrets are encrypted at rest since #1233 — server-side, nothing visual to check)
+- ☐ **2FA**: enable TOTP from account settings, sign out, sign back in with the code.
+  > **DO NOT enable 2FA on a seed account until #2197 is fixed — it locks the account out permanently.**
+  > The server withholds the session cookie and returns a challenge, but the login page has no step to
+  > handle it and silently treats the challenge as a successful sign-in. There is no route back, because
+  > the disable control is behind `/settings`. Test on a throwaway registration, or verify #2197 is closed
+  > first. Secrets are encrypted at rest since #1233.
 - ☐ **Guest join**: mint a guest-allowed invite, open it logged-out, join with display name only — the guest lands in the campaign without an account
 - ☐ **Campaign archive → restore** from the dashboard (archived campaigns collapse under a toggle); update a campaign cover image and see it on the card
-- ☐ **Account recovery flows** (never covered; needs email capture — note as env-caveat if the dev mailbox isn't wired): forgot password → reset via token; forgot username; change password (other sessions die with the session-expired banner, current one survives); change email (link goes to the NEW inbox, notice to the OLD)
+- ☐ **Account recovery flows** (needs email capture — note as env-caveat if the dev mailbox isn't wired): forgot password → reset via token; forgot username; change password (other sessions die with the session-expired banner, current one survives); change email (link goes to the NEW inbox, notice to the OLD)
+
+  > **RESTORE THE SEED ACCOUNT AFTERWARDS.** Changing a seed account's password breaks it for every
+  > other run and every e2e spec — on 2026-08-06 this left `Adventurer` unable to log in at all.
+  > Prefer testing this on a throwaway account you registered yourself. If you must use a seed
+  > account, put it back before you finish (all seeds share the password `password`, so copy a
+  > sibling's hash and clear the timestamp):
+  >
+  > ```sql
+  > UPDATE users SET password_hash = (SELECT h FROM (SELECT password_hash AS h FROM users WHERE username='Rook') AS t),
+  >                  password_changed_at = NULL
+  >  WHERE username='Adventurer';
+  > ```
+  >
+  > Then verify: `POST /api/auth/login` with `{"identifier":"Adventurer","password":"password"}` must return 200.
 - ☐ **Creature gallery CRUD** (any signed-in user, nav link since #2114): create a custom creature, edit it, clone a built-in, delete it; it's usable in Start Combat's Bestiary tab
 
 ## Act 22 — Wrap-up
