@@ -10,7 +10,7 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, writeFileSync, rmSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { countDirty } from "./worktree-tidy.mjs";
+import { countDirty, readStamp } from "./worktree-tidy.mjs";
 
 let repo;
 
@@ -76,5 +76,33 @@ describe("countDirty — everything `worktree remove --force` would destroy", ()
     writeFileSync(join(repo, ".darkwatch-origin"), "#2185\n");
     writeFileSync(join(repo, "wip-notes.md"), "do not lose me\n");
     assert.equal(countDirty(repo), 1);
+  });
+});
+
+// #2126 — round-trip for the stamp /ship's Step 5 writes right after a PR
+// opens (`echo "#$PR_NUMBER" > .darkwatch-origin`), read back here by the
+// exact function worktree-tidy-core.mjs's classifier consumes.
+describe("readStamp — the /ship-written PR stamp (#2126)", () => {
+  test("returns null when no stamp file exists yet", () => {
+    clean();
+    assert.equal(readStamp(repo), null);
+  });
+
+  test("reads the exact `#<N>` format /ship writes", () => {
+    clean();
+    writeFileSync(join(repo, ".darkwatch-origin"), "#2126\n");
+    assert.equal(readStamp(repo), 2126);
+  });
+
+  test("tolerates a bare number without the leading #", () => {
+    clean();
+    writeFileSync(join(repo, ".darkwatch-origin"), "2126\n");
+    assert.equal(readStamp(repo), 2126);
+  });
+
+  test("returns null for unparseable content rather than throwing", () => {
+    clean();
+    writeFileSync(join(repo, ".darkwatch-origin"), "not a stamp\n");
+    assert.equal(readStamp(repo), null);
   });
 });

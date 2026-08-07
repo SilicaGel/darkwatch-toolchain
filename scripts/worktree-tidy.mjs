@@ -271,8 +271,11 @@ function readBranches(worktrees) {
     });
 }
 
-/** #2084 — the creation-time stamp that makes PR lookup unnecessary. */
-function readStamp(path) {
+/** #2084/#2126 — the stamp that makes PR lookup unnecessary once a worktree
+ *  has shipped. `/ship`'s Step 5 writes it right after the PR opens (the PR
+ *  number doesn't exist any earlier). Exported for a direct round-trip test
+ *  (#2126) — /ship writes exactly `#<N>`, this reads it back. */
+export function readStamp(path) {
   const f = join(path, ".darkwatch-origin");
   if (!existsSync(f)) return null;
   const m = /#?(\d+)/.exec(readFileSync(f, "utf8"));

@@ -48,9 +48,13 @@
 // shipped — so that is `unknown` with a pointed reason, not a deletion. This
 // is the case that would silently destroy work if labels were trusted.
 //
-// `.darkwatch-origin` (a stamp written at creation time) short-circuits the
-// whole problem for worktrees created after it lands: it names the PR
-// directly. It is checked FIRST.
+// `.darkwatch-origin` (#2126 — a stamp `/ship`'s Step 5 writes right after a
+// PR opens, not at `git worktree add` time: the PR number doesn't exist yet
+// at creation) short-circuits the whole problem for worktrees a `/ship` run
+// has stamped: it names the PR directly. It is checked FIRST. Never write
+// anything into that file besides `#<PR-number>` — the reader below has no
+// corroborating check, so stray digits (a branch slug, a sha) could resolve
+// to a real, unrelated PR.
 
 /** @typedef {"reclaimable" | "in-flight" | "unknown"} Bucket */
 

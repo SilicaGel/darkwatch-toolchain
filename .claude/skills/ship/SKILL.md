@@ -1,8 +1,8 @@
 ---
 name: ship
 description: Use when a development branch is ready to merge — the user invokes `/ship`, says "ship it", "ship this branch", or "open the PR". Handles the full docs + PR housekeeping for this repo; read the body before acting, the PR-body protocol has hard rules.
-version: 1.2.0
-last_changed: 2026-07-30
+version: 1.3.0
+last_changed: 2026-08-07
 ---
 
 # ship
@@ -427,6 +427,24 @@ CODE=$(curl -s -o "$TMP/pr_resp.json" -w '%{http_code}' -X POST \
 If you later amend the PR body (PATCH), rebuild it from scratch in a fresh `$TMP` — never re-send a body file another step (or session) may have touched without re-reading it first.
 
 Capture the PR number from the response — you need it for Step 6.
+
+**#2126 — stamp `.darkwatch-origin` now that the PR number exists.** A later
+`worktree-tidy` sweep resolves a worktree to its PR either by an exact-sha
+match or archaeology (branch-label matching, advisory only) — both work, but
+this stamp is the direct answer and is checked first. Write it **immediately**
+after a successful PR creation, at the worktree root, with **exactly**
+`#<PR-number>` and nothing else appended:
+
+```bash
+PR_NUMBER=$(jq -r '.number' "$TMP/pr_resp.json")
+echo "#$PR_NUMBER" > "$(git rev-parse --show-toplevel)/.darkwatch-origin"
+```
+
+Do not write anything else into that file (a branch slug, a commit sha, a
+timestamp) — the reader extracts the first run of digits it finds with no
+corroborating check, so any other digits risk resolving to a real, unrelated,
+merged PR and marking a live worktree reclaimable. `.darkwatch-origin` is
+gitignored; this stamp is local metadata and must never land in a commit.
 
 Report the PR number and URL to the user.
 

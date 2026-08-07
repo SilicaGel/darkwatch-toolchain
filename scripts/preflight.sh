@@ -349,10 +349,20 @@ INT_DB_PASS="$(envval DB_PASSWORD)"; INT_DB_PASS="${INT_DB_PASS:-darkwatch_dev}"
 INT_DB_URL="mysql://${INT_DB_USER}:${INT_DB_PASS}@127.0.0.1:${DB_PORT}/${INT_DB_NAME_PF}"
 
 if [ "$SKIP_INT" -eq 1 ]; then
+  note_skip "ensure integration database" "--skip-int"
   note_skip "Kysely schema verify" "--skip-int"
   note_skip "server integration tests" "--skip-int"
 elif (echo > "/dev/tcp/127.0.0.1/$DB_PORT") 2>/dev/null; then
   int_before="${#FAIL[@]}"
+  # #2109 — build this worktree's integration database FIRST if it doesn't
+  # exist yet. Without this, a fresh worktree whose work never happened to run
+  # `test:int` before preflight (e.g. a client-only branch) hit `db:verify`
+  # against a database that had never been created, and MariaDB reported that
+  # as "Access denied for user 'darkwatch'@'%' to database '...'" — reading
+  # like a credentials problem rather than "not built yet". Same probe+build
+  # steps `npm run test:int`'s vitest globalSetup uses (#2062), shared via
+  # scripts/ensure-int-db.ts so the two can't drift apart.
+  run_check "ensure integration database" bash -c "cd server && DATABASE_URL='$INT_DB_URL' DB_NAME='$INT_DB_NAME_PF' npm run db:int:ensure"
   run_check "Kysely schema verify" bash -c "cd server && DATABASE_URL='$INT_DB_URL' npm run db:verify"
   run_check "server integration tests" bash -c "cd server && npm run test:int"
   if [ "${#FAIL[@]}" -gt "$int_before" ]; then
