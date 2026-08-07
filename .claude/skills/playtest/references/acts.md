@@ -95,7 +95,8 @@ Walls mode: trace a room (Esc commits), endpoint snap (start a new wall from an 
 
 Ruler (distance + Near/Close/Far/Distant bands; private per user). Pointer (broadcast dot with name; auto-fade) — also hold-to-draw a stroke that fades. Grid editor (cell size + origin; tokens must not shift). Spawn point (set; activate a *new* map; party clusters there). Focus mode (Expand/Esc). Token right-click: Rotate, Resize (presets + drag handle), Remove. Custom token: upload an image, place, verify palette persistence across maps. **DM Light tool**: place/drag/remove a standalone map light (torch / continual-flame, adjustable radius). **Drop lit torch**: a player drops a carried lit torch from their card → light lands on the map at the token.
 
-- ☐ Ruler bands correct (≤1 Near, ≤3 Close, ≤10 Far); measuring is private **while dragging**, but a **placed** measurement broadcasts to the whole table in the sender's colour and persists until cleared — survives tool-switch AND disconnect; one per user; DM can clear any/all (#1351)
+- ☐ **Ruler bands match RAW** — Close = 5 ft = **≤1 square**, Near = up to 30 ft = **≤6 squares**, then Far (core rulebook p. 3; confirm via `rules-lookup`). **Known defect #2190:** `distanceBands.ts` currently ships `{near:1, close:3, far:10}` — the two shortest names swapped and Near halved — while `weaponReach.ts` uses the RAW-correct `{close:1, near:6, far:12}`, so the ruler disagrees with the code that decides whether an attack is in range. Assert the RAW answer here, not the current behaviour; this ☐ previously encoded the bug and would have passed it forever.
+- ☐ The measurement broadcasts to the whole table **while dragging AND after placement** (`onMeasure` and `onCommit` both emit — #1351/#1352 built the live feedback deliberately), renders in the sender's colour, persists until cleared, survives tool-switch AND disconnect; one per user; DM can clear any/all
 - ☐ Pointer dot appears on all clients with the pointer's name, fades ~2 s after stillness; hold-to-draw stroke broadcasts + fades (#994)
 - ☐ Grid changes broadcast (~200 ms debounce) and never move tokens
 - ☐ Spawn affects first-arrival only; revisits restore prior positions
@@ -127,8 +128,8 @@ The paths a normal run skips:
 - **Control transfer:** DM grants a player control of another PC. ☐ Ctrl badge appears for grantee ☐ grantee can roll/attack/death-save as that character ☐ survives grantee reload ☐ revoke removes access
 - **DM drives a PC:** open a player's sheet as DM and run their attack end-to-end
 - **Monster casters:** give the Shaman (or any monster) its seeded spell; cast check `d20+mod vs 10+tier` ☐ fail just fizzles (no mishap) ☐ success arms faction-aware targets (enemy spell lights the party; ally heal lights monsters)
-- **Monster conditions:** apply timed condition to a monster ☐ visible to players ☐ auto-expires on round ticks
-- **Morale:** ☐ per-monster Morale button exists (❌ missing 2026-06-12), rolls 2d6 vs morale, DM-only result
+- **Monster conditions:** apply a condition to a monster ☐ visible to players. **Auto-expiry on round ticks applies to companion NPCs, NOT raw bestiary monsters** — combat monsters store conditions as a bare string array with no duration, which is a deliberate split (see the source comment), so a bestiary monster's condition persisting is correct, not a defect.
+- **Morale:** ☐ per-monster Morale button exists and rolls **1d20 + WIS vs DC 15**, DM-only result. RAW is *"flee if they fail a DC 15 Wisdom check"* (core p. 93, quick-ref p. 3) — the old **2d6-vs-a-morale-score** payload was REMOVED by #183 (v0.186.0), so a 2d6 roll here would be the bug. Monsters with an immunity trait show *Immune* instead.
 - **Conditions → auto ADV/DIS:** poison the attacker (☐ attack auto-rolls DIS), stun the target (☐ attacker auto-ADV), both (☐ cancel to straight); manual toggle overrides
 - **Undo:** undo a damage entry from the log ☐ HP restored everywhere
 - **Companion NPC:** create one (combatant flag), include via Start Combat checkbox ☐ fights party-side with the same armed-click flow ☐ HP persists to the campaign after combat
@@ -184,15 +185,37 @@ XP to threshold (DB + owner reload is fine), Level Up button (owner-only), modal
 - ☐ **Lifetime stats "History" panel (#45)**: expands with real numbers from the session just played (hit rate, crits, damage, near-deaths); owner + DM only — another player gets a 403, not a leak
 - ☐ Export→import round-trip preserves stats/gear/spells
 
-## Act 13 — Themes & readability
+## Act 13 — Themes & readability [War Table scope]
 
-For EACH theme (13 as of 2026-06: Dungeon, Bloodmoon, Ghostlight, Deepwood, Iron, Crystal, Arcane, Ember, Storm, Void, Bone, Laser, Paper): screenshot **four views** — campaign overview, open character sheet, a modal (combat setup), roll log with mixed entries (crit, mishap, DM-only). Then run an axe contrast scan per theme (`tests/helpers/axe.ts` pattern) and collect violations. Check semantic colors survive: HP green-ish, danger red-ish, ADV vs DIS distinguishable (Laser failed this 2026-06-12). Fancy/Simple toggle: verify the CSS fallback renders and persists per browser. Click effects fire and self-clean.
+> **Do NOT hand-run a 13-theme contrast sweep.** Contrast is already automated and CI-gated on every
+> PR: `tests/e2e/theme-contrast.spec.ts` scans the **Classic** campaign view across all 13 Classic
+> themes (and is the Classic zero-baseline — it MUST NOT change), while
+> `tests/e2e/1736-wt-contrast.spec.ts` scans the **War Table** surface under both WT themes plus
+> `/dev/buttons` on its WT axis. Re-doing that by hand duplicates a passing gate and was the single
+> largest time sink in this act. If you want the contrast answer, read those specs' results.
 
-- ☐ Text contrast passes (or violations listed per theme — this answers "readability complaints" with data)
-- ☐ ADV/DIS, danger, crit visually distinct in every theme
-- ☐ Dynamic themes: 90% panel opacity doesn't wash out log text over busy shader moments (screenshot during a Storm flash if possible)
-- ☐ Paper (light theme): fog/unexplored treatment not jarring; map letterboxing acceptable
-- ☐ Simple mode actually stops the WebGL animation
+What a playtest adds is the **judgment** axe cannot make: whether colour still *means* something, and
+whether motion/opacity stay legible in practice. Scope that to the two themes the default layout
+actually ships — **Storm Glass** and **Torchlit** (`data-wt-theme`; picker on /settings and in the WT
+user menu). Classic's 13 remain reachable via `?layout=classic` but are being retired (milestone #26)
+— spot-check them only if the run is explicitly about Classic.
+
+For EACH of the two WT themes, screenshot four views — campaign stage, an open character sheet, a
+modal (combat setup), and the Game Log with mixed entries (crit, mishap, DM-only) — and judge them.
+
+- ☐ **Semantic colour survives**: HP reads green-ish, danger red-ish, and **ADV vs DIS are
+  distinguishable from each other** (Classic's Laser theme failed exactly this on 2026-06-12 — the
+  failure mode is two states that pass contrast individually while being indistinguishable from one
+  another, which is why axe cannot catch it)
+- ☐ Gold state-accent still reads as "armed / whose turn / lit" against each theme's own background —
+  Torchlit's browns are the hard case (#2133 tracks the Torchlit variant)
+- ☐ Panel opacity doesn't wash out log text over a busy stage moment (Storm Glass is translucent over
+  a gradient — screenshot during an atmosphere effect if one is running)
+- ☐ Simple mode actually stops the WebGL animation (and persists per browser)
+- ☐ Click effects fire and self-clean
+- ☐ Theme switch is live with no navigation, and reaches **every** surface — including panels hosting
+  Classic components (see Act 20's Classic-bleed sweep; the Atmosphere float was wrongly reported as
+  theme-deaf on 2026-08-03 and is not)
 
 ## Act 14 — Mobile player [fresh campaign]
 
