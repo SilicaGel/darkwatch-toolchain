@@ -89,13 +89,13 @@ Walls mode: trace a room (Esc commits), endpoint snap (start a new wall from an 
 - ☐ Open/close updates every viewer without reload, repeatedly
 - ☐ Walls-block-movement toggle (#1342): 🚶 Free / 🧱 Blocked (default ON; disabled until walls exist); closed door blocks, open door passes
 - ☐ Player token drag stops at walls (radius-aware slide-along); DM bypasses
-- ☐ Regression (2026-06-12 §A.14): right-click near token+wall must open ONE context menu
+- ☐ Right-click a token that overlaps a wall, dropped torch, or light marker opens ONE context menu — the token's own (fixed by #2191; the never-filed 2026-06-12 §A.14 regression, `MapToken.tsx` was missing `e.stopPropagation()` so the click also bubbled to the map's "Clear fog of war" menu)
 
 ## Act 6 — Map tools [fresh campaign]
 
 Ruler (distance + Near/Close/Far/Distant bands; private per user). Pointer (broadcast dot with name; auto-fade) — also hold-to-draw a stroke that fades. Grid editor (cell size + origin; tokens must not shift). Spawn point (set; activate a *new* map; party clusters there). Focus mode (Expand/Esc). Token right-click: Rotate, Resize (presets + drag handle), Remove. Custom token: upload an image, place, verify palette persistence across maps. **DM Light tool**: place/drag/remove a standalone map light (torch / continual-flame, adjustable radius). **Drop lit torch**: a player drops a carried lit torch from their card → light lands on the map at the token.
 
-- ☐ **Ruler bands match RAW** — Close = 5 ft = **≤1 square**, Near = up to 30 ft = **≤6 squares**, then Far (core rulebook p. 3; confirm via `rules-lookup`). **Known defect #2190:** `distanceBands.ts` currently ships `{near:1, close:3, far:10}` — the two shortest names swapped and Near halved — while `weaponReach.ts` uses the RAW-correct `{close:1, near:6, far:12}`, so the ruler disagrees with the code that decides whether an attack is in range. Assert the RAW answer here, not the current behaviour; this ☐ previously encoded the bug and would have passed it forever.
+- ☐ **Ruler bands match RAW** — Close = 5 ft = **≤1 square**, Near = up to 30 ft = **≤6 squares**, then Far (core rulebook p. 3; confirm via `rules-lookup`). Fixed by #2190: `distanceBands.ts` now ships `{close:1, near:6, far:12}`, matching `weaponReach.ts`'s REACH_SQUARES (a unit test asserts they stay in lockstep). This ☐ previously asserted the pre-#2190 wrong values (`{near:1, close:3, far:10}`) and would have passed the bug forever — a reminder to re-verify against RAW, not the shipped code, whenever an act reads suspiciously self-referential.
 - ☐ The measurement broadcasts to the whole table **while dragging AND after placement** (`onMeasure` and `onCommit` both emit — #1351/#1352 built the live feedback deliberately), renders in the sender's colour, persists until cleared, survives tool-switch AND disconnect; one per user; DM can clear any/all
 - ☐ Pointer dot appears on all clients with the pointer's name, fades ~2 s after stillness; hold-to-draw stroke broadcasts + fades (#994)
 - ☐ Grid changes broadcast (~200 ms debounce) and never move tokens
