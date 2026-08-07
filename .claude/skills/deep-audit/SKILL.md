@@ -1,8 +1,8 @@
 ---
 name: deep-audit
 description: Use whenever the user invokes `/deep-audit` (or scoped `/deep-audit security | perf | quality | ops`), or asks for a full honest codebase audit, a pre-launch review, or "how healthy is the codebase" — a slow, subagent-driven audit reconciled against open Forgejo issues. Not for reviewing a single diff or PR.
-version: 1.0.0
-last_changed: 2026-07-05
+version: 1.1.0
+last_changed: 2026-08-07
 ---
 
 # Deep Audit Skill
@@ -19,8 +19,8 @@ The product is approaching public launch (free first, monetized later), so the b
 
 | Flag | Dimensions | Best for |
 |---|---|---|
-| `/deep-audit` | quality + security + performance + ops | Default. Pre-launch sweep, weekly/biweekly checkup. |
-| `/deep-audit quality` | code structure, duplication, dead code, error handling, tests | After a big refactor, before opening a major PR. |
+| `/deep-audit` | quality + architecture + security + performance + ops | Default. Pre-launch sweep, weekly/biweekly checkup. |
+| `/deep-audit quality` | architecture fitness + duplication, dead code, error handling, tests | After a big refactor, before opening a major PR. |
 | `/deep-audit security` | authn/authz, input validation, secrets, deps, headers, injection, SSRF | Before a public launch or after touching auth/payments. |
 | `/deep-audit perf` | hot paths, N+1, bundle size, query plans, memory leaks, socket churn | When users complain something feels slow. |
 | `/deep-audit ops` | logging, observability, /health, error tracking, backup/restore, migration safety, CI hygiene, on-call surface | When thinking about going public or expanding the team — the SRE perspective. |
@@ -50,7 +50,7 @@ Skip: `node_modules`, `.worktrees`, `.fallow`, `test-results`, `ui-review*`, gen
 1. Confirm scope and warn the user this will take a while
 2. Take inventory (files, sizes, frameworks, recent activity)
 3. Run external tools that exist on disk (see `references/tools.md`); recommend ones that don't
-4. Dispatch **per-dimension subagents** (in parallel) to do deep reading — quality, security, perf, and ops
+4. Dispatch **per-dimension subagents** (in parallel) to do deep reading — quality, architecture, security, perf, and ops
 5. Aggregate findings, drop nits, classify severity, dedup across dimensions (the same issue often surfaces in 2-3 subagents)
 6. Reconcile against open Forgejo issues — **all open pages first**, then recently-closed; weight open matches above closed
 7. Group new findings into milestones + labels
@@ -104,7 +104,7 @@ Structural-quality tools (audit-only — #1289; run if installed, recommend if n
 
 These are **never** preflight/CI gates — they're review *candidates* for over/under-extraction. Their output should **feed the quality subagent's duplication / abstraction / complexity categories**, not be reported raw. (Circular-dependency *enforcement* already lives in `scripts/check-import-cycles.mjs`; madge here is for the orphan/structure picture, not gating.)
 
-Save tool output to `/tmp/deep-audit-<scope>-<tool>.log` and reference paths in the report — don't paste 5,000 lines into the chat.
+Save tool output under a **session-unique** dir (`TOOLDIR=$(mktemp -d /tmp/deep-audit-tools.XXXXXX)`) as `$TOOLDIR/<tool>.log` — fixed `/tmp` names collide across concurrent sessions, same rule as Step 6a. Point jscpd's `--output` there too. Substitute the concrete paths into any subagent prompt that consumes them, and reference the paths in the report — don't paste 5,000 lines into the chat.
 
 ---
 
@@ -112,7 +112,11 @@ Save tool output to `/tmp/deep-audit-<scope>-<tool>.log` and reference paths in 
 
 Subagents prevent the main context from drowning in file contents, and let dimensions run in parallel.
 
-For each dimension in the requested scope (default: all four — quality, security, perf, ops), dispatch one Sonnet subagent in the same turn. Use the `Agent` tool with `subagent_type: "general-purpose"`. **All four go out together** — don't run them serially or pair-then-pair; the parallelism is the whole point.
+For each dimension in the requested scope (default: all five — quality, **architecture**, security, perf, ops), dispatch one **Opus** subagent in the same turn. Use the `Agent` tool with `subagent_type: "general-purpose"` and **pin `model: "opus"` explicitly on every dispatch** — never leave the model unpinned (an unpinned dispatch inherits the parent model). Opus over Sonnet is deliberate for this skill: it runs at most weekly, the dimensions are judgment-heavy (security threat-modeling, architecture verdicts), and Aaron has said token cost is not a constraint here (2026-08-07) — signal quality wins. **All go out together** — don't run them serially or pair-then-pair; the parallelism is the whole point.
+
+The **architecture** subagent rides under the `quality` scope flag (the scope table promises "architecture fitness" there), so `/deep-audit quality` dispatches both quality and architecture. It is a separate agent because it's a different work mode: quality *hunts point defects*; architecture *surveys and judges the overall shape*. Mixing them in one prompt shortchanges one or the other.
+
+Prompt-substitution note for every dispatch: where a prompt below references `references/checklist.md`, substitute the absolute path `.claude/skills/deep-audit/references/checklist.md` (repo-rooted) — a general-purpose subagent cannot resolve "in the deep-audit skill" on its own. Same for tool-output paths from Step 3.
 
 ### Quality subagent prompt
 
@@ -120,13 +124,36 @@ For each dimension in the requested scope (default: all four — quality, securi
 >
 > Read `client/src/`, `server/src/`, `scripts/`, and `tests/`. Use `references/checklist.md` (in the deep-audit skill) as your map but go deeper than the checklist where something looks off.
 >
-> If present, consume the structural-tool output to anchor your duplication / abstraction / complexity findings (don't just eyeball): `/tmp/deep-audit-jscpd/jscpd-report.json` (jscpd clones → under-extraction candidates) and any madge orphan / single-importer / circular list (→ over-extraction + dead-code candidates). Treat these as *candidates*, not verdicts — verify each before reporting, and skip intentional entrypoints (CLI scripts, seeds, test setup) when judging orphans.
+> If present, consume the structural-tool output to anchor your duplication / abstraction / complexity findings (don't just eyeball): the jscpd report JSON (concrete path substituted at dispatch; clones → under-extraction candidates) and any madge orphan / single-importer / circular list (→ over-extraction + dead-code candidates). Treat these as *candidates*, not verdicts — verify each before reporting, and skip intentional entrypoints (CLI scripts, seeds, test setup) when judging orphans.
 >
 > Severity bar: **medium and above**. A nit is something a linter would catch or a one-line cleanup. Drop nits unless several of them combine into a real maintainability problem.
 >
 > For each finding return: title, severity (critical/high/medium), file:line refs (real ones, verified), one-paragraph explanation, suggested fix direction (one sentence — not full code), category (one of: duplication, dead-code, error-handling, abstraction, naming, testing, complexity, deps, types).
 >
 > Return JSON: `{ "findings": [...], "tooling_gaps": [...], "noteworthy_lows": [...] }`. Nothing else.
+
+### Architecture subagent prompt
+
+> You are auditing the **architecture fitness** of Darkwatch — is the code structure, layering, and file separation the *right pattern* for this stack (React + Vite client, Express + Socket.IO + MariaDB/Kysely server) and this application (a real-time TTRPG session manager)? You judge the shape of the codebase, not individual defects. Survey first, judge second.
+>
+> **Survey (do this before forming any opinion):**
+> - Map the top two directory levels of `client/src/` and `server/src/`. Note the intended layering (server: routes → services → repositories → db; socket handlers; middleware. client: pages / components / context / hooks / lib / rulesets).
+> - Trace import direction across layers: do routes reach past services into repositories or raw `db`? Do socket handlers bypass the service layer? Does anything in `client/` import from `server/` outside the sanctioned shared-boundary path (the #1564 boundary guard defines what's allowed — read `scripts/` and eslint config for it)?
+> - If madge orphan / single-importer / circular output was generated in Step 3, consume it (path substituted into this prompt) for the structural picture.
+> - Read the project's own declared conventions before judging: `docs/HANDBOOK.md`, root `CLAUDE.md`, and the `<MapTab>` sibling pattern. The codebase is judged against **its own stated rules and platform idioms**, not against an ideology you import.
+>
+> **Judge each area** (server layering, client component/state organization, socket event flow, shared client/server boundary, rulesets plug-in structure, tests layout) on:
+>
+> The **rulesets area gets extra depth**: a second ruleset implementation is planned (as of 2026-08 — verify against #1563/#334 if that reads stale), so hunt the checklist's *semantic leakage* items specifically — SD assumptions in core that the #1564 grep guard structurally cannot see. Findings there are pre-implementation savings, not cleanup.
+> - **Consistency over ideology.** "12 of 20 routes go through the service layer, 8 inline their queries" is a finding. "You chose layered MVC instead of hexagonal" is not. Never recommend an architecture-pattern rename or a rewrite.
+> - **Fitness for the app.** Real-time session state: where does authoritative state live, how do socket events propagate mutations, is ownership of a session's state findable in one place? Would a new contributor find where a feature lives on the first guess?
+> - **Platform idiom.** Express/React/Socket.IO conventions — flag genuine departures that cost something, not harmless style.
+>
+> **Verdicts are required for every area, including "fine — leave alone."** An architecture review that only lists problems is indistinguishable from a defect hunt; the explicit all-clear per area is half the value.
+>
+> Return JSON: `{ "assessment": { "<area>": { "verdict": "sound | inconsistent | misfit", "evidence": "2-4 sentences with concrete refs", "leave_alone": true|false } }, "findings": [...], "tooling_gaps": [...] }`. Nothing else.
+>
+> `findings` entries use the standard shape (title, severity critical/high/medium, refs, one-paragraph what, one-sentence fix direction, category: layering, boundary, consistency, state-ownership, structure) and only for concrete, actionable structural problems — they join the main findings pipeline. Refs may be directory paths or "pattern spans N files: a, b, c" when no single line is the finding. The `assessment` prose is the holistic verdict and is reported separately — don't duplicate one into the other.
 
 ### Security subagent prompt
 
@@ -215,6 +242,8 @@ Merge findings from all dimensions. Apply the severity bar:
 
 When the same root cause appears in multiple dims, **keep one finding** with the framing closest to the impact (security > perf > quality > ops for the same root cause), and reference the other dims' angle in the body. Don't file two issues for the same code change.
 
+The architecture subagent's `findings` join this merge like any other dimension (its layering/boundary findings often overlap quality's abstraction findings — dedup them). Its `assessment` prose does NOT go through the findings pipeline — it lands verbatim-ish (edited for length, not content) in the report's "Architecture assessment" section and is never filed as issues wholesale.
+
 Verify file:line references actually exist before including them — subagents occasionally hallucinate paths. A finding with a bad ref is worse than no finding. Spot-check refs by reading the file when in doubt.
 
 ---
@@ -223,7 +252,7 @@ Verify file:line references actually exist before including them — subagents o
 
 This is the part the user explicitly asked for. **Don't skip it, and don't half-bake it.** A bad reconciliation step (filing duplicates of issues we already have, missing reopen-worthy ones) makes the whole audit a net negative — every duplicate is a paper cut on the issue list.
 
-Use a **Sonnet-or-stronger** subagent for reconciliation — never Haiku (retired: it matched mostly closed issues and missed open overlaps; see CHANGELOG.md). The matching task is genuinely subtle (paraphrase, partial-overlap, scope-narrower/broader, regression-of-fix).
+Use an **Opus** subagent for reconciliation (pin `model: "opus"`) — never Haiku (retired: it matched mostly closed issues and missed open overlaps; see CHANGELOG.md). The matching task is genuinely subtle (paraphrase, partial-overlap, scope-narrower/broader, regression-of-fix).
 
 ### 6a. Save findings to a file first
 
@@ -233,7 +262,8 @@ Don't try to embed the merged findings inline in the prompt — they get long. W
 
 ```
 Agent({
-  subagent_type: "general-purpose",   // Sonnet by default
+  subagent_type: "general-purpose",
+  model: "opus",
   description: "Audit-finding reconciliation",
   prompt: `You are matching deep-audit findings to existing Darkwatch issues. Accuracy matters more than throughput — duplicates pollute the issue list and missed matches mean the team re-discusses solved problems.
 
@@ -364,6 +394,15 @@ Template:
 
 3–6 sentences. The honest take. What's the overall shape? What's the biggest risk for a public launch? What's surprisingly fine?
 
+## Architecture assessment
+
+REQUIRED when scope includes quality (i.e., full runs and `/deep-audit quality`). One subsection per area from the architecture subagent's `assessment` object:
+
+### <Area> — sound | inconsistent | misfit
+2–4 sentences of evidence. If `leave_alone` — say so explicitly: "Fine as-is; don't restructure."
+
+(Areas: server layering, client organization, socket event flow, shared boundary, rulesets structure, tests layout — plus anything else the subagent judged.)
+
 ## Findings
 
 Group by severity, then by category. Within each category, list findings with:
@@ -413,6 +452,8 @@ Deep audit complete — report at docs/audits/2026-05-01-deep-audit.md
 
 Findings (medium+ only):
   CRITICAL: 2  HIGH: 7  MEDIUM: 12
+
+Architecture: 4 areas sound, 2 inconsistent (socket handlers bypass services; client context sprawl) — details in report
 
 Reconciliation:
   Already tracked (skipped):    4 findings → #88, #135, #84, #126

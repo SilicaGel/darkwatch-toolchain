@@ -63,6 +63,51 @@ Map for the per-dimension subagents. Not exhaustive — go deeper when something
 
 ---
 
+## Architecture
+
+Survey-and-judge map for the architecture subagent. Judge the codebase against its own declared conventions (HANDBOOK, CLAUDE.md, boundary guard) and platform idioms — never against an imported ideology. Every area gets a verdict, including explicit "fine — leave alone."
+
+### Server layering (routes → services → repositories → db)
+- Routes that inline Kysely/raw-SQL queries instead of going through a service/repository — count how many do vs. don't; the ratio is the finding
+- Socket handlers that bypass the service layer and mutate the DB directly while the HTTP route for the same mutation goes through a service (two write paths for one resource)
+- Business logic living in middleware
+- A layer that exists but is vestigial (repositories wrapping one-line queries for only some tables)
+
+### Client organization
+- Type-folders (`components/`, `hooks/`) vs feature-folders — either is fine; *mixed without a rule* is the finding
+- Components that can't be found on first guess (feature X's UI split across `components/`, `pages/`, and `lib/` with no naming thread)
+- Context providers as a state dumping ground vs. scoped per concern; prop-drilling that suggests a missing context (or a context that should be a prop)
+- Business/rules logic in components that belongs in `rulesets/` or `lib/`
+
+### Socket event flow & state ownership
+- Is authoritative session state findable in ONE place server-side? Or spread across socket closures, module-level maps, and the DB?
+- Client socket handling: one gateway module (`socket.ts`) vs. components subscribing ad-hoc
+- Event naming consistency (verb-noun vs noun-verb mixed; `update` vs `changed` vs `set` for the same kind of mutation)
+- HTTP-vs-socket split: is there a discernible rule for which mutations go over which channel?
+
+### Shared client/server boundary
+- Imports crossing `client/` ↔ `server/` outside the sanctioned shared path (#1564 boundary guard allows the generic interface — judge against the guard's actual rules, don't re-litigate them)
+- Types duplicated by hand on both sides that have drifted (compare field-by-field)
+- Zod schemas vs TS types defined twice for the same wire shape
+
+### Rulesets / plug-in structure
+- Does the multi-ruleset seam (#334 direction) actually isolate Shadowdark-specific logic, or does SD leak into generic code paths?
+- New-ruleset test: could a second system be added by adding files, or would it require editing core?
+- **Semantic leakage** — SD assumptions in core that the #1564 guard *cannot* catch (no import, no "shadowdark" literal, no `sd:` prefix). These are the leaks that bite mid-implementation of a second ruleset:
+  - Core code hardcoding SD *mechanics*: d20/advantage-disadvantage assumptions, slot-based gear math, light-source timers, crawl-round timing, death timers, spellcasting-check shapes — anywhere a generic-named function would produce wrong answers for a non-SD system
+  - SD *vocabulary* in core naming: generic components/types/columns named with SD concepts (talents, gear slots, XP thresholds), or stat lists (STR/DEX/CON/INT/WIS/CHA) enumerated outside `rulesets/`
+  - Generic wire/DB shapes that are secretly SD-shaped: `combat_state` fields, socket payloads, or Zod schemas in core whose structure encodes SD initiative/rest/damage rules such that ruleset #2 couldn't reuse them
+  - The generic interface itself (`rulesets/types`, registry signatures): do its method signatures encode SD concepts, forcing every future ruleset to answer SD-shaped questions?
+  - Core UI copy using SD terms for generic surfaces
+  - **Genre-vocabulary litmus** — for every core identifier, ask: *"would this name survive a cyberpunk or sci-fi ruleset?"* Words like `fireball`, `sword`, `torch`, `spell`, `gold`, `dungeon` read generic inside a fantasy codebase but are ruleset content. A core type union, column, or function arm carrying fantasy nouns is a leak even though the #1564 guard scores it clean. (Genuinely system-agnostic RPG concepts — character, campaign, session, token, map — pass the litmus; don't flag those.)
+  - **DB schema and seed content** — read the migrations, `db-schema.ts`, and `seeds/` directly, not just TS code: core tables (anything outside the `character_ruleset_<slug>` pattern) holding fantasy content catalogs (spells, gear, creatures), enum/varchar columns whose *value set* is fantasy items, and seed rows planting SD content into generic tables that ruleset #2 would have to filter around or migrate away from. Schema leaks are the most expensive kind — they need data migrations, not refactors.
+
+### Tests layout
+- Unit / integration / e2e placement consistent with declared conventions (`__tests__`, `.test.ts` siblings, `tests/` root — mixed without a rule is the finding)
+- Test helpers duplicated across packages that should live in one support module
+
+---
+
 ## Security
 
 ### Authentication
