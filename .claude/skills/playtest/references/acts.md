@@ -325,7 +325,9 @@ The panel system got a full wave of work (#1919, #1950, #2003, #2017, #2057–#2
 
   **Judge composition, not colour.** A hosted Classic component usually *themes fine*, because it styles from the semantic tokens (`--text-primary`, `--gold`, `--space-*`) that the WT themes redefine — so "its CSS has no `--wt-*` tokens" proves nothing on its own. That inference produced a wrong issue on 2026-08-03 (#2169: the Atmosphere float was claimed theme-deaf, then shown live to follow Torchlit completely). **Test it the only way that settles it: switch Storm Glass ⇄ Torchlit and compare screenshots of the same surface.** What actually goes wrong is composition — a duplicated title, doubled chrome, a Classic layout idiom in a WT frame.
 
-  Known, both tracked — **confirm and add evidence; do NOT re-file**: **(a)** the player Party dock nests Classic's read-only `NpcPanel` (`WarTablePlayerView.tsx`) → **#1959**; **(b)** the Atmosphere float renders its title twice — the WT float header *and* the panel's own `ATMOSPHERE` heading → **#2169** (the `PastSessionsPanel` twin is still unverified — check it and say which way it goes).
+  Known, tracked — **confirm and add evidence; do NOT re-file**: the player Party dock nests Classic's read-only `NpcPanel` (`WarTablePlayerView.tsx`) → **#1959**.
+
+  **Fixed (2026-08-07)**: the Atmosphere float used to render its title twice — the WT float header *and* the panel's own `ATMOSPHERE` heading. `AtmospherePanel` now takes the same `embedded` prop `PastSessionsPanel` already had (#1951), suppressing the internal heading when float-hosted → **#2169**. The `PastSessionsPanel` twin was checked and does NOT bleed — it already honored `embedded` there.
 
   Exempt: the map **canvas** (one live instance reparented across modes) and `DiceTray` (chromeless full-screen overlay). *Not* exempt — Classic's `MapToolbar` appearing anywhere in WT would be real bleed, since WT's map chrome is the Command Rail / palettes / drawer. The **phone** surface is deliberately Classic (#2073/#2074) and out of scope.
 
