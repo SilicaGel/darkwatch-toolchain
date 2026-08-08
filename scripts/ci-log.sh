@@ -60,21 +60,56 @@ fi
 arg="${1:-}"
 task_id=""
 
+# #2111 — `ci-log.sh --failed <branch>` used to be accepted with the branch
+# silently ignored (only $1 is ever read below), which sent at least one
+# investigation looking at the wrong argument first. No form this script
+# supports takes a second positional argument, so reject one outright.
+if [[ -n "${2:-}" ]]; then
+  echo "ci-log: unexpected second argument '$2' — this script takes exactly one (task id, branch name, or --failed), not both. Did you mean to combine them?" >&2
+  exit 2
+fi
+
+# #2111 — the /actions/tasks endpoint (behind Cloudflare) intermittently
+# either hangs or answers with an error page instead of JSON. Before this
+# fix, the three branches below fed that straight to `jq -r` unguarded: a
+# non-JSON response produced a bare `jq: parse error: ...` and then — because
+# the failing pipeline sits on the right of a plain assignment, which `set -e`
+# does not treat as fatal on its own — the script carried on with an empty
+# task_id instead of stopping, in the worst case exiting 0 having fetched
+# nothing. A hang was worse: none of these curls had --max-time, so a stalled
+# connection blocked forever with no output at all (observed >3min, #2111).
+#
+# fetch_tasks_json mirrors the guard the metadata call below already had
+# (#2067's "capture defensively, don't let a bad response abort the script"
+# pattern) but adds the piece that call didn't need: task-id resolution is
+# NOT optional, so on failure this prints a clear, endpoint-naming message
+# and returns non-zero rather than silently returning empty. `jq -e . `
+# validates the response actually parses as JSON before any real query runs
+# against it — an HTML error page or empty body both fail this check.
+fetch_tasks_json() {
+  local limit="$1" resp
+  resp=$(curl -sS --max-time 20 -H "Authorization: token $FORGEJO_TOKEN" \
+    "$API/actions/tasks?limit=$limit" 2>/dev/null || true)
+  if [[ -z "$resp" ]] || ! jq -e . >/dev/null 2>&1 <<<"$resp"; then
+    echo "ci-log: could not reach the Forgejo API (/actions/tasks?limit=$limit returned no usable JSON, or timed out after 20s) — this endpoint is intermittently unavailable (#2111). Retry shortly, or pass a task id directly ('ci-log.sh <id>') if you already have one from elsewhere." >&2
+    return 1
+  fi
+  printf '%s' "$resp"
+}
+
 if [[ -z "$arg" ]]; then
-  task_id=$(curl -sS -H "Authorization: token $FORGEJO_TOKEN" \
-    "$API/actions/tasks?limit=1" | jq -r '.workflow_runs[0].id')
+  resp=$(fetch_tasks_json 1) || exit 1
+  task_id=$(jq -r '.workflow_runs[0].id' <<<"$resp")
 elif [[ "$arg" == "--failed" ]]; then
-  task_id=$(curl -sS -H "Authorization: token $FORGEJO_TOKEN" \
-    "$API/actions/tasks?limit=20" \
-    | jq -r '[.workflow_runs[] | select(.status == "failure")][0].id // empty')
+  resp=$(fetch_tasks_json 20) || exit 1
+  task_id=$(jq -r '[.workflow_runs[] | select(.status == "failure")][0].id // empty' <<<"$resp")
   [[ -z "$task_id" ]] && { echo "no failing tasks in last 20 runs" >&2; exit 1; }
 elif [[ "$arg" =~ ^[0-9]+$ ]]; then
   task_id="$arg"
 else
   # Treat as branch name — find latest task for that branch
-  task_id=$(curl -sS -H "Authorization: token $FORGEJO_TOKEN" \
-    "$API/actions/tasks?limit=20" \
-    | jq -r --arg b "$arg" '[.workflow_runs[] | select(.head_branch == $b or .head_branch == ("#"+$b))][0].id // empty')
+  resp=$(fetch_tasks_json 20) || exit 1
+  task_id=$(jq -r --arg b "$arg" '[.workflow_runs[] | select(.head_branch == $b or .head_branch == ("#"+$b))][0].id // empty' <<<"$resp")
   [[ -z "$task_id" ]] && { echo "no task found for branch '$arg'" >&2; exit 1; }
 fi
 
@@ -83,8 +118,12 @@ fi
 # 524s / HTML instead of JSON. Under `set -o pipefail` a failed `curl | jq` here
 # used to abort the whole script *before* the log fetch — so a flaky API meant
 # no log even when the file was sitting right there on disk. Capture it
-# defensively and only print when we actually got a metadata line.
-meta=$(curl -sS -H "Authorization: token $FORGEJO_TOKEN" \
+# defensively and only print when we actually got a metadata line. Unlike
+# fetch_tasks_json above, this one genuinely IS optional (it's a diagnostic
+# header line, not the task-id resolution the rest of the script depends on),
+# so it keeps its original non-fatal shape — just with --max-time added so a
+# hang here can't block the log fetch either.
+meta=$(curl -sS --max-time 20 -H "Authorization: token $FORGEJO_TOKEN" \
   "$API/actions/tasks?limit=50" 2>/dev/null \
   | jq -r --arg id "$task_id" \
     '.workflow_runs[]? | select(.id == ($id | tonumber)) | "# task=\(.id) run=\(.run_number) branch=\(.head_branch) sha=\(.head_sha[0:7]) status=\(.status)"' 2>/dev/null \

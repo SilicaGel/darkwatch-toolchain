@@ -291,6 +291,13 @@ run_check "rights-matrix drift" node scripts/check-rights-matrix.mjs
 # production source (count ratchet in ruleset-boundary-allowlist.json).
 run_check "ruleset-boundary" node scripts/check-ruleset-boundary.mjs
 
+# #2143 — production-required env var provisioning: a var an NODE_ENV===
+# production boot guard requires (or a KNOWN_UNPROVISIONED-curated silent
+# gap, see #2150) must be provisioned in BOTH .forgejo/workflows/deploy.yml
+# and deploy/docker-compose.prod.yml. #2141 crash-looped production for 35h
+# on exactly this gap going unenforced. Pure node + repo files, no deps.
+run_check "prod env provisioning" node scripts/check-prod-env-provisioning.mjs
+
 # #1290 — ESLint gate (mirrors ci.yml's `Lint (ESLint)` step). Fails on any
 # ESLint error. Until #1290 this only ran in the bypassable lint-staged
 # pre-commit hook; now it's part of the gate too.

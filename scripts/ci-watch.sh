@@ -112,27 +112,67 @@ write_status() {
 #
 # Prints "<job> <state>" per job, or nothing if the read failed.
 #
-# Two gotchas encoded here, both of which cost time on 2026-07-26:
+# Gotchas encoded here:
 #   - `commit_sha` lives on action_task DIRECTLY. There is no t.run_id; join
-#     to action_run_job on j.task_id = t.id.
+#     to action_run_job on j.id = t.job_id (NOT j.task_id = t.id — see #2110
+#     below for why that direction is wrong).
 #   - A re-fire leaves the earlier failed row in place, so take the HIGHEST
-#     task id per job name or a superseded failure reads as current.
+#     task id PER JOB, grouped by the stable `job_id` FK on action_task — or
+#     a superseded failure reads as current.
+#
+# #2110 (2026-08-07) — the ORIGINAL version of this query joined the wrong
+# direction and grouped by the wrong key, and the two defects compounded:
+#
+#   LEFT JOIN action_run_job j ON j.task_id = t.id
+#
+# `action_run_job.task_id` is a "which attempt is CURRENT" pointer — Forgejo
+# repoints it at the new task id on every retry. So for a job's SUPERSEDED
+# (failed, retried) task row, no action_run_job row points back at it any
+# more: `j.task_id = t.id` finds nothing, `j.name` comes back NULL, and the
+# row renders as the generic "(unnamed)" bucket — a REAL job's real name
+# gets thrown away for exactly the row where the diagnosis needed it most.
+#
+# Worse, the old dedup subquery grouped by
+# `COALESCE(j2.name,'(unnamed)') = COALESCE(j.name,'(unnamed)')` — the
+# rendered STRING, not a stable id. Every superseded task from EVERY job
+# whose name resolution failed this way collapses into the SAME "(unnamed)"
+# bucket, and MAX(id) is taken across all of them combined — so an old,
+# already-superseded failure from one job can "win" that bucket and print
+# as a current failure with no name to trace it back to. This is exactly
+# what happened on PR #2105: knip's first attempt (task 15459) failed and
+# was retried to success (task 15470), but the superseded 15459 row printed
+# as a bare "(unnamed) failure" — every NAMED job was green, and the watcher
+# still declared the run red.
+#
+# Fix: join + group on `action_task.job_id`, a stable FK that does NOT move
+# on retry (unlike action_run_job.task_id). Joining j.id = t.job_id resolves
+# the job's real name for EVERY attempt, including superseded ones — nothing
+# needs the generic bucket to render at all unless job_id is genuinely NULL
+# (an orphaned task with no job row whatsoever), in which case it prints
+# with its own task id so it's still traceable rather than silently
+# swallowed. Grouping by `t2.job_id IS t.job_id` (SQLite's NULL-safe `IS`,
+# not `=`, which never matches NULL to NULL) keeps that orphaned case
+# visible too, instead of vanishing from the report entirely.
+#
+# Verified against a local sqlite3 mock reproducing #2105's exact scenario
+# (a retried job, a genuinely-failing job, and a job_id-less orphaned task)
+# — this environment had no SSH access to the live Forgejo DB to verify
+# end-to-end; verify against a real run before fully trusting it.
 db_job_states() {
   ssh -o ConnectTimeout=10 -o BatchMode=yes "$PI_HOST" \
     "sudo sqlite3 -separator ' ' '$GITEA_DB' \"
-       SELECT COALESCE(j.name,'(unnamed)') AS job,
+       SELECT COALESCE(j.name,'unnamed-task-' || t.id) AS job,
               CASE t.status WHEN 1 THEN 'success' WHEN 2 THEN 'failure'
                             WHEN 3 THEN 'cancelled' WHEN 4 THEN 'skipped'
                             WHEN 5 THEN 'waiting' WHEN 6 THEN 'running'
                             ELSE 'unknown' END AS state
          FROM action_task t
-         LEFT JOIN action_run_job j ON j.task_id = t.id
+         LEFT JOIN action_run_job j ON j.id = t.job_id
         WHERE t.commit_sha LIKE '${sha}%'
           AND t.id = (SELECT MAX(t2.id)
                         FROM action_task t2
-                        LEFT JOIN action_run_job j2 ON j2.task_id = t2.id
                        WHERE t2.commit_sha LIKE '${sha}%'
-                         AND COALESCE(j2.name,'(unnamed)') = COALESCE(j.name,'(unnamed)'))
+                         AND t2.job_id IS t.job_id)
         ORDER BY 1;\"" 2>/dev/null
 }
 
