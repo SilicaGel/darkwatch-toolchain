@@ -1,8 +1,8 @@
 ---
 name: qa-check
 description: Use whenever the user invokes `/qa-check` (optionally `/qa-check <number>` for one issue), says "QA the qa issues", "check status/qa", "go through the qa list", "verify what's in qa", or asks "what's ready to close?" in a QA context — verifies open `status/qa` Forgejo issues.
-version: 1.2.0
-last_changed: 2026-08-03
+version: 1.3.0
+last_changed: 2026-08-07
 ---
 
 # QA Check
@@ -186,6 +186,21 @@ Before you accept a code-read for a user-visible issue, ask one question:
 - **No → code-read is correct.** The change really is greppable (a column read, an endpoint field, a static layout, a type tightening). Proceed to Step 3. Don't propose a spec for something a grep fully answers — the gate cuts both ways.
 
 This is a proposal, not an autonomous spec-write: the user is part of QA and may know a code-read is enough, or may want the deeper check. Give them the call **with** the reasoning, instead of defaulting to the cheap path and hoping.
+
+### Step 2.6 — Silent-mechanism gate: prove the OUTCOME on the substrate, not the presence in the source
+
+Step 2.5 handles the *visible* flow that a browser must drive. This gate handles the opposite failure — a fix whose correctness is **invisible to the eye and to the source**. These are the ones that regressed: on 2026-08-07 a deep-audit found **five closed issues whose "fix" never worked**, each closed on evidence that read the code but never exercised the mechanism (see *Why this design*). A sanitizer that silently does nothing renders a DM note perfectly; a DB index that was never created returns correct rows; a re-render storm looks fine on screen. Neither Step 2.5's browser check nor a grep of the diff would catch any of them, because **the source was present and the tests were green — the tests just weren't testing the mechanism.**
+
+If the issue's fix belongs to one of these classes, a code-read (and often a plain browser check) is **not** sufficient evidence. Verify the **outcome on the real substrate**:
+
+| Fix class | What a code-read/grep proves | What you MUST assert instead |
+|---|---|---|
+| **security control** (sanitizer, authz predicate, rate limiter, escaping) | the control code exists and is wired | drive the control with a **hostile** input on the real pipeline and assert it was neutralized — render real `<img onerror>` markdown and assert no live node in the DOM; hit the endpoint as the wrong user and assert the row is refused |
+| **DB index / schema migration** | the migration SQL adds the index/column | query the **running schema**: `SHOW INDEX FROM <table>` (or `EXPLAIN` the target query) and confirm the index exists / is used — the source SQL can be a silent no-op (`IF NOT EXISTS` matches on index **name**, not columns — #1185) |
+| **perf mechanism** (memoization, cache, coalescing, debounce, "moved off the hot path") | some memo/cache code was added | measure the **outcome**: render count dropped (React Profiler / a render-counter), one union per drag not N, event-loop lag bounded — "9 memo sites added" (#1186) counted the fix, never measured the storm, and missed six unfixed siblings |
+| **whole-set / coverage claim** ("every / all X") | one instance is fixed | the coverage check already in Step 3 — confirm **every** call site, not one example |
+
+**The decisive test for all four: could you make the shipped test go RED by reverting the fix?** If the fix's own test passes against synthetic inputs the real pipeline never produces (`sanitize.test.ts` hand-built HAST `raw` nodes the pipeline consumes before the plugin runs; `auth.lockout-email.test.ts` injected a fail-count the code can't reach), it is **verification theater** — the control is dead and the suite is green. When you meet a security/mechanism fix, **read its test and confirm it exercises the real substrate**; if it feeds hand-built inputs, treat the issue as `partial` and drive the real outcome yourself before proposing a close. Say in the report which substrate you checked (`SHOW INDEX`, hostile-payload render, render count) — "verified the fix code is present" is exactly the sentence that closed all five.
 
 ### Step 3 — Run code checks inline (do NOT dispatch a sub-agent)
 
@@ -493,6 +508,15 @@ Copy the relevant template to `tests/qa-check/<N>/spec.ts`, rename the test, upd
   - **#572** "dead chip on monster **and** character cards" — closed on *"CharacterDetail.tsx:210 — dead chip."* Only the monster half shipped. (The **multi-surface trap**.)
 
   Common thread: the acceptance carried a **coverage quantifier** ("every / all") or **multiple named surfaces**, and verification confirmed one instance, not the set. Reachability (added earlier) detects "symbol not wired"; it does **not** force "every acceptance bullet satisfied" — that's the gap these three changes close.
+
+- **Silent-mechanism gate (Step 2.6) — why it exists.** The 2026-08-07 deep-audit found **five closed issues whose fix never worked**, and unlike the 2026-05-08 batch these were not coverage misses — they were *outcome* misses on invisible mechanisms, each closed on a code-read (three explicitly "Verified (qa-check)"):
+  - **#391** "sanitize MDEditor output" — closed on *"rehype-DOMPurify wired; tests cover script + onerror."* The plugin only rewrites HAST `raw` nodes, but the real pipeline runs it *after* rehype-raw has already expanded them, so it does nothing; the unit test passed only on hand-built `raw` nodes the pipeline never produces. `<img onerror>` renders live.
+  - **#1185** "missing DB indexes" — closed on *"migration adds 6 indexes."* True of the SQL file; the maps composite was added under an existing index's **name** with `IF NOT EXISTS`, a permanent silent no-op — the index was never created in any environment. A `SHOW INDEX FROM maps` would have shown it.
+  - **#1186** "CampaignView re-render storm" — closed on *"9 memo/callback sites; behaviour unchanged."* Counted the memoization added (to one context), never measured the render count, and missed six sibling contexts still minting a new identity every render.
+  - **#1189** "1.1 MB entry chunk" — the fix was real at close, but a later change silently reintroduced the bloat and no bundle-size gate caught it (a *regression* class — the lesson is a CI gate, not a better close).
+  - **#1234** "fog union off the hot path" — the fix shipped correctly; only a perf tail was knowingly deferred (a defensible partial, mis-flagged as a regression on first pass).
+
+  Common thread for the four that matter: **verification confirmed the fix code was present and the suite was green, but never exercised the mechanism on its real substrate** — and the green suite was complicit because the shipped tests validated synthetic inputs the pipeline never produces. Step 2.6 is the gate; the decisive question is "could reverting the fix make its own test go RED?"
 
 ## Related skills
 
