@@ -37,6 +37,22 @@
       "issue": 2159,
       "expires": "2026-11-30",
       "reason": "Dev-only, and no override is safe. js-yaml@3.14.2 is pulled solely by @lhci/utils@0.15.1 (under @lhci/cli). The vulnerable range is <=3.14.2, so clearing it means forcing 4.x/5.x onto a 3.x consumer \u2014 and js-yaml 4 REMOVED safeLoad/safeDump, the exact API a 3.x caller uses, so the override would likely break lhci at runtime rather than fix it. Same containment as the tmp entry above: the root workspace ships nothing (\"dependencies\": {}), and this code path only runs when Lighthouse CI does. Tracked in the issue above."
+    },
+    {
+      "ghsa": "GHSA-w3rx-r6r6-pgpr",
+      "package": "image-size",
+      "workspaces": ["server"],
+      "issue": 2225,
+      "expires": "2026-11-30",
+      "reason": "Crafted-input infinite loop in image-size's ICNS/JXL/HEIF parsers; no fixed release exists upstream (fixAvailable: none). Made unreachable in this app by magic-byte gating BEFORE imageSize at both call sites: imageProcessing.ts already restricted uploads to png/jpeg/webp via fileTypeFromBuffer, and imageProbe.ts (the DM-supplied-URL path, the one reachable with attacker bytes) now applies the same buffer-sniffing gate (png/jpeg/webp/gif) \u2014 the content-type header is attacker-controlled and is deliberately not trusted. Unit test pins the ICNS case. Upstream fix tracked in the issue above; on expiry, re-review or replace the dependency."
+    },
+    {
+      "ghsa": "GHSA-5p2g-fcmc-qvqq",
+      "package": "image-size",
+      "workspaces": ["server"],
+      "issue": 2225,
+      "expires": "2026-11-30",
+      "reason": "Crafted-input infinite loop in image-size's ICNS/JXL/HEIF parsers; no fixed release exists upstream (fixAvailable: none). Made unreachable in this app by magic-byte gating BEFORE imageSize at both call sites: imageProcessing.ts already restricted uploads to png/jpeg/webp via fileTypeFromBuffer, and imageProbe.ts (the DM-supplied-URL path, the one reachable with attacker bytes) now applies the same buffer-sniffing gate (png/jpeg/webp/gif) \u2014 the content-type header is attacker-controlled and is deliberately not trusted. Unit test pins the ICNS case. Upstream fix tracked in the issue above; on expiry, re-review or replace the dependency."
     }
   ]
 }
