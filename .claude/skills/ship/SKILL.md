@@ -1,8 +1,8 @@
 ---
 name: ship
 description: Use when a development branch is ready to merge — the user invokes `/ship`, says "ship it", "ship this branch", or "open the PR". Handles the full docs + PR housekeeping for this repo; read the body before acting, the PR-body protocol has hard rules.
-version: 1.4.0
-last_changed: 2026-08-07
+version: 1.5.0
+last_changed: 2026-08-09
 ---
 
 # ship
@@ -361,6 +361,35 @@ For **each** `Ready #N`, mechanically:
 
 A scope cut you make in a dispatch prompt ("do the route only, not the global handler") is the *birthplace* of a deferral — upstream of every gate here — so it must emit a tracker in the same breath. And **"Builds on closed #M that dropped this before"** is a hard do-not-silently-defer signal: re-deferring a twice-flagged item requires an explicit recorded justification, never a silent scope note.
 
+**Emit the reconciliation as a locked `## Acceptance reconciliation` block** (not free prose) so `ship-guard` CI (#2297) and the self-check below can verify it mechanically — that's what catches a session which skipped this step because it loaded an older copy of this skill (the #2294 bypass). One `### #N` block per `Ready #N`; one bullet per acceptance key, each keyed to the issue's `## Acceptance` slugs (see `/issue` Step 6):
+
+```
+## Acceptance reconciliation
+
+### #2296
+- (epoch) — met
+- (audit-row) — deferred:#2301
+```
+
+- Every bullet is `- (slug) — met` or `- (slug) — deferred:#M`. The `(slug)` must match a key in that issue's `## Acceptance` checklist; a `deferred:#M` must cite a real, **open** tracker (file it now if it doesn't exist).
+- CI fails (once enforcing) if the block **omits** any acceptance key — that is the silent-drop catch (#2230). It does **not** and cannot check whether a `met` is *true*; that stays your judgment and qa-check's. So `met` is a claim you are signing, not a box the tool clears for you.
+- Legacy issue with no keyed `## Acceptance`? CI degrades to a notice — reconcile it as best you can and prefer back-filling the issue with keyed acceptance items so the next pass is enforceable.
+
+**Self-check before you POST the PR (Step 5)** — run the same check CI runs, in blocking mode, against the body you are about to send, so you never lean on the warn-first CI job to remind you:
+
+```bash
+# $TMP holds pr_body.md (built in Step 5). Fetch every issue the block references…
+RDIR="$TMP/recon"; mkdir -p "$RDIR"
+PR_BODY="$(cat "$TMP/pr_body.md")" node scripts/ship-guard/reconcile.mjs --list \
+  | while read -r N; do
+      curl -sS -H "Authorization: token $FORGEJO_TOKEN" \
+        "https://forge.example.com/api/v1/repos/aaron/darkwatch/issues/$N" -o "$RDIR/$N.json"
+    done
+# …then check, blocking. Non-zero = fix the block / file the tracker before opening the PR.
+PR_BODY="$(cat "$TMP/pr_body.md")" ISSUE_DIR="$RDIR" RECONCILE_ENFORCE=1 \
+  node scripts/ship-guard/reconcile.mjs --check
+```
+
 ---
 
 A PR body that says a finding was *deliberately not fixed* reads as though that finding is parked somewhere. **Usually it isn't.** On 2026-07-30, PR #2071 shipped with a "Deliberately not fixed" section naming two findings: one existed only inside the body of the issue that PR was closing (so it would have died when that issue closed), and the other had never been filed at all. Aaron caught it by asking *"I assume there is an issue tracking these things somewhere?"* — nothing in this skill did.
@@ -400,6 +429,9 @@ The PR body shape:
 ## Test plans
 <the `### #N` blocks drafted in Step 4.5, in the same order as the Ready lines below>
 
+## Acceptance reconciliation
+<one `### #N` block per Ready line — the keyed `- (slug) — met | deferred:#M` bullets from Step 4.6>
+
 Ready #N
 Ready #N
 
@@ -420,6 +452,12 @@ cat > "$TMP/pr_body.md" <<'EOF'
 
 ### #N — <title>
 ...
+
+## Acceptance reconciliation
+
+### #N
+- (slug) — met
+- (slug) — deferred:#M
 
 Ready #N
 

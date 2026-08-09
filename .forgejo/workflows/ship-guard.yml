@@ -131,3 +131,64 @@ jobs:
           echo "$CHANGED" | sed 's/^/::warning::  - /'
           # Intentionally always exit 0 — this is a reminder, not a gate.
           exit 0
+
+  # #2297 — acceptance-reconciliation gate (WARN-first). The `/ship` skill
+  # (Step 4.6) emits a `## Acceptance reconciliation` block that reconciles each
+  # `Ready #N`'s keyed `## Acceptance` checklist against the diff. This job
+  # re-checks that MECHANICALLY, so a session that loaded an older skill can't
+  # silently skip the reconciliation (the #2294 bypass a skill instruction alone
+  # can't stop). A-checks (block present, bullets well-formed) are offline;
+  # B-checks (every keyed acceptance item addressed, every `deferred:#M` still
+  # open) fetch the issue bodies. Whether a `met` bullet is actually satisfied
+  # stays a human / qa-check judgment — deliberately not checked here.
+  #
+  # WARNING only for now (never sets RECONCILE_ENFORCE) so in-flight PRs from
+  # pre-format sessions aren't insta-redded; flip to blocking by adding
+  # `RECONCILE_ENFORCE: "1"` once the format has proven out on a few PRs.
+  # API reads use github.token (same pattern as dead-code.yml / supply-chain.yml),
+  # via curl — a urllib/fetch call Cloudflare-403s (#1620). Escape hatch:
+  # `[skip-ship-guard]` in the PR title, matching the blocking guard above.
+  acceptance-reconciliation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5 # #1263 — checkout + a few API GETs + a node script.
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          fetch-depth: 1 # no git history needed — reads the PR body + issue API
+
+      - name: Use Node 22
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "22"
+
+      - name: Acceptance reconciliation (warn-first)
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          FORGEJO_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          case "$PR_TITLE" in
+            *"[skip-ship-guard]"*)
+              echo "reconcile: [skip-ship-guard] in PR title — skipped."
+              exit 0
+              ;;
+          esac
+          # Numbers to fetch = Ready #N ∪ every deferred:#M target.
+          NUMS=$(node scripts/ship-guard/reconcile.mjs --list)
+          if [ -z "$NUMS" ]; then
+            echo "reconcile: no Ready #N lines — nothing to reconcile."
+            exit 0
+          fi
+          DIR=$(mktemp -d)
+          API="https://forge.example.com/api/v1/repos/aaron/darkwatch/issues"
+          for N in $NUMS; do
+            code=$(curl -sS -o "$DIR/$N.json" -w '%{http_code}' \
+              -H "Authorization: token $FORGEJO_TOKEN" "$API/$N" || echo 000)
+            if [ "$code" != "200" ]; then
+              echo "::notice::reconcile: could not fetch issue #$N (HTTP $code) — its completeness/liveness degrades to a notice."
+              rm -f "$DIR/$N.json"
+            fi
+          done
+          # No RECONCILE_ENFORCE → warnings, exit 0. Flip by adding it to `env:`.
+          ISSUE_DIR="$DIR" node scripts/ship-guard/reconcile.mjs --check

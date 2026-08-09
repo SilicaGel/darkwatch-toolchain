@@ -1,8 +1,8 @@
 ---
 name: issue
 description: Use whenever the user invokes `/issue <description>`, or says "file an issue", "open a ticket", "track this as a ticket", "add an issue for that", "create an issue" — files, triages, or updates a Forgejo issue. Use even when the description is very short or vague; conversation context fills the gaps.
-version: 1.0.0
-last_changed: 2026-07-05
+version: 1.1.0
+last_changed: 2026-08-09
 ---
 
 # Issue Skill
@@ -145,6 +145,21 @@ Skip the questions and write the issue directly if the intent is clear from cont
 - Specific details: component names, values, constraints, edge cases
 - For features with choices: briefly note the options, with a recommendation if you have one
 - Keep it honest — don't pad. If the user typed "fix button color" and the conversation said it should be purple to match the border, say exactly that.
+
+### Acceptance checklist (keyed) — required
+
+End every issue with a `## Acceptance` checklist: one checkbox per verifiable criterion, each prefixed with a short stable `(slug)` key. This is the contract the `/ship` reconciliation gate (#2297) matches against — at ship time the PR must address each key with `met` or `deferred:#M`, so a criterion can't be silently dropped between filing and shipping (the #2230 / #2294 failure mode).
+
+```
+## Acceptance
+- [ ] (epoch) A credential change invalidates every outstanding session
+- [ ] (audit-row) A login_2fa_challenged row lands on a 2FA challenge, not just a log line
+```
+
+- **Keys** are lowercase kebab slugs — short, meaning-bearing (`(epoch)`, `(audit-row)`), unique within the issue, and **stable**: don't rename or renumber them later, because the PR that ships will cite them by name.
+- Write **one key per independently-verifiable outcome.** A findings-style `**Fix:** do A, B, and C` is three keys, not one. A coverage quantifier ("all/every") stays one key unless the parts verify separately.
+- Phrase each as an **observable** outcome (a DOM state, a DB row, a response code) — the same bar as a `/ship` test-plan `Expected:` line, not an implementation note.
+- A genuinely pure-chore issue with nothing to verify can carry a single `- [ ] (done) <the one outcome>`. Don't pad, but don't omit the section — a missing checklist downgrades the ship gate to a notice for that issue.
 
 ---
 
