@@ -1,8 +1,8 @@
 ---
 name: qa-check
 description: Use whenever the user invokes `/qa-check` (optionally `/qa-check <number>` for one issue), says "QA the qa issues", "check status/qa", "go through the qa list", "verify what's in qa", or asks "what's ready to close?" in a QA context — verifies open `status/qa` Forgejo issues.
-version: 1.3.0
-last_changed: 2026-08-07
+version: 1.4.0
+last_changed: 2026-08-08
 ---
 
 # QA Check
@@ -97,7 +97,7 @@ If the result is empty: "Nothing in QA right now." End. If non-empty, briefly te
 
 ### Step 1.5 — Fetch the closing PR's test plan (if any)
 
-Since the `ship` skill landed the test-plan protocol (#766), every PR opened after that date carries a `## Test plans` block with one `### #<N>` entry per resolved issue. **A test plan, when present, IS the verification target** — follow the plan instead of inventing one from the issue body. The plan was written by whoever shipped, with the issue body in front of them; it's the most current and most authoritative account of what success looks like.
+Since the `ship` skill landed the test-plan protocol (#766), every PR opened after that date carries a `## Test plans` block with one `### #<N>` entry per resolved issue. **A test plan, when present, is the verification *method* — not the *definition of done*.** Follow the plan for *how* to check (which surface to drive, what to observe); it was written by whoever shipped and is the most current account of the intended check. But **the plan is the shipper's account of what they shipped, not evidence that what they shipped covers the ticket** — a plan can silently narrow scope to the parts that got built. So the acceptance-coverage check (Step 3) against the *issue's own* acceptance bullets runs **unconditionally, even when a green test plan exists** — the plan overrides the method of verification, never the definition of done. On 2026-08-08 #2230 closed "verified" on a green plan that covered 2 of the issue's 3 fix bullets; the plan never mentioned the dropped third, and following-the-plan couldn't catch a narrowing nobody wrote down.
 
 For each issue in the QA queue, find the closing PR and extract its plan:
 
@@ -143,7 +143,7 @@ awk -v n="$N" '
 
 Classify the extracted block:
 
-- **User-visible plan** — has numbered steps and an `Expected:` line. **Use this as the verification target** — go straight to Step 4 (Playwright) using the steps. Skip the reachability grep in Step 3; the plan's existence + the author's confidence in writing it IS the reachability proof.
+- **User-visible plan** — has numbered steps and an `Expected:` line. **Use this as the verification method** — go straight to Step 4 (Playwright) using the steps. You may skip the *reachability grep* in Step 3 (the plan's existence proves reachability) — but you MUST still run Step 3's **acceptance-coverage check** against the *issue's own* bullets: the plan tells you how to drive the surface, the issue defines what "done" means, and a plan that drives only the parts that got built will pass while a dropped bullet goes unseen (the #2230 miss). Enumerate the issue's fix/acceptance bullets and tie each to code; any bullet you can't → the issue is `partial`, regardless of a green plan.
 - **No-user-surface escape hatch** — single bullet of the form `- no user surface — verify via <grep / file>`. **Gate it first (see "Obstructed surface ≠ no surface" above):** the hatch is valid ONLY for the *inherent* absence of UI. If the bullet's reason is a *temporary obstacle* — "no **reachable** surface today", "no seeded X", "not **readily** testable", "needs an active session/combat/map" — it is **not** the hatch: the surface exists, so clear the obstacle and drive it (Step 4), then file the durable-fixture issue. Only when the absence is genuinely inherent: run the cited grep / read the cited file; that's the whole verification, skip Step 4.
 - **Malformed** (heading present but neither shape) — note in the report and fall back to Step 2's heuristics.
 
@@ -418,6 +418,8 @@ The skill runs locally on macOS, so `open` works.
 
 ### Step 7 — Walk through closes interactively
 
+**Evidence rule for every close comment: only state outcomes you personally read in an assertion or the route source — never transcribe the shipper's test plan.** A close comment is the permanent record; a wrong detail in it outlives the session. On 2026-08-08 the #2230 close comment said the tests show "→ 200 + clean 409" — the `409` was copied verbatim from the PR's test-plan bullet without reading the assertions, and no 409 exists anywhere in the route or its tests (nor did the "held-transaction race test" the plan also cited). Before a response code, state, or test name enters a close comment, confirm it in the code: cite the assertion that checks it or the route line that returns it. "The test drives X and asserts Y" is evidence; "→ Y" copied from the plan is not. This read-it-yourself discipline — and Step 2.6's read-the-test gate — apply to **every** cited outcome on **every** issue, not just the security-flagged ones (the #2230 comment was written for an issue mentally binned as "plumbing," which is exactly where the discipline lapsed).
+
 After the report, work through the sections in order:
 
 1. **Verified.** Ask: "Close all M with the suggested comments? (Y / pick which / n)." Accept "all", a list of numbers, or "none." For each close: POST the comment → PATCH state to closed → DELETE the `status/qa` label (id 38). All three steps, every time. **Close-gate for multi-criterion issues:** do not batch-close an issue whose acceptance has ≥2 bullets or an "all/every/each" quantifier on a one-line evidence row — its per-bullet checklist (Step 6) must be fully green (`✓` on every bullet) first. A checklist with any `✗` belongs in Scope decision, not Verified, so it should never reach this close prompt.
@@ -517,6 +519,8 @@ Copy the relevant template to `tests/qa-check/<N>/spec.ts`, rename the test, upd
   - **#1234** "fog union off the hot path" — the fix shipped correctly; only a perf tail was knowingly deferred (a defensible partial, mis-flagged as a regression on first pass).
 
   Common thread for the four that matter: **verification confirmed the fix code was present and the suite was green, but never exercised the mechanism on its real substrate** — and the green suite was complicit because the shipped tests validated synthetic inputs the pipeline never produces. Step 2.6 is the gate; the decisive question is "could reverting the fix make its own test go RED?"
+
+- **Unconditional acceptance-coverage + read-it-yourself close comments (Step 1.5 / Step 3 / Step 7) — why they exist.** An independent re-verification of the 2026-08-08 wave found #2230 closed "verified" with one of its three fix bullets (a process-level `unhandledRejection` backstop) silently unshipped, and its close comment describing a `409` response the route never returns. Two distinct process holes, now both closed: (1) the skill treated a present test plan as *superseding* the acceptance-coverage check, so following the plan (which covered only the 2 shipped bullets) skipped the check that would have flagged the 3rd — the plan is now the verification *method*, never the *definition of done*, and the coverage check runs unconditionally; (2) the `409` was *transcribed* from the shipper's test-plan bullet without reading the assertions (the plan itself fabricated it, plus a "held-transaction test" that doesn't exist) — close comments now may only state outcomes read in an assertion or the route source. The irony: #2230's own subject was a comment describing behavior the code doesn't have, and its close comment did exactly that.
 
 ## Related skills
 

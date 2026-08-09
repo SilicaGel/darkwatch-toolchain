@@ -1,7 +1,7 @@
 ---
 name: ship
 description: Use when a development branch is ready to merge — the user invokes `/ship`, says "ship it", "ship this branch", or "open the PR". Handles the full docs + PR housekeeping for this repo; read the body before acting, the PR-body protocol has hard rules.
-version: 1.3.0
+version: 1.4.0
 last_changed: 2026-08-07
 ---
 
@@ -279,6 +279,7 @@ Verify: <playwright | device | eyes> — <how / which part>
   Maps directly to the `two-user-observation.spec.ts` Playwright template that `qa-check` can drive. When in doubt, use `[Role]` — it's slightly more verbose but never wrong.
 - **Dev seed accounts** named explicitly: `DungeonMaster` (DM), `Adventurer` / `Rook` / `Sylva` (players). Password is `password`. No "log in as a player" ambiguity.
 - The `Expected:` line is **required** for every user-visible plan — without it, qa-check has nothing to assert against and you risk a "verified-by-vibes" close (the #694 lesson).
+- **The `Expected:` line must describe an outcome a shipped test actually asserts — not an aspirational one.** A test plan is downstream evidence: qa-check reads it and often *transcribes* its outcome phrases into the permanent close comment. So a made-up outcome propagates. On 2026-08-08, #2230's plan claimed *"concurrent duplicate signups → 200 + clean 409, process alive"* and cited a "held-transaction race test" — **neither the 409 nor that test exists** (the route always-200s duplicates; the tests assert 200s + a clean 500). qa-check copied the "409" into the close comment verbatim. Before writing an `Expected:` outcome or naming a test, confirm the assertion exists in the code you're shipping — cite the response/state the test actually checks, never the one you intended it to. A plan that describes behavior the tests don't assert is the same defect as the code-that-describes-behavior-it-doesn't-have that these tickets keep being about.
 - The `Verify:` line is **required** too — it declares **who checks this and how**, so qa-check drives whatever it can instead of dumping the whole plan on the human. Pick one tag:
   - **`playwright`** — qa-check can drive and assert this headlessly. **This is the default.** Name the shape so qa-check knows the template: `two-user-observation` (one role acts, another observes), `state-navigation` (single user, navigate + assert), or `single-context`. Example: `Verify: playwright (two-user-observation) — assert the observer DOM receives the broadcast.`
   - **`device`** — needs a real phone/tablet that headless can't fake: on-screen-keyboard occlusion, `visualViewport` resize, native touch/long-press, PWA install. Say why. Example: `Verify: device — keyboard-occlusion can't be reproduced headlessly (#1278).`
@@ -348,7 +349,19 @@ Verify: device — keyboard-occlusion + visualViewport resize can't be reproduce
 
 After interactive confirmation, if **any** `Ready #N` is missing a plan or escape hatch, **do not call Step 5**. Empty has to be a blocker — soft warnings get ignored, and the protocol's only value comes from the halt.
 
-## Step 4.6: Every deferred item needs a tracker — HALT if one doesn't have one
+## Step 4.6: Reconcile each Ready #N's acceptance against the diff, and every deferred item needs a tracker — HALT if a bullet is unmet or untracked
+
+**First — reconcile each `Ready #N` against its issue's own acceptance, before scanning for *mentioned* deferrals.** The deferral scan below catches work the PR body *admits* it skipped. It cannot catch work that was silently dropped and never written down — which is the more common and more dangerous miss. On 2026-08-08, #2230's fix line had three parts (idempotent insert / try-catch+`next` / a process-level `unhandledRejection` backstop); the diff satisfied two, the third was scoped out in a dispatch prompt and never mentioned anywhere, and it closed "verified." The backstop had already been dropped once before (#1164) — this was the second time.
+
+For **each** `Ready #N`, mechanically:
+
+1. **Enumerate the issue's own fix/acceptance bullets** — the `## Acceptance` list, or the verbs in a findings-style `**Fix:**` line ("do A, B, and C" = three bullets), or the "should…" statements. A coverage quantifier ("all/every/each") expands one bullet into a set.
+2. **Mark each bullet satisfied / not by *this diff*** — by the actual code changed, not by the issue's intent.
+3. **Any unmet bullet must be implemented now or filed now** (a real, verified-open `#N`) — never left to the deferral scan, which only sees what you chose to write down. Put the per-bullet reconciliation *in the PR body* so a gap is visible in the artifact, not just in your head: an unwritten "I decided to skip it" is indistinguishable from "it fell off the list" (the #2230 lesson — the distinction between a deliberate deferral and a dropped one only exists if there's a tracker).
+
+A scope cut you make in a dispatch prompt ("do the route only, not the global handler") is the *birthplace* of a deferral — upstream of every gate here — so it must emit a tracker in the same breath. And **"Builds on closed #M that dropped this before"** is a hard do-not-silently-defer signal: re-deferring a twice-flagged item requires an explicit recorded justification, never a silent scope note.
+
+---
 
 A PR body that says a finding was *deliberately not fixed* reads as though that finding is parked somewhere. **Usually it isn't.** On 2026-07-30, PR #2071 shipped with a "Deliberately not fixed" section naming two findings: one existed only inside the body of the issue that PR was closing (so it would have died when that issue closed), and the other had never been filed at all. Aaron caught it by asking *"I assume there is an issue tracking these things somewhere?"* — nothing in this skill did.
 
