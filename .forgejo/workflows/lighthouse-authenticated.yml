@@ -9,25 +9,37 @@ name: Lighthouse CI — authenticated pages
 # or this workflow / its config files.
 
 on:
+  # #2309 — same reasoning as lighthouse.yml: non-blocking advisory output
+  # (`lhci autorun || true`) that gated nothing while costing runner time and a
+  # concurrent slot. This was the broader of the two filters — `server/src/**`
+  # meant any route or service change pulled in a full authenticated Lighthouse
+  # pass — and it ran on 75 of 162 PR shas (46%) over 10 days.
+  #
+  # Now on demand + opt-in `run-lighthouse` (the label is SHARED with
+  # lighthouse.yml, so one label opts a PR into both passes — the pair is what
+  # you want when actually chasing a perf question).
+  #
+  # No `schedule:` — same reason as lighthouse.yml: nothing consumes a
+  # non-PR run's output yet. Tracked on #2321.
+  workflow_dispatch:
   pull_request:
     branches: [main]
-    paths:
-      - "client/**"
-      - "server/src/**"
-      - "lighthouserc.authenticated.cjs"
-      - "scripts/lighthouse-comment/puppeteer-login.cjs"
-      - ".forgejo/workflows/lighthouse-authenticated.yml"
+    # `labeled` is REQUIRED — see lighthouse.yml.
+    types: [opened, synchronize, reopened, labeled]
   # push-to-main trigger removed (#1617): the PR comment is PR-gated and badge
   # upload doesn't exist yet (#819) — post-merge runs built 8-18 min of output
   # nothing consumed. Restore only when #819 lands.
 
 # Cancel superseded PR runs (#1617).
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  # #2309 — an unlabeled PR gets its own skip group; see lighthouse.yml.
+  group: ${{ github.event_name == 'pull_request' && !contains(github.event.pull_request.labels.*.name, 'run-lighthouse') && format('lighthouse-auth-skip-{0}', github.ref) || format('{0}-{1}', github.workflow, github.ref) }}
   cancel-in-progress: true
 
 jobs:
   lighthouse-authenticated:
+    # #2309 — normal-job `if:` (Forgejo ignores it on a `uses:` job, #1623).
+    if: ${{ github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'run-lighthouse') }}
     runs-on: ubuntu-latest
     timeout-minutes: 25 # #1263 — build + DB seed + full server stack + lhci; ~12-18 min typical
     container:

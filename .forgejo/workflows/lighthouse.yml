@@ -9,25 +9,58 @@ name: Lighthouse CI
 # has a Lighthouse comment, but until now nothing measured main itself
 # after the merge. Badge upload to MinIO is tracked separately (#819).
 on:
+  # #2309 — this job is NON-BLOCKING (`lhci autorun || true`, below): it posts
+  # an advisory comment and gates nothing. Measured over 10 days it ran on 66 of
+  # 162 PR shas (41%) and, with lighthouse-authenticated.yml, cost 636 runner-
+  # minutes — ~8% of all CI time — plus 2 concurrent slots on ~46% of PR shas,
+  # at a point where jobs-per-PR against a shared slot pool is the merge-
+  # throughput bottleneck (baseline on #1617).
+  #
+  # The old `paths` filter also over-triggered: PR #2318 ran a full 3-pass suite
+  # because it appended a filename to the `test:scripts` npm script, and
+  # `package.json` was on the list. No client code; no possible perf impact.
+  #
+  # So it now runs nightly, on demand, and on an opt-in `run-lighthouse` PR
+  # label — the same shape as `run-e2e-full` (#1623) and `run-visual` (#1494).
+  # The perf signal is DEFERRED, not deleted.
+  #
+  # `paths` is deliberately gone rather than narrowed: with a label gate a paths
+  # filter is actively harmful, because a labelled PR that happens to touch
+  # nothing on the list would silently not run — the opposite of what labelling
+  # it means. An unlabeled PR pays only a no-op job evaluation (no runner).
+  #
+  # NO `schedule:` HERE, on purpose. A nightly is the obvious other half, but
+  # this job's only consumer is the PR comment (`if: github.event_name ==
+  # 'pull_request'`), #819's badge upload does not exist yet, and nothing
+  # uploads an artifact or writes a step summary — so a scheduled run would
+  # build the client, do three passes, and discard the result. That is exactly
+  # why #1617 removed the push-to-main trigger (see the note below), and adding
+  # a cron now would reinstate it under a different name. The nightly is
+  # tracked on #2321, which owns giving it a consumer first.
+  workflow_dispatch:
   pull_request:
     branches: [main]
-    paths:
-      - "client/**"
-      - "lighthouserc.cjs"
-      - ".forgejo/workflows/lighthouse.yml"
-      - "package.json"
-      - "package-lock.json"
+    # `labeled` is REQUIRED — without it, adding `run-lighthouse` to an already-
+    # open PR fires no event and the label silently does nothing (#1623).
+    types: [opened, synchronize, reopened, labeled]
   # push-to-main trigger removed (#1617): the PR comment is PR-gated and badge
   # upload doesn't exist yet (#819) — post-merge runs built 8-18 min of output
   # nothing consumed. Restore only when #819 lands.
 
 # Cancel superseded PR runs (#1617).
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  # #2309 — an UNLABELED PR must get its own group. Sharing one group with the
+  # nightly/dispatch runs would make a PR that only evaluates a skip queue
+  # behind a real 10-minute run just to do nothing (the #1623 reasoning).
+  group: ${{ github.event_name == 'pull_request' && !contains(github.event.pull_request.labels.*.name, 'run-lighthouse') && format('lighthouse-skip-{0}', github.ref) || format('{0}-{1}', github.workflow, github.ref) }}
   cancel-in-progress: true
 
 jobs:
   lighthouse:
+    # #2309 — normal-job `if:`, not a `uses:`-job `if:`. Forgejo does NOT honour
+    # `if:` on a reusable-workflow job (#1623 lost a prove iteration to that);
+    # this is a normal job, so the gate holds.
+    if: ${{ github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'run-lighthouse') }}
     runs-on: ubuntu-latest
     timeout-minutes: 20 # #1263 — npm install + vite build + 3 lhci passes; ~8-12 min typical
     # #969 — prebuilt CI image (Node 22 + Chromium + Playwright deps baked).
