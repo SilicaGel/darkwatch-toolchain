@@ -66,12 +66,22 @@ set -uo pipefail
 # To update: review `git diff` of .forgejo/workflows/ci.yml, confirm this
 # script still mirrors the `lint-typecheck` + `test` jobs (update the checks
 # below if they changed), then set this to the value preflight prints.
-# Reconciled 2026-08-04 (#2167): `smoke` now runs in two Playwright shards with
+# Reconciled 2026-08-10 (#2308): a `tree-gate` job was added ahead of
+# lint-typecheck / test / smoke, and those three gained `needs: [tree-gate]` +
+# an `if:` so a push-to-main merge whose tree is byte-identical to an
+# already-green PR head can skip them. The gate is push-only and never applies
+# to a pull request, and NO STEP inside lint-typecheck / test moved — preflight
+# still mirrors exactly what those jobs run. Hash bump only.
+# (Bumped without reconciliation on main by #2331, because Renovate's #2325
+# edited the mariadb digest inside ci.yml and Renovate does not run /ship — so
+# the pin went stale and preflight was red on main until someone hand-bumped it.
+# Every image-digest bump does this; tracked as #2333.)
+# (Previously reconciled 2026-08-04 (#2167): `smoke` now runs in two Playwright shards with
 # a Vite restart between them, and its spec list moved into a job-level
 # SMOKE_SPECS env var so both shards read one copy. That's the `smoke` job, not
 # `lint-typecheck` / `test`, so no check below moved — hash bump only. (The list
 # is still literal `e2e/*.spec.ts` text in ci.yml, which is what
-# check-e2e-tiers.mjs and affected-e2e.mjs regex out of it.)
+# check-e2e-tiers.mjs and affected-e2e.mjs regex out of it.))
 # (Previously reconciled 2026-07-29 (#1670): `smoke` job's hardcoded spec list gained
 # e2e/1670-layout-flip.spec.ts. That's the `smoke` job, not `lint-typecheck` /
 # `test`, so no check below moved — hash bump only.)
@@ -96,7 +106,7 @@ set -uo pipefail
 # CI remains the enforcer.)
 # (Previously reconciled 2026-07-19, #1736 Task 4: WT no-raw-color guard.)
 # (Previously reconciled 2026-07-14, #1360/#1701: smoke spec list.)
-EXPECTED_CI_HASH="13acc1b6b0c1dc7f723a2915e25cd9b6507a6748c42e2e3b9c9b2096888177e3"
+EXPECTED_CI_HASH="93783850a3cb0f9edf1c39ddc9895b97d30a741c34fbe5786b0168493f3a99ae"
 
 # --- setup ------------------------------------------------------------------
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || {

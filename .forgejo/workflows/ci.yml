@@ -13,6 +13,11 @@ name: CI
 # `test` jobs for a one-command local pre-PR gate (and /ship runs it before
 # opening a PR). If you change either of those jobs, update preflight.sh —
 # it pins a SHA-256 of this file and will fail until reconciled.
+#
+# PUSH-TO-MAIN IS GATED (#2308): the `tree-gate` job below can skip
+# lint-typecheck / test / smoke on a merge whose tree is byte-identical to an
+# already-green PR head. It never applies to pull requests, and it fails open.
+# See the job comment for the full rationale and the warn-first rollout switch.
 
 on:
   push:
@@ -32,12 +37,89 @@ permissions:
 
 jobs:
   # ---------------------------------------------------------------------------
+  # tree-gate — #2308. Push-to-main only. Decides whether this merge needs a
+  # fresh lint-typecheck / test / smoke run at all.
+  #
+  # A squash-merge whose TREE is byte-identical to the PR head tree that already
+  # passed ci.yml re-proves nothing: the PR's run tested exactly these bytes.
+  # Measured over the 40 merges before 2026-08-10, 37 were identical (92.5%) —
+  # `/ship` merges origin/main into the branch before pushing, so the trees match
+  # unless main moved AFTER that merge. When main DID move the trees differ and
+  # the gate runs, which is precisely the green-PR-→-red-main window that
+  # notify-main-red exists for. Nothing is hidden: "same tree" means "same bytes,
+  # already tested".
+  #
+  # The one honest cost: a second run of a nondeterministic suite is a second
+  # SAMPLE, and #1798 is the documented case where the identical tree was green
+  # on the PR run and red on the push. See the "LIMIT OF THE CLAIM" note in
+  # tree-gate-core.mjs; the decision on whether `test` stays gated is #2336.
+  #
+  # Logic lives in scripts/ci/tree-gate-core.mjs (pure, unit-tested); this job is
+  # the I/O shell. It never fails — every unknown resolves to skip=false.
+  #
+  # WARN-FIRST (mirrors ship-guard's RECONCILE_ENFORCE, #2297): the step below
+  # deliberately does NOT set TREE_GATE_ENFORCE, so it logs "WOULD SKIP" and
+  # skips nothing. Flip it by adding `TREE_GATE_ENFORCE: "1"` to that step's
+  # `env:` once a few merges have shown the decision reading correctly.
+  # ---------------------------------------------------------------------------
+  tree-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    outputs:
+      # `skip` is the only one other jobs consume. The warn-first "would have
+      # skipped" signal is a log line in this job (grep the run log), not an
+      # output — Forgejo doesn't expose job outputs over the API, so promoting it
+      # here would add config nothing can read.
+      skip: ${{ steps.gate.outputs.skip }}
+      reason: ${{ steps.gate.outputs.reason }}
+    steps:
+      # Default depth 1 is enough: the job needs HEAD's subject and tree, plus a
+      # one-ref shallow fetch of the PR head it does itself.
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "22"
+
+      - name: Decide whether this merge needs a fresh gate run
+        id: gate
+        env:
+          API_URL: ${{ github.api_url }}
+          REPO: ${{ github.repository }}
+          # Reading commit statuses only; github.token is the fallback exactly as
+          # in notify-main-red below.
+          FORGEJO_TOKEN: ${{ secrets.FORGEJO_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
+          # Add `TREE_GATE_ENFORCE: "1"` here to make skips real (see above).
+        # No npm install: the script is Node built-ins + git + curl.
+        run: node scripts/ci/tree-gate.mjs
+
+  # ---------------------------------------------------------------------------
   # lint-typecheck — static checks + compile. No DB, no build artifacts.
   # Fastest signal: a typecheck or grep-gate failure surfaces here in well
   # under a minute without waiting on tests or smoke.
   # ---------------------------------------------------------------------------
   lint-typecheck:
     runs-on: ubuntu-latest
+    needs: [tree-gate]
+    # #2308. `!cancelled()` is load-bearing TWICE, and both are the fail-open:
+    #   1. On a PULL REQUEST, tree-gate is skipped by its own `if:`. A job whose
+    #      `needs` was skipped is itself skipped — UNLESS its `if:` uses a status
+    #      function. `!cancelled()` is that function, so PR runs are unchanged.
+    #   2. If tree-gate FAILS (or its script crashes), `skip` is empty, which is
+    #      != 'true', so these jobs run. A broken gate costs CI minutes, never
+    #      coverage. Do NOT swap in always(): that would also run these on an
+    #      explicitly cancelled run.
+    #
+    # ⚠️ This condition must never skip this job on a `pull_request`. Forgejo
+    # posts a `success` commit status for a SKIPPED job (verified 2026-08-10:
+    # `CI / badges (pull_request)` reads success on every PR), and tree-gate
+    # reads exactly those statuses as proof the PR run was green. A job that can
+    # skip on a PR would therefore certify itself. tree-gate's own `if:` pins it
+    # to push-to-main so that the gate can only ever subtract a *main* run.
+    if: ${{ !cancelled() && needs.tree-gate.outputs.skip != 'true' }}
     timeout-minutes: 15 # #1263 — npm install + static checks + tsc + build; ~5-8 min typical
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
@@ -329,6 +411,9 @@ jobs:
   # ---------------------------------------------------------------------------
   test:
     runs-on: ubuntu-latest
+    needs: [tree-gate]
+    # #2308 — see the full note on `lint-typecheck`. Must never skip on a PR.
+    if: ${{ !cancelled() && needs.tree-gate.outputs.skip != 'true' }}
     timeout-minutes: 18 # #1355 — healthy ~4-9 min (worst legit ~14); trimmed from 25 (#1263) to backstop a hang below the ~20-min OOM-runaway range
     services:
       mariadb:
@@ -528,6 +613,9 @@ jobs:
   # ---------------------------------------------------------------------------
   smoke:
     runs-on: ubuntu-latest
+    needs: [tree-gate]
+    # #2308 — see the full note on `lint-typecheck`. Must never skip on a PR.
+    if: ${{ !cancelled() && needs.tree-gate.outputs.skip != 'true' }}
     # #1263 — build + smoke specs + DB seed; ~15-20 min typical. #1621 — the
     # affected tier can append up to 20 nightly-only specs (+MinIO + all-tier
     # seed) on PRs touching a mapped area, so allow headroom above the base.
@@ -945,7 +1033,7 @@ jobs:
   badges:
     runs-on: ubuntu-latest
     timeout-minutes: 10 # #1263 — SSH + badge JSON gen + MinIO upload; ~2-5 min typical
-    needs: [lint-typecheck, test, smoke]
+    needs: [tree-gate, lint-typecheck, test, smoke]
     if: always() && github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
@@ -989,6 +1077,10 @@ jobs:
           LINT_RESULT: ${{ needs.lint-typecheck.result }}
           TEST_RESULT: ${{ needs.test.result }}
           SMOKE_RESULT: ${{ needs.smoke.result }}
+          # #2308 — when tree-gate skipped the three jobs, their `result` is
+          # 'skipped'. Without this the build + e2e badges would go RED on a
+          # merge that is provably green, which is the opposite of the truth.
+          GATE_SKIPPED: ${{ needs.tree-gate.outputs.skip }}
           DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
         run: |
@@ -1009,8 +1101,12 @@ jobs:
             const lint = process.env.LINT_RESULT || 'skipped';
             const test = process.env.TEST_RESULT || 'skipped';
             const smoke = process.env.SMOKE_RESULT || 'skipped';
-            const buildOk = lint === 'success' && test === 'success';
-            const e2eOk = smoke === 'success';
+            // #2308 — tree-gate only sets skip=true after proving this exact
+            // tree passed all three jobs on the PR head, so inheriting 'passing'
+            // reports a measured result, not an assumed one.
+            const gateSkipped = process.env.GATE_SKIPPED === 'true';
+            const buildOk = gateSkipped || (lint === 'success' && test === 'success');
+            const e2eOk = gateSkipped || smoke === 'success';
             fs.writeFileSync(out + '/build.json', JSON.stringify({
               schemaVersion: 1, label: 'build',
               message: buildOk ? 'passing' : 'failing',
@@ -1034,12 +1130,21 @@ jobs:
               }
               return { schemaVersion: 1, label, message: 'n/a', color: 'lightgrey' };
             }
-            fs.writeFileSync(out + '/server-coverage.json',
-              JSON.stringify(cov('server coverage',
-                './server/coverage-combined/coverage-summary.json',
-                './server/coverage/coverage-summary.json')));
-            fs.writeFileSync(out + '/client-coverage.json',
-              JSON.stringify(cov('client coverage', './client/coverage/coverage-summary.json')));
+            // #2308 — a skipped gate produces no coverage artifact, and cov()
+            // degrades a missing summary to 'n/a'. Publishing n/a over a real
+            // number would make the badge WRONG; not writing the file at all
+            // leaves the last measured value in place — stale by a merge or two,
+            // but true. The upload step below only copies files that exist.
+            if (gateSkipped) {
+              console.log('tree-gate skipped the test job — leaving the coverage badges at their last measured values');
+            } else {
+              fs.writeFileSync(out + '/server-coverage.json',
+                JSON.stringify(cov('server coverage',
+                  './server/coverage-combined/coverage-summary.json',
+                  './server/coverage/coverage-summary.json')));
+              fs.writeFileSync(out + '/client-coverage.json',
+                JSON.stringify(cov('client coverage', './client/coverage/coverage-summary.json')));
+            }
             const version = process.env.BADGE_VERSION || '0.0.0';
             fs.writeFileSync(out + '/version.json', JSON.stringify({
               schemaVersion: 1, label: 'version', message: 'v' + version, color: 'blue'
@@ -1071,11 +1176,24 @@ jobs:
           ENC_USER="$(urlenc "$MINIO_ROOT_USER")"
           ENC_PASS="$(urlenc "$MINIO_ROOT_PASSWORD")"
           ENDPOINT_AUTH="${MINIO_ENDPOINT/:\/\//://${ENC_USER}:${ENC_PASS}@}"
+          # #2308 — copy only the badges this run actually produced. On a
+          # tree-gate skip the two coverage JSONs are deliberately absent (see
+          # the generator above), and naming a missing file would fail the whole
+          # `mc cp`, taking the version + build badges down with it. Built from
+          # the host paths, rewritten to the container's bind-mount path.
+          # `if`, not `[ -f … ] && …`: this block runs under `set -e`, where a
+          # for-loop whose last command returns 1 aborts the whole script.
+          BADGES=""
+          for b in build e2e server-coverage client-coverage version; do
+            if [ -f "$HOME/tmp/badges/$b.json" ]; then BADGES="$BADGES /badges/$b.json"; fi
+          done
+          echo "uploading badges:$BADGES"
+          [ -n "$BADGES" ] || { echo "no badge files to upload"; exit 0; }
           docker run --rm --network host \
             -v "$HOME/tmp/badges:/badges:ro" \
             -e "MC_HOST_dw=${ENDPOINT_AUTH}" \
             minio/mc:RELEASE.2025-08-13T08-35-41Z \
-            cp /badges/build.json /badges/e2e.json /badges/server-coverage.json /badges/client-coverage.json /badges/version.json \
+            cp $BADGES \
               "dw/${MINIO_BUCKET}/site/"
           rm -f "$HOME"/tmp/badges/*.json
           EOSSH
@@ -1086,6 +1204,11 @@ jobs:
   # advisory can't block a merge), this is also how an audit regression that
   # slipped in on an unrelated merge gets attention. Self-contained: uses the
   # repo token, no external channel.
+  #
+  # #2308 — deliberately NOT taught about tree-gate. When the gate skips the
+  # three jobs their result is 'skipped', which is not 'failure', so this stays
+  # quiet. That is correct: a skip means an identical tree already went green, so
+  # there is no red main to report.
   notify-main-red:
     runs-on: ubuntu-latest
     timeout-minutes: 5
