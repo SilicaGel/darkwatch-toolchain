@@ -52,21 +52,12 @@ jobs:
       # PR #1974 (task 13916), and the same shape killed visual-regression's
       # `detect`. This job only needs a changed-file list, so take a shallow
       # head and deepen just enough to reach the merge-base.
+      # Retry-hardened, unshallow-fallback resolver (see the script for the
+      # #1958 budget + #2317 merge-commit-flake rationale). BLOCKING guard: an
+      # unresolvable base is a red (the script exits 1, propagated here) — a diff
+      # off an incomplete graph would pass the guard vacuously, worse than a red.
       - name: Ensure a merge-base with origin/main
-        run: |
-          set -e
-          git fetch --no-tags --depth=50 origin +refs/heads/main:refs/remotes/origin/main
-          for extra in 150 500 2000; do
-            git merge-base origin/main HEAD >/dev/null 2>&1 && break
-            git fetch --no-tags --deepen="$extra" origin +refs/heads/main:refs/remotes/origin/main
-          done
-          # Fail LOUD if it still can't be reached. A shallow graph makes
-          # `git diff origin/main...HEAD` return NOTHING rather than erroring —
-          # so a guard would pass vacuously, which is worse than a red build.
-          git merge-base origin/main HEAD >/dev/null 2>&1 || {
-            echo "::error::no merge-base with origin/main after deepening — refusing to diff an incomplete graph"
-            exit 1
-          }
+        run: bash scripts/ship-guard/ensure-merge-base.sh
 
       # No npm dependencies — the guard is Node built-ins only. PR body/title
       # come from the event payload; the script reads the diff from git itself.
@@ -98,26 +89,14 @@ jobs:
       # PR #1974 (task 13916), and the same shape killed visual-regression's
       # `detect`. This job only needs a changed-file list, so take a shallow
       # head and deepen just enough to reach the merge-base.
+      # Same shared resolver, but ADVISORY (#1775): this reminder job must never
+      # red the PR, so a non-zero exit is ignored — worst case the reminder is
+      # incomplete. #2317's retries + unshallow fallback make an unresolved base
+      # rare in the first place.
       - name: Ensure a merge-base with origin/main
         run: |
-          set -e
-          git fetch --no-tags --depth=50 origin +refs/heads/main:refs/remotes/origin/main
-          for extra in 150 500 2000; do
-            git merge-base origin/main HEAD >/dev/null 2>&1 && break
-            git fetch --no-tags --deepen="$extra" origin +refs/heads/main:refs/remotes/origin/main
-          done
-          # #1775 — this is the ADVISORY reminder job ("intentionally always
-          # exit 0", below). Unlike the blocking ship-guard job, a merge-base it
-          # can't resolve must NOT red the PR. A merge commit in the branch (from
-          # the /ship merge-not-rebase step) can leave the deepened graph short
-          # of the base — the deepen loop reaches a merge commit's second parent
-          # unreliably (#2317; the blocking job hit-or-misses on the same commit).
-          # The worst case here is only that the workflow-change reminder doesn't
-          # print, so skip it rather than fail the build.
-          git merge-base origin/main HEAD >/dev/null 2>&1 || {
-            echo "::notice::workflow-change-reminder: no merge-base with origin/main after deepening — skipping the advisory reminder (see #2317)."
-            exit 0
-          }
+          bash scripts/ship-guard/ensure-merge-base.sh \
+            || echo "::notice::workflow-change-reminder: merge-base unresolved after unshallow — advisory reminder may be incomplete (#2317)."
 
       - name: Remind about workflow-change hygiene
         run: |
