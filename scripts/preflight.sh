@@ -66,12 +66,16 @@ set -uo pipefail
 # To update: review `git diff` of .forgejo/workflows/ci.yml, confirm this
 # script still mirrors the `lint-typecheck` + `test` jobs (update the checks
 # below if they changed), then set this to the value preflight prints.
-# Reconciled 2026-08-10 (#2308): a `tree-gate` job was added ahead of
+# Reconciled 2026-08-10 (#2315): the `tree-gate` job's checkout gained
+# `filter: blob:none` + `sparse-checkout: scripts/ci` — it needs commits and
+# trees, never a tracked file's contents. That is the `tree-gate` job, not
+# `lint-typecheck` / `test`, so no check below moved — hash bump only.
+# (Previously reconciled 2026-08-10 (#2308): a `tree-gate` job was added ahead of
 # lint-typecheck / test / smoke, and those three gained `needs: [tree-gate]` +
 # an `if:` so a push-to-main merge whose tree is byte-identical to an
 # already-green PR head can skip them. The gate is push-only and never applies
 # to a pull request, and NO STEP inside lint-typecheck / test moved — preflight
-# still mirrors exactly what those jobs run. Hash bump only.
+# still mirrors exactly what those jobs run. Hash bump only.)
 # (Bumped without reconciliation on main by #2331, because Renovate's #2325
 # edited the mariadb digest inside ci.yml and Renovate does not run /ship — so
 # the pin went stale and preflight was red on main until someone hand-bumped it.
@@ -106,7 +110,7 @@ set -uo pipefail
 # CI remains the enforcer.)
 # (Previously reconciled 2026-07-19, #1736 Task 4: WT no-raw-color guard.)
 # (Previously reconciled 2026-07-14, #1360/#1701: smoke spec list.)
-EXPECTED_CI_HASH="93783850a3cb0f9edf1c39ddc9895b97d30a741c34fbe5786b0168493f3a99ae"
+EXPECTED_CI_HASH="f7dc4ef679be926e9b4f7c8a7b7f93e7d9fbd63c69e5cef98e7a04b76ccf9be3"
 
 # --- setup ------------------------------------------------------------------
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || {

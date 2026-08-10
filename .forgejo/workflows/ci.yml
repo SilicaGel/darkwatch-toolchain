@@ -77,6 +77,31 @@ jobs:
       # Default depth 1 is enough: the job needs HEAD's subject and tree, plus a
       # one-ref shallow fetch of the PR head it does itself.
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          # #2315 — this job runs only `node scripts/ci/tree-gate*.mjs`, which
+          # import nothing but `node:` builtins, and it never reads a tracked
+          # file's *contents*. It needs COMMITS and TREES only: `git log -1
+          # --format=%s`, `rev-parse HEAD^{tree}`, a depth-1 fetch of
+          # `refs/pull/N/head`, and `rev-parse` of that ref's tree. No blobs.
+          #
+          # Measured on the first real run (task 17673, main push for #2337):
+          # 45s total, of which ~25s was this checkout and ~2s was the decision.
+          # Same recipe as ship-guard/acceptance-reconciliation (#2338) and
+          # workflow-change-reminder (81M -> 1.6M, 3m17s -> 1.5s, #2332).
+          #
+          # ⚠️ The property that makes this SAFE, and it is not obvious: sparse
+          # checkout changes what is written to DISK, never a tree object's SHA.
+          # `HEAD^{tree}` is the full-repo root tree either way — verified
+          # locally against a full checkout (both `f1565737970b` for 7a04f42e),
+          # and the skip path still reached `skip=true` on #2337's merge inside
+          # a partial+sparse+shallow clone (852K .git). A sparse working tree
+          # therefore cannot skew the comparison the gate is built on.
+          #
+          # `filter` alone would be a no-op (#2338): a full working tree lazily
+          # re-fetches every tip blob. The sparse list is what does the work.
+          filter: blob:none
+          sparse-checkout: |
+            scripts/ci
 
       - name: Setup Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
