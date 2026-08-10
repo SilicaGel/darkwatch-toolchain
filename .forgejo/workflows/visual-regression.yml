@@ -53,6 +53,25 @@ jobs:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           fetch-depth: 50
+          # #2315 — this job reads NOTHING from the working tree. Every step is
+          # shell + git: resolve a merge-base, then decide from
+          # `git diff --name-only origin/main...HEAD` which visual specs to run.
+          # Commits and trees, never a blob.
+          #
+          # Unfiltered it is the worst tail in the fleet, because the merge-base
+          # step escalates `--deepen` through 150/500/2000 — and on an unfiltered
+          # repo each deepen drags historical copies of the 43.3M of visual
+          # baselines. ship-guard.yml's own comment records that this exact shape
+          # already killed this job once.
+          #
+          # `filter` alone would be a NO-OP (a full working tree makes checkout
+          # lazily re-fetch every tip blob — measured 82M, worse than nothing),
+          # so the sparse list is required. `scripts/ci` is a small real path
+          # chosen only to stop the tree materialising; cone mode always includes
+          # root files, and this job needs neither.
+          filter: blob:none
+          sparse-checkout: |
+            scripts/ci
 
       # #1958 — resolve a merge-base WITHOUT the full-history fetch.
       #

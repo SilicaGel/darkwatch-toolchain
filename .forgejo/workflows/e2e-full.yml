@@ -487,6 +487,21 @@ jobs:
           # point. It also runs only on failure, only off pull_request, and has
           # a 10-minute budget. Revisit if it starts timing out.
           fetch-depth: 0
+          # #2315 — depth STAYS 0 for the reason above; what changes is that
+          # it no longer drags blobs. This job only runs `git log --oneline`
+          # (commit subjects for the suspect list) and an inline Python block
+          # over a downloaded artifact — it opens no tracked file. Unfiltered,
+          # `fetch-depth: 0` is the most expensive checkout in the fleet: it
+          # pulls EVERY historical version of the 43.3M of visual baselines and
+          # 19M of brochure PNGs. `blob:none` keeps the full commit graph the
+          # last-green walk needs while skipping all of it.
+          #
+          # `filter` alone would be a no-op with a full working tree (checkout
+          # lazily re-fetches every tip blob), hence the sparse list; `scripts/ci`
+          # is a small real path chosen only to stop the tree materialising.
+          filter: blob:none
+          sparse-checkout: |
+            scripts/ci
 
       - name: Download the e2e-full report artifact
         if: ${{ (needs.e2e-full.result == 'failure' || contains(needs.*.result, 'failure')) && github.event_name != 'pull_request' }}
