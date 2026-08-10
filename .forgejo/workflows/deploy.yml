@@ -127,6 +127,12 @@ jobs:
           DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
           JWT_SECRET: ${{ secrets.JWT_SECRET }}
           TOTP_ENCRYPTION_KEY: ${{ secrets.TOTP_ENCRYPTION_KEY }}
+          # #2150 — comma-separated user id(s) allowed onto the admin surfaces
+          # (/admin/images, #704). Never set here before now, so production
+          # refused every account, including the owner's. The Forgejo secret
+          # itself must hold the owner's REAL production user id — the fixed
+          # dev-seed UUID (ad000000-…) doesn't exist in the prod DB.
+          ADMIN_USER_IDS: ${{ secrets.ADMIN_USER_IDS }}
           CLIENT_URL: ${{ secrets.CLIENT_URL }}
           EXTRA_ALLOWED_ORIGINS: ${{ secrets.EXTRA_ALLOWED_ORIGINS }}
           WAITLIST_PUBLIC_URL: ${{ secrets.WAITLIST_PUBLIC_URL }}
@@ -155,6 +161,7 @@ jobs:
             printf 'DB_PASSWORD=%s\n' "$DB_PASSWORD"
             printf 'JWT_SECRET=%s\n' "$JWT_SECRET"
             printf 'TOTP_ENCRYPTION_KEY=%s\n' "$TOTP_ENCRYPTION_KEY"
+            printf 'ADMIN_USER_IDS=%s\n' "$ADMIN_USER_IDS"
             printf 'CLIENT_URL=%s\n' "$CLIENT_URL"
             printf 'EXTRA_ALLOWED_ORIGINS=%s\n' "$EXTRA_ALLOWED_ORIGINS"
             printf 'WAITLIST_PUBLIC_URL=%s\n' "$WAITLIST_PUBLIC_URL"

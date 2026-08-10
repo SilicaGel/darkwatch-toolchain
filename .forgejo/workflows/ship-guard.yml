@@ -77,6 +77,13 @@ jobs:
   workflow-change-reminder:
     runs-on: ubuntu-latest
     timeout-minutes: 5 # #1263 — checkout + git diff only; ~1-2 min typical
+    # #2324 — belt-and-suspenders on top of the advisory design above: a
+    # `|| echo` inside a step only catches a non-zero *exit*, not a killed
+    # process or a job-level timeout (both observed on #2323 when the
+    # capacity-loaded Pi (#2315) made the `--unshallow` fallback run slow).
+    # `continue-on-error` makes the JOB itself structurally unable to fail the
+    # workflow, regardless of which step or how it fails.
+    continue-on-error: true
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
