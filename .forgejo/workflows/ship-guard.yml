@@ -88,6 +88,37 @@ jobs:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           fetch-depth: 50
+          # #2315 — this job only ever needs a changed-FILE-LIST, so it needs
+          # commits and trees but never file contents. Measured against the
+          # live server: a plain `--depth=50` fetch of this repo transfers
+          # 81M (most of it the 43M of visual baselines at the tip, plus every
+          # regeneration of them in history). With a blob:none promisor remote
+          # plus a sparse working tree it is 1.6M — a ~50x cut on a job whose
+          # budget is 5 minutes.
+          #
+          # That budget is why this matters: on 2026-08-10 (PR #2332) the fetch
+          # alone took 3m17s of the 5 minutes and the job was killed at exactly
+          # 5m00s. The `context deadline exceeded` reading SUMMARY.md over
+          # docker.sock that shows up in the log is the teardown symptom of
+          # that kill, not the cause — which is why re-running sometimes
+          # "fixed" it and no amount of merge-base hardening (#2314, #2317)
+          # ever did.
+          #
+          # `filter` alone is NOT enough: with a full working tree the checkout
+          # lazily re-fetches every tip blob and you land back at 82M. The
+          # sparse list is what keeps it small, so it must stay minimal —
+          # `scripts/ship-guard` because the next step executes a script from
+          # it, and `.forgejo/workflows` defensively for future steps (the
+          # `git diff` itself reads trees, not the working tree).
+          #
+          # The filter also protects the expensive fallback: ensure-merge-base
+          # can escalate to `--unshallow` / `--deepen=100000`, which on an
+          # unfiltered repo drags the entire history of every regenerated PNG.
+          # A promisor remote keeps even that path blob-free.
+          filter: blob:none
+          sparse-checkout: |
+            scripts/ship-guard
+            .forgejo/workflows
 
       # #1958 — resolve a merge-base WITHOUT the full-history fetch.
       #

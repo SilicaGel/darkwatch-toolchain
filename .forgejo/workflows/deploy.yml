@@ -9,8 +9,12 @@ name: Deploy
 # no rsync-over-network, no Mac dependency. The May-2026 Mac-runner shape
 # (build on Mac → rsync/SSH to the Pi) broke whenever the Mac was off the
 # home LAN; every step below is local to the Pi. The e2e gate that fronts
-# the nightly (nightly-deploy.yml) still runs on the Mac runner — a fully
-# offline Mac still blocks the nightly (accepted residual, see #1337).
+# the nightly (nightly-deploy.yml) runs on `ubuntu-latest`, not on a specific
+# machine. When this note was written the Mac was the only runner serving that
+# label, so an offline Mac blocked the nightly — the #1337 residual. That has
+# not been true since Falcon's amd64 runners took over the label on 2026-07-31:
+# verified 2026-08-09 that nightly deploys succeeded on 2026-08-06 and 08-07
+# with the Mac offline. An offline Mac no longer blocks the nightly.
 #
 # Host prerequisites (installed 2026-07-06, see docs/BACKUPS.md): Node 22
 # (system), docker, rsync, caddy; the deploy user's sudoers allows `install`
