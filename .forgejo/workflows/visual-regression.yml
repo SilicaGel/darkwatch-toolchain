@@ -110,8 +110,21 @@ jobs:
           # surface — wartable.css and wt-*.css live under client/src/styles, and
           # the WT spec imports freezeForSnapshot too), PLUS the WT sources and
           # the WT spec itself. Keep these globs in step with the `wartable` area
-          # in tests/e2e/spec-areas.json.
-          if echo "$CHANGED" | grep -qE '^client/src/.*\.css$|^client/src/styles/|^tests/helpers/freeze\.ts$|^client/src/pages/wartable/|^client/src/components/wt/|^client/src/rulesets/[^/]+/components/wt/|^client/src/hooks/useLayoutMode|^client/src/lib/layoutMode|^tests/e2e/1736-wt-visual\.spec\.ts$'; then
+          # in tests/e2e/spec-areas.json — #2298 added a GUARD for that
+          # (scripts/check-e2e-tiers.mjs), because this comment alone did not
+          # stop the two lists drifting three ways:
+          #   • `client/src/components/map/**` was missing from BOTH. MapTab.tsx
+          #     renders War Table chrome — the maps drawer is portaled to
+          #     document.body at --wt-menu-z and positioned off the WT panel
+          #     rect — so a change there moves WT pixels with no CSS touched.
+          #     That is how #2222 slipped past every pre-merge tier (#2295).
+          #   • `useWtScale.ts` was in spec-areas but not here, so a WT *zoom*
+          #     change skipped the pixel baseline — the one change most certain
+          #     to move pixels.
+          #   • spec-areas hardcoded `rulesets/shadowdark/` while this used
+          #     `[^/]+`; a second ruleset's WT components routed here but not
+          #     into the affected e2e tier.
+          if echo "$CHANGED" | grep -qE '^client/src/.*\.css$|^client/src/styles/|^tests/helpers/freeze\.ts$|^client/src/pages/wartable/|^client/src/components/wt/|^client/src/rulesets/[^/]+/components/wt/|^client/src/components/map/|^client/src/hooks/useLayoutMode|^client/src/hooks/useWtScale|^client/src/lib/layoutMode|^tests/e2e/1736-wt-visual\.spec\.ts$'; then
             SPECS="$SPECS $WT"
             echo "→ War Table visual spec (WT source / CSS / harness change)"
           fi
