@@ -47,7 +47,13 @@ import { parseReadyNumbers, SKIP_MARKER } from "./check.mjs";
 
 // Locked section headers (must match what the /ship and /issue skills emit).
 export const RECONCILE_HEADER = /^##\s+Acceptance reconciliation\s*$/im;
-export const ACCEPTANCE_HEADER = /^##\s+Acceptance\s*$/im;
+// The issue-side acceptance header. Accepts a trailing qualifier: a reframe per
+// implementing-issues.md revises the list and dates the header
+// (`## Acceptance (revised 2026-08-10)`), which the old EXACT match missed
+// entirely — silently following an *archived* bare `## Acceptance` instead and
+// verifying against withdrawn criteria (#2320). The negative lookahead keeps it
+// from also matching the PR-body `## Acceptance reconciliation` header.
+export const ACCEPTANCE_HEADER = /^##\s+Acceptance\b(?!\s+reconciliation\b).*$/im;
 
 // A `### #N` block header inside the reconciliation section.
 const BLOCK_HEADER = /^###\s+#(\d+)\b/;
@@ -65,22 +71,39 @@ const LIST_LINE = /^[\s>]*[-*+]\s+/;
 const ACCEPTANCE_ITEM = /^[\s>]*[-*+]\s+\[[ xX]\]\s*/;
 const ACCEPTANCE_KEY = /^[\s>]*[-*+]\s+\[[ xX]\]\s*\(([a-z0-9][a-z0-9-]*)\)/;
 
+// A retire marker on an acceptance item — `- [ ] (slug) … — superseded:#M`
+// (or `moved:` / `carved:`) — declares the key withdrawn to another ticket, so
+// the gate drops it from the REQUIRED set without relying on the
+// `~~strikethrough~~`-defeats-the-regex accident that no test pinned (#2320,
+// folds in #2316). The target #M should be a live issue (checked like a deferral).
+const SUPERSEDED = /\b(?:superseded|moved|carved):\s*#(\d+)/i;
+
 /**
- * Drop fenced code blocks (``` / ~~~) so an *illustrative* `## Acceptance` or
- * `## Acceptance reconciliation` shown inside a code fence — e.g. the format
- * examples in this very issue's body — is not parsed as the real section. A
- * fence closes on the same marker char it opened with; unbalanced fences drop
- * to EOF (conservative — better to ignore trailing example text than to parse
- * it as a live header).
+ * Drop content the parser must NOT treat as authoritative:
+ *   - fenced code blocks (``` / ~~~) — an *illustrative* `## Acceptance` shown
+ *     as a format example (the fence examples in this very issue's body);
+ *   - `<details>…</details>` blocks — a COLLAPSED / archived section. A reframe
+ *     per implementing-issues.md moves the superseded acceptance list into a
+ *     `<details>`; collapsing it must also hide it from the parser, else the
+ *     gate can follow the withdrawn criteria (#2320).
+ *
+ * Order matters: strip fenced code FIRST, then remove only *balanced*
+ * `<details>…</details>` pairs. An UNBALANCED `<details>` — e.g. an inline-code
+ * prose mention like `` `<details>` `` in an issue *about* this very format
+ * (#2320's own body) — is left as harmless text, so it can never over-strip
+ * past a real closing tag and swallow the live section. Unbalanced fences drop
+ * to EOF (conservative — better to ignore trailing example text than parse it
+ * as a live header).
  */
-export function stripFences(body) {
+export function stripIgnored(body) {
   if (typeof body !== "string") return "";
+  // 1) Fenced code blocks (line-based; a fence closes on the marker char it opened).
   const out = [];
-  let fence = null; // the marker char ("`" or "~") of the open fence, else null
+  let fence = null;
   for (const line of body.split("\n")) {
-    const m = line.match(/^\s*(```+|~~~+)/);
-    if (m) {
-      const marker = m[1][0];
+    const f = line.match(/^\s*(```+|~~~+)/);
+    if (f) {
+      const marker = f[1][0];
       if (fence === null)
         fence = marker; // opening fence
       else if (marker === fence) fence = null; // matching closing fence
@@ -88,7 +111,15 @@ export function stripFences(body) {
     }
     if (fence === null) out.push(line);
   }
-  return out.join("\n");
+  // 2) Balanced <details>…</details> pairs (a collapsed/archived section). Repeat
+  //    so adjacent/nested pairs all go; an unbalanced <details> stays put.
+  let text = out.join("\n");
+  let prev;
+  do {
+    prev = text;
+    text = text.replace(/<details\b[\s\S]*?<\/details\s*>/gi, "");
+  } while (text !== prev);
+  return text;
 }
 
 /**
@@ -99,7 +130,7 @@ export function stripFences(body) {
  */
 export function sliceSection(body, headerRe) {
   if (typeof body !== "string") return "";
-  const stripped = stripFences(body);
+  const stripped = stripIgnored(body);
   const m = stripped.match(headerRe);
   if (!m) return "";
   const rest = stripped.slice(m.index + m[0].length);
@@ -138,22 +169,33 @@ export function parseReconciliation(body) {
 
 /**
  * Parse an issue body's `## Acceptance` checklist.
- * Returns { hasChecklist, keys:Set<slug> }. `hasChecklist` is true when the
- * section has ANY `- [ ]` item; `keys` holds the `(slug)`-keyed ones. A
- * checklist with items but no keys → hasChecklist true, keys empty → B can't
+ * Returns { hasChecklist, keys:Set<slug>, retired:Map<slug,#M>, headerCount }.
+ * - `keys` are the REQUIRED `(slug)`-keyed items (a `superseded:#M` item is
+ *   dropped here and recorded in `retired` instead).
+ * - `headerCount` is how many `## Acceptance` headers survive stripping — >1
+ *   means the live section is ambiguous (the #2320 collision) and callers must
+ *   not trust the parsed keys.
+ * A checklist with items but no keys → hasChecklist true, keys empty → B can't
  * verify completeness deterministically, so it degrades to a NOTICE.
  */
 export function parseAcceptanceKeys(issueBody) {
+  const stripped = stripIgnored(issueBody);
+  const headerCount = (stripped.match(new RegExp(ACCEPTANCE_HEADER.source, "gim")) || []).length;
   const section = sliceSection(issueBody, ACCEPTANCE_HEADER);
   const keys = new Set();
+  const retired = new Map();
   let hasChecklist = false;
   for (const raw of section.split("\n")) {
     if (!ACCEPTANCE_ITEM.test(raw)) continue;
     hasChecklist = true;
     const k = raw.match(ACCEPTANCE_KEY);
-    if (k) keys.add(k[1].toLowerCase());
+    if (!k) continue;
+    const slug = k[1].toLowerCase();
+    const sup = raw.match(SUPERSEDED);
+    if (sup) retired.set(slug, sup[1]);
+    else keys.add(slug);
   }
-  return { hasChecklist, keys };
+  return { hasChecklist, keys, retired, headerCount };
 }
 
 /**
@@ -190,6 +232,13 @@ export function decideReconciliation({ body, issues = new Map(), skipB = false }
     if (skipB) continue;
 
     const iss = issues.get(n);
+    if (iss && iss.headerCount > 1) {
+      problems.push({
+        level: "error",
+        msg: `#${n}: ${iss.headerCount} \`## Acceptance\` headers found — the gate can't tell which is live, so completeness is NOT verified (it could follow a superseded section, the #2320 hole). Keep one live \`## Acceptance\`; archive superseded ones in <details>, or retire individual keys with \`superseded:#M\`.`,
+      });
+      continue;
+    }
     if (iss && iss.hasChecklist && iss.keys.size) {
       const have = new Set(blk.bullets.map((x) => x.slug));
       const missing = [...iss.keys].filter((k) => !have.has(k));
@@ -234,6 +283,11 @@ export function decideReconciliation({ body, issues = new Map(), skipB = false }
         }
       }
     }
+    // NOTE: a `superseded:#M` retire marker drops the key from the required set
+    // (parseAcceptanceKeys → retired), but its target's liveness is NOT checked
+    // here: unlike a `deferred:#M` (declared in the PR block, so listable), a
+    // retire lives in the ISSUE body and its target isn't known until after the
+    // Ready #N is fetched — full liveness would need a two-phase fetch. Deferred.
   }
 
   return { problems };
@@ -253,6 +307,14 @@ function listNumbers(body) {
   return [...nums];
 }
 
+const EMPTY_ISSUE = () => ({
+  state: null,
+  hasChecklist: false,
+  keys: new Set(),
+  retired: new Map(),
+  headerCount: 0,
+});
+
 function loadIssues(dir) {
   const issues = new Map();
   let files = [];
@@ -267,13 +329,19 @@ function loadIssues(dir) {
     try {
       const j = JSON.parse(readFileSync(`${dir}/${f}`, "utf8"));
       if (j && j.number != null) {
-        const { hasChecklist, keys } = parseAcceptanceKeys(j.body ?? "");
-        issues.set(String(j.number), { state: j.state ?? null, hasChecklist, keys });
+        const { hasChecklist, keys, retired, headerCount } = parseAcceptanceKeys(j.body ?? "");
+        issues.set(String(j.number), {
+          state: j.state ?? null,
+          hasChecklist,
+          keys,
+          retired,
+          headerCount,
+        });
       } else {
-        issues.set(fallbackKey, { state: null, hasChecklist: false, keys: new Set() });
+        issues.set(fallbackKey, EMPTY_ISSUE());
       }
     } catch {
-      issues.set(fallbackKey, { state: null, hasChecklist: false, keys: new Set() });
+      issues.set(fallbackKey, EMPTY_ISSUE());
     }
   }
   return issues;

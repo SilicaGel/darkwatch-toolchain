@@ -1,8 +1,8 @@
 ---
 name: issue
 description: Use whenever the user invokes `/issue <description>`, or says "file an issue", "open a ticket", "track this as a ticket", "add an issue for that", "create an issue" — files, triages, or updates a Forgejo issue. Use even when the description is very short or vague; conversation context fills the gaps.
-version: 1.1.0
-last_changed: 2026-08-09
+version: 1.2.0
+last_changed: 2026-08-10
 ---
 
 # Issue Skill
@@ -160,6 +160,7 @@ End every issue with a `## Acceptance` checklist: one checkbox per verifiable cr
 - Write **one key per independently-verifiable outcome.** A findings-style `**Fix:** do A, B, and C` is three keys, not one. A coverage quantifier ("all/every") stays one key unless the parts verify separately.
 - Phrase each as an **observable** outcome (a DOM state, a DB row, a response code) — the same bar as a `/ship` test-plan `Expected:` line, not an implementation note.
 - A genuinely pure-chore issue with nothing to verify can carry a single `- [ ] (done) <the one outcome>`. Don't pad, but don't omit the section — a missing checklist downgrades the ship gate to a notice for that issue.
+- **Retiring a key** (a criterion carved out to another ticket): mark it `- [ ] (slug) … — superseded:#M`, not `~~strikethrough~~`. The `superseded:#M` marker drops the key from the gate's required set declaratively; the strikethrough only "worked" by defeating a regex and no test pinned it (#2320). **One live `## Acceptance` per issue** — when reframing, archive the old list in a `<details>` (the gate strips it) rather than leaving a second live header, which the gate now flags as a collision.
 
 ---
 

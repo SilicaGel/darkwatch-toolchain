@@ -37,7 +37,7 @@ It may already be fixed — by a sibling issue, a systemic fix, or a PR that clo
 **Don't silently implement something different.** Say so, then deliver:
 
 1. State what you found, with the citation (rule text, mount points, the closing commit).
-2. Reframe the issue — strike the incorrect claims, keep the confirmed defect, revise the acceptance criteria. Preserve the original in a `<details>` block so the history stays auditable.
+2. Reframe the issue — strike the incorrect claims, keep the confirmed defect, revise the acceptance criteria. Preserve the original in a `<details>` block so the history stays auditable. Keep the revised list as the **single live `## Acceptance`** (a dated qualifier like `## Acceptance (revised 2026-08-10)` is fine): the reconciliation gate strips `<details>` and flags any second live `## Acceptance` header, so it follows the revised list, not the archived one (#2320). To withdraw one key that moved to another ticket, mark it `- [ ] (slug) … — superseded:#M` rather than striking it through.
 3. Build the *real* fix.
 
 A reframed issue is a better outcome than a wrongly-implemented one, and far better than an argument in a PR body about why the code doesn't match the ticket.

@@ -3,7 +3,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
-  stripFences,
+  stripIgnored,
   sliceSection,
   parseReconciliation,
   parseAcceptanceKeys,
@@ -195,9 +195,9 @@ describe("decideReconciliation — B (completeness + liveness)", () => {
 });
 
 describe("fenced examples are ignored (the #2297 self-dogfood bug)", () => {
-  it("stripFences drops ``` and ~~~ blocks, keeps real content", () => {
+  it("stripIgnored drops ``` and ~~~ blocks, keeps real content", () => {
     const body = "real one\n```\nfenced line\n```\nreal two\n~~~\nother fence\n~~~\nreal three";
-    assert.equal(stripFences(body), "real one\nreal two\nreal three");
+    assert.equal(stripIgnored(body), "real one\nreal two\nreal three");
   });
   it("parseAcceptanceKeys reads the REAL `## Acceptance`, not a fenced example", () => {
     // An issue body that *documents* an example checklist in a code fence, then
@@ -233,5 +233,89 @@ describe("fenced examples are ignored (the #2297 self-dogfood bug)", () => {
     const blocks = parseReconciliation(body);
     assert.ok(blocks.has("100"));
     assert.ok(!blocks.has("999"));
+  });
+});
+
+describe("reframed issues + retire markers (#2320)", () => {
+  // The exact shape implementing-issues.md produces on a reframe: revised list
+  // live under a dated header, original archived in a <details>.
+  const reframed = [
+    "## Problem",
+    "blah",
+    "",
+    "## Acceptance (revised 2026-08-10)",
+    "- [ ] (live-a) the current criterion",
+    "- [ ] (live-b) another current one",
+    "",
+    "<details><summary>Original acceptance (superseded)</summary>",
+    "",
+    "## Acceptance",
+    "- [ ] (retired-a) old withdrawn criterion",
+    "- [ ] (retired-b) another withdrawn one",
+    "",
+    "</details>",
+  ].join("\n");
+
+  it("stripIgnored drops a balanced <details> block, keeps surrounding content", () => {
+    assert.equal(
+      stripIgnored("keep 1\n<details>\ndrop a\ndrop b\n</details>\nkeep 2"),
+      "keep 1\n\nkeep 2",
+    );
+  });
+
+  it("stripIgnored drops adjacent <details> blocks", () => {
+    const two = "a\n<details>x</details>\nb\n<details>y</details>\nc";
+    assert.equal(stripIgnored(two).replace(/\n+/g, "\n"), "a\nb\nc");
+  });
+
+  it("stripIgnored leaves an UNBALANCED <details> mention as text (the #2320 own-body case)", () => {
+    // An inline-code prose mention with no closing tag must NOT over-strip the
+    // live section that follows it.
+    const b = "Archive it in a `<details>` block.\n\n## Acceptance\n- [ ] (real) x";
+    const stripped = stripIgnored(b);
+    assert.match(stripped, /## Acceptance/);
+    assert.deepEqual([...parseAcceptanceKeys(b).keys], ["real"]);
+  });
+
+  it("live-section-wins: parses the REVISED keys, not the archived ones", () => {
+    const { keys, headerCount } = parseAcceptanceKeys(reframed);
+    assert.deepEqual([...keys].sort(), ["live-a", "live-b"]);
+    assert.equal(headerCount, 1); // the archived one is inside <details>, stripped
+  });
+
+  it("accepts a qualified `## Acceptance (revised …)` header but not `## Acceptance reconciliation`", () => {
+    assert.match("## Acceptance (revised 2026-08-10)", ACCEPTANCE_HEADER);
+    assert.doesNotMatch("## Acceptance reconciliation", ACCEPTANCE_HEADER);
+  });
+
+  it("multi-header-detected: two LIVE ## Acceptance headers → collision error, completeness skipped", () => {
+    const body = "## Acceptance\n- [ ] (a) one\n\n## Acceptance\n- [ ] (b) two";
+    const parsed = parseAcceptanceKeys(body);
+    assert.equal(parsed.headerCount, 2);
+    const prBody = "## Acceptance reconciliation\n### #77\n- (a) — met\n\nReady #77";
+    const issues = new Map([["77", { state: "open", ...parsed }]]);
+    const { problems } = decideReconciliation({ body: prBody, issues });
+    const err = problems.find((p) => p.level === "error");
+    assert.match(err.msg, /2 `## Acceptance` headers/);
+    // and it must NOT also emit an omitted-key error (completeness was skipped)
+    assert.ok(!problems.some((p) => /omits acceptance key/.test(p.msg)));
+  });
+
+  it("retire-is-declared: a `superseded:#M` key is dropped from required and recorded", () => {
+    const body =
+      "## Acceptance\n- [ ] (keep) still required\n- [ ] (gone) withdrawn — superseded:#2305";
+    const { keys, retired } = parseAcceptanceKeys(body);
+    assert.deepEqual([...keys], ["keep"]);
+    assert.equal(retired.get("gone"), "2305");
+  });
+
+  it("a retired key is NOT demanded by the completeness check", () => {
+    const issueBody = "## Acceptance\n- [ ] (keep) required\n- [ ] (gone) x — superseded:#2305";
+    const parsed = parseAcceptanceKeys(issueBody);
+    // Reconciliation addresses only (keep); (gone) is retired, so no omission error.
+    const prBody = "## Acceptance reconciliation\n### #88\n- (keep) — met\n\nReady #88";
+    const issues = new Map([["88", { state: "open", ...parsed }]]);
+    const { problems } = decideReconciliation({ body: prBody, issues });
+    assert.equal(problems.filter((p) => p.level === "error").length, 0);
   });
 });
