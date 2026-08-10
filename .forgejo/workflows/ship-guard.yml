@@ -39,6 +39,25 @@ jobs:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           fetch-depth: 50
+          # #2315 — this job runs only `node scripts/ship-guard/*.mjs`, which
+          # import nothing but `node:` builtins, and decides everything from
+          # the changed-FILE-LIST (`git diff --name-only`) plus the event
+          # payload. It never reads a tracked file's *contents* — `check.mjs`
+          # tests whether `docs/CHANGELOG.md` appears in the diff list, not
+          # what is in it. So it needs commits and trees but no blobs.
+          #
+          # 43.3M of the repo's 96.2M tracked tip is visual baselines and
+          # another 19M is brochure PNGs; this job needed none of it. Same
+          # recipe already proven on workflow-change-reminder (81M -> 1.6M,
+          # fetch 3m17s -> 1.5s, PR #2332).
+          #
+          # `filter` ALONE would be a no-op: with a full working tree the
+          # checkout lazily re-fetches every tip blob (measured 82M, i.e.
+          # worse than doing nothing). The sparse list is what does the work,
+          # so keep it minimal — only what the job executes from disk.
+          filter: blob:none
+          sparse-checkout: |
+            scripts/ship-guard
 
       - name: Use Node 22
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
@@ -183,6 +202,25 @@ jobs:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           fetch-depth: 1 # no git history needed — reads the PR body + issue API
+          # #2315 — this job runs only `node scripts/ship-guard/*.mjs`, which
+          # import nothing but `node:` builtins, and decides everything from
+          # the changed-FILE-LIST (`git diff --name-only`) plus the event
+          # payload. It never reads a tracked file's *contents* — `check.mjs`
+          # tests whether `docs/CHANGELOG.md` appears in the diff list, not
+          # what is in it. So it needs commits and trees but no blobs.
+          #
+          # 43.3M of the repo's 96.2M tracked tip is visual baselines and
+          # another 19M is brochure PNGs; this job needed none of it. Same
+          # recipe already proven on workflow-change-reminder (81M -> 1.6M,
+          # fetch 3m17s -> 1.5s, PR #2332).
+          #
+          # `filter` ALONE would be a no-op: with a full working tree the
+          # checkout lazily re-fetches every tip blob (measured 82M, i.e.
+          # worse than doing nothing). The sparse list is what does the work,
+          # so keep it minimal — only what the job executes from disk.
+          filter: blob:none
+          sparse-checkout: |
+            scripts/ship-guard
 
       - name: Use Node 22
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
