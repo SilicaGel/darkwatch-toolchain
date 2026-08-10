@@ -332,7 +332,7 @@ jobs:
     timeout-minutes: 18 # #1355 — healthy ~4-9 min (worst legit ~14); trimmed from 25 (#1263) to backstop a hang below the ~20-min OOM-runaway range
     services:
       mariadb:
-        image: mariadb:11@sha256:efb4959ef2c835cd735dbc388eb9ad6aab0c78dd64febcd51bc17481111890c4
+        image: mariadb:11@sha256:d9f7eb2637296652f24b484afd5d246f759f49f5babcadc6a9e344c9acb75fbf
         env:
           # CI DB credentials come from Forgejo repo secrets (Settings → Secrets).
           # Required: CI_DB_ROOT_PASSWORD, CI_DB_NAME, CI_DB_USER, CI_DB_PASSWORD.
@@ -579,7 +579,7 @@ jobs:
       image: forge.example.com/aaron/darkwatch-ci-playwright:1.61.1
     services:
       mariadb:
-        image: mariadb:11@sha256:efb4959ef2c835cd735dbc388eb9ad6aab0c78dd64febcd51bc17481111890c4
+        image: mariadb:11@sha256:d9f7eb2637296652f24b484afd5d246f759f49f5babcadc6a9e344c9acb75fbf
         env:
           MYSQL_ROOT_PASSWORD: ${{ secrets.CI_DB_ROOT_PASSWORD }}
           MYSQL_DATABASE: ${{ secrets.CI_DB_NAME }}
