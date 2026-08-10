@@ -16,6 +16,12 @@ name: Ship guard
 on:
   pull_request:
     branches: [main]
+    # #1775 — include `edited` so a PR body PATCHed in AFTER creation re-fires
+    # these guards against the FRESH payload. Without it the default set
+    # (opened/synchronize/reopened) means a `## Test plans` / `## Acceptance
+    # reconciliation` block added post-open is invisible until the next push —
+    # the stale-event-payload bug. Covers all three jobs in this file.
+    types: [opened, synchronize, reopened, edited]
 
 # Cancel superseded PR runs (#1617).
 concurrency:
@@ -100,12 +106,17 @@ jobs:
             git merge-base origin/main HEAD >/dev/null 2>&1 && break
             git fetch --no-tags --deepen="$extra" origin +refs/heads/main:refs/remotes/origin/main
           done
-          # Fail LOUD if it still can't be reached. A shallow graph makes
-          # `git diff origin/main...HEAD` return NOTHING rather than erroring —
-          # so a guard would pass vacuously, which is worse than a red build.
+          # #1775 — this is the ADVISORY reminder job ("intentionally always
+          # exit 0", below). Unlike the blocking ship-guard job, a merge-base it
+          # can't resolve must NOT red the PR. A merge commit in the branch (from
+          # the /ship merge-not-rebase step) can leave the deepened graph short
+          # of the base — the deepen loop reaches a merge commit's second parent
+          # unreliably (#2317; the blocking job hit-or-misses on the same commit).
+          # The worst case here is only that the workflow-change reminder doesn't
+          # print, so skip it rather than fail the build.
           git merge-base origin/main HEAD >/dev/null 2>&1 || {
-            echo "::error::no merge-base with origin/main after deepening — refusing to diff an incomplete graph"
-            exit 1
+            echo "::notice::workflow-change-reminder: no merge-base with origin/main after deepening — skipping the advisory reminder (see #2317)."
+            exit 0
           }
 
       - name: Remind about workflow-change hygiene
