@@ -38,7 +38,9 @@ permissions:
 jobs:
   # ---------------------------------------------------------------------------
   # tree-gate — #2308. Decides whether a push-to-main merge needs a fresh
-  # lint-typecheck / test / smoke run at all.
+  # lint-typecheck / smoke run at all. (`test` is carved out of the skip —
+  # #2368: Forgejo 15's workflow_call wrapper reports FAILURE when its callee
+  # skips, so its `skip` input is pinned "false" at the call site below.)
   #
   # THE JOB RUNS ON EVERY EVENT, BUT THE GATE DECIDES ONLY ON PUSH-TO-MAIN
   # (#2351): on any other event the gate step short-circuits to skip=false
@@ -487,9 +489,16 @@ jobs:
     needs: [tree-gate]
     uses: ./.forgejo/workflows/test.yml
     with:
-      # #1620 — passed as an INPUT, not an `if:` on this job (see above).
-      # test.yml gates internally on this value with an ordinary job-level if:.
-      skip: ${{ needs.tree-gate.outputs.skip }}
+      # #2368 — pinned to "false": `test` is CARVED OUT of the tree gate's
+      # skip. On the first enforced skip (run 9347, the #2336 merge) the
+      # callee's test.test skipped exactly as designed — and this `uses:`
+      # WRAPPER job then marked itself FAILED (0s, no log): Forgejo 15
+      # aggregates a skipped callee job as failure, which reds the run and
+      # false-fires notify-main-red. Until that's fixed (re-test after the
+      # v16 upgrade, #1725) the suite runs on every push; only lint-typecheck
+      # and smoke skip. Do NOT wire tree-gate's output back in here without
+      # closing #2368's acceptance first.
+      skip: "false"
     secrets: inherit
 
   smoke:

@@ -126,6 +126,11 @@ set -uo pipefail
 # reads the LIVE advisory feed, so mirroring it would make preflight
 # non-deterministic and let an unrelated upstream advisory block local work.
 # CI remains the enforcer.)
+# (Reconciled 2026-08-11 (#2368): `test` carved out of the tree gate's skip —
+# its `skip` input pinned "false" at the ci.yml call site, because Forgejo
+# 15's workflow_call wrapper reports FAILURE when its callee skips (run 9347).
+# That's the call-site `with:`, not the `lint-typecheck` / `test` job bodies,
+# so no check below moved — hash bump only.)
 # (Reconciled 2026-08-11 (#2336): tree-gate flipped to enforce —
 # `TREE_GATE_ENFORCE: "1"` on the gate step plus comment rewrites. That's the
 # `tree-gate` job, not `lint-typecheck` / `test`, so no check below moved —
@@ -134,7 +139,7 @@ set -uo pipefail
 # image digests out first (#2333).)
 # (Previously reconciled 2026-07-19, #1736 Task 4: WT no-raw-color guard.)
 # (Previously reconciled 2026-07-14, #1360/#1701: smoke spec list.)
-EXPECTED_CI_HASH="4e474bb61854d9277466777df9d39c3cdb7456628d6f5b8c37896ffa7f216809"
+EXPECTED_CI_HASH="22d4ab8ba611f090019a2a1987ac902baea3f64f82981d5600f0756469715cf9"
 
 # #2336 — the `test` job MOVED from ci.yml to its own reusable workflow so the
 # nightly can call it too. The guard below hashed only ci.yml, so without this
