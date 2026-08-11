@@ -117,7 +117,7 @@ EXPECTED_CI_HASH="9e19c0c835b76e68a1025ff90135c804184c11a4402da2fa5bab35a72c4dcc
 # second hash the suite preflight mirrors would have silently dropped off the
 # drift watch the moment it moved — the exact failure this guard exists to
 # prevent. Reconcile BOTH when either changes.
-EXPECTED_TEST_HASH="83509567870af8039d962a367d1335104d6424fdbc5d752c68334dae5735d614"
+EXPECTED_TEST_HASH="903bbe1ff35c85704c66648419264ed9519396664bffb58ce0dac94f3f2ac92b"
 
 # --- setup ------------------------------------------------------------------
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || {
