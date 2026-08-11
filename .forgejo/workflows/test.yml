@@ -1,0 +1,373 @@
+name: Test suite
+
+# #2336 — the unit + integration suite, extracted from ci.yml so more than one
+# workflow can call it. Two callers today:
+#
+#   ci.yml             — per PR and per push to main (gated by tree-gate)
+#   nightly-deploy.yml — once a day, and it BLOCKS the deploy
+#
+# The nightly call is the point. The push-to-main tree gate skips this suite
+# when the merge tree is byte-identical to an already-green PR head, which
+# trades away a second sample of a suite that is NOT a deterministic function
+# of the tree: these are int tests against a real DB, `rollLog last_roll_at` is
+# documented flaking under CI load, and #1798 is a suspected placement-vs-walls
+# race that was green on a PR and red on the identical-tree main push.
+#
+# The nightly run replaces that per-merge duplicate with one run per day
+# against main — a better race detector, because it varies time, load and DB
+# state instead of re-running the same bytes minutes later. Before this, the
+# nightly ran only e2e-full + smoke-walk, so the unit/int suite had NO nightly
+# backstop at all.
+#
+# It gates the deploy for the same reason e2e-full does: better a blocked
+# deploy than shipping something broken in a way nobody looked for.
+
+on:
+  workflow_call:
+    inputs:
+      # #1620 — the tree-gate decision arrives as an INPUT, not as an `if:` on
+      # the calling `uses:` job. Forgejo mishandles `if:` on a reusable-workflow
+      # call: it evaluates the expression at PLAN time, before `needs` results
+      # exist, and bakes the result in. On PR #2351 that produced a stored job
+      # payload of `if: false` + `runs-on: []` and a 0-second failure with no
+      # log at all. Gate INSIDE the callee instead, where it is an ordinary
+      # job-level `if:` that behaves normally.
+      skip:
+        description: "tree-gate's decision; 'true' skips the suite"
+        type: string
+        required: false
+        default: "false"
+  workflow_dispatch:
+
+jobs:
+  test:
+    if: ${{ inputs.skip != 'true' }}
+    runs-on: ubuntu-latest
+    # #2308 — see the full note on `lint-typecheck`. Must never skip on a PR.
+    timeout-minutes: 18 # #1355 — healthy ~4-9 min (worst legit ~14); trimmed from 25 (#1263) to backstop a hang below the ~20-min OOM-runaway range
+    services:
+      mariadb:
+        image: mariadb:11@sha256:d9f7eb2637296652f24b484afd5d246f759f49f5babcadc6a9e344c9acb75fbf
+        env:
+          # CI DB credentials come from Forgejo repo secrets (Settings → Secrets).
+          # Required: CI_DB_ROOT_PASSWORD, CI_DB_NAME, CI_DB_USER, CI_DB_PASSWORD.
+          # See .forgejo/workflows/README.md for details.
+          MYSQL_ROOT_PASSWORD: ${{ secrets.CI_DB_ROOT_PASSWORD }}
+          MYSQL_DATABASE: ${{ secrets.CI_DB_NAME }}
+          MYSQL_USER: ${{ secrets.CI_DB_USER }}
+          MYSQL_PASSWORD: ${{ secrets.CI_DB_PASSWORD }}
+        options: >-
+          --health-cmd="healthcheck.sh --connect --innodb_initialized"
+          --health-interval=2s
+          --health-timeout=5s
+          --health-retries=30
+          --tmpfs /var/lib/mysql:rw,noexec,nosuid,size=512m
+      minio:
+        # The official minio/minio image needs `server /data` as its command;
+        # Forgejo's act_runner supports `cmd:` in service definitions.
+        # The image-library int tests create + drop a per-suite bucket against
+        # this instance.
+        image: minio/minio:RELEASE.2025-04-08T15-41-24Z@sha256:8834ae47a2de3509b83e0e70da9369c24bbbc22de42f2a2eddc530eee88acd1b
+        cmd:
+          - server
+          - /data
+          - --console-address
+          - ":9001"
+        env:
+          MINIO_ROOT_USER: darkwatch_admin
+          MINIO_ROOT_PASSWORD: darkwatch_minio_dev
+        options: >-
+          --health-cmd="curl -fsS http://localhost:9000/minio/health/ready || exit 1"
+          --health-interval=2s
+          --health-timeout=5s
+          --health-retries=30
+    steps:
+      # #2351 — permanent one-liner, not debug leftovers: under workflow_call
+      # this Forgejo hands the CALLEE `event_name=workflow_call` — NEVER the
+      # caller's event (measured on PR #2351: `event_name=workflow_call
+      # ref=refs/pull/2351/head base_ref=main pr_number=2351`). Any event_name
+      # string-match in this file is therefore dead or inverted; conditions
+      # key on event DATA (`github.event.pull_request.number`, `github.ref`),
+      # which DOES propagate. This echo is the record of what a given call
+      # actually saw when the next context surprise lands.
+      - name: Log callee github context
+        run: |
+          echo "event_name=${{ github.event_name }} ref=${{ github.ref }} base_ref=${{ github.base_ref }} pr_number=${{ github.event.pull_request.number }} repo=${{ github.repository }}"
+
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          # The diff-coverage comment needs history to diff against the base ref.
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: |
+            package-lock.json
+            server/package-lock.json
+            client/package-lock.json
+            tests/package-lock.json
+
+      - name: Install root devDependencies (c8 — coverage-bot scripts)
+        run: npm ci --no-audit --no-fund
+
+      - name: Install server dependencies
+        run: |
+          cd server && npm ci --no-audit --no-fund
+          ROLLDOWN_ARCH=$(node -p "process.arch")
+          if [ ! -d "node_modules/@rolldown/binding-linux-${ROLLDOWN_ARCH}-gnu" ]; then
+            VER=$(node -e "const l=JSON.parse(require('fs').readFileSync('package-lock.json','utf8')); console.log(l.packages['node_modules/@rolldown/binding-linux-'+process.arch+'-gnu'].version)")
+            echo "Patching missing rolldown linux-${ROLLDOWN_ARCH} binding @ $VER"
+            npm install --no-save --ignore-engines "@rolldown/binding-linux-${ROLLDOWN_ARCH}-gnu@$VER"
+          fi
+
+      - name: Install client dependencies
+        run: cd client && npm ci --no-audit --no-fund
+
+      - name: Test server (unit)
+        # Always emit coverage — PR uses it for the diff-coverage comment;
+        # main uses it to write the server-coverage badge.
+        run: cd server && npm run test:coverage
+
+      - name: Wait for MariaDB
+        run: |
+          for i in $(seq 1 30); do
+            (echo > /dev/tcp/mariadb/3306) 2>/dev/null && echo "MariaDB is ready" && break
+            echo "Waiting for MariaDB... ($i/30)"
+            sleep 2
+            [ "$i" -eq 30 ] && echo "MariaDB never became ready" && exit 1
+          done
+
+      - name: Wait for MinIO (image-library int tests need it)
+        run: |
+          for i in $(seq 1 30); do
+            (echo > /dev/tcp/minio/9000) 2>/dev/null && echo "MinIO is ready" && break
+            echo "Waiting for MinIO... ($i/30)"
+            sleep 2
+            [ "$i" -eq 30 ] && echo "MinIO never became ready" && exit 1
+          done
+
+      - name: Apply migrations to CI DB
+        env:
+          DB_HOST: mariadb
+          DB_PORT: "3306"
+          DB_USER: ${{ secrets.CI_DB_USER }}
+          DB_PASSWORD: ${{ secrets.CI_DB_PASSWORD }}
+          DB_NAME: ${{ secrets.CI_DB_NAME }}
+        run: cd server && npm run db:migrate
+
+      - name: Verify Kysely schema types are up-to-date
+        env:
+          DATABASE_URL: mysql://${{ secrets.CI_DB_USER }}:${{ secrets.CI_DB_PASSWORD }}@mariadb:3306/${{ secrets.CI_DB_NAME }}
+        run: cd server && npm run db:verify
+
+      - name: Seed core + shadowdark content (int tests assume seeded DB)
+        env:
+          DB_HOST: mariadb
+          DB_PORT: "3306"
+          DB_USER: ${{ secrets.CI_DB_USER }}
+          DB_PASSWORD: ${{ secrets.CI_DB_PASSWORD }}
+          DB_NAME: ${{ secrets.CI_DB_NAME }}
+        run: cd server && npm run seed:core && npm run seed:shadowdark
+
+      - name: Integration tests (repositories against real DB)
+        env:
+          DB_HOST: mariadb
+          DB_PORT: "3306"
+          DB_USER: ${{ secrets.CI_DB_USER }}
+          DB_PASSWORD: ${{ secrets.CI_DB_PASSWORD }}
+          DB_NAME: ${{ secrets.CI_DB_NAME }}
+          DATABASE_URL: mysql://${{ secrets.CI_DB_USER }}:${{ secrets.CI_DB_PASSWORD }}@mariadb:3306/${{ secrets.CI_DB_NAME }}
+          MINIO_ENDPOINT: http://minio:9000
+          MINIO_ROOT_USER: darkwatch_admin
+          MINIO_ROOT_PASSWORD: darkwatch_minio_dev
+        run: cd server && npm run test:int:coverage
+
+      - name: Combine server unit + integration coverage (for the badge)
+        # #1323 — the server-coverage badge should reflect unit ∪ integration,
+        # not unit-only (~37% → ~77%). The two suites emit separate
+        # coverage-final.json files; merge them into one summary the badges job
+        # reads. Runs on PRs too (writes a local file, logs the combined %) so
+        # the merge is exercised in CI; only the main run uploads/uses it.
+        # Cosmetic — never fail the build over it.
+        if: always()
+        continue-on-error: true
+        run: |
+          mkdir -p server/coverage-combined
+          node scripts/coverage-badge/combined-summary.mjs \
+            server/coverage/coverage-final.json \
+            server/coverage-int/coverage-final.json \
+            server/coverage-combined/coverage-summary.json
+
+      - name: Test client (unit)
+        # Always emit coverage — PR uses it for the diff-coverage comment;
+        # main uses it to write the client-coverage badge.
+        # #1355 — pin the worker heap. Node otherwise auto-sizes old-space from
+        # the runner's free RAM (~2 GB when the host is busy), which made this
+        # step flaky-OOM under memory pressure. The suite needs <1 GB; 4 GB is
+        # deterministic headroom regardless of runner load.
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
+        run: cd client && npm run test:coverage
+
+      - name: Test coverage-bot scripts
+        run: npm run test:scripts:coverage
+
+      - name: Post diff coverage comment
+        # #2351 — key on the PR payload, NOT `github.event_name ==
+        # 'pull_request'`: under workflow_call the callee's event_name doesn't
+        # match the caller's normalized value, and that guard silently skipped
+        # this step — which is REQUIRED branch-protection context
+        # `coverage-bot`, so the miss blocks every merge. The payload test is
+        # jank-proof: a PR run has a PR number, nothing else does.
+        if: always() && github.event.pull_request.number != null
+        env:
+          FORGEJO_URL: ${{ github.server_url }}
+          FORGEJO_TOKEN: ${{ github.token }}
+          REPO_OWNER: ${{ github.repository_owner }}
+          REPO_NAME: ${{ github.event.repository.name }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          # #2351 — from the PR payload, not `github.base_ref`: the payload is
+          # proven present whenever this step runs (the `if:` above), while the
+          # top-level shorthand fields are exactly what workflow_call mangles.
+          BASE_REF: origin/${{ github.event.pull_request.base.ref || github.base_ref }}
+          # Dual-mode coverage: unit and integration datasets shown separately
+          # with per-line gutter markers (U/I/UI) in code snippets.
+          COVERAGE_FILES_UNIT: server/coverage/coverage-final.json,client/coverage/coverage-final.json,scripts/coverage/coverage-final.json
+          COVERAGE_FILES_INT: server/coverage-int/coverage-final.json
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          git fetch origin ${{ github.event.pull_request.base.ref || github.base_ref }} --depth=50
+          node scripts/coverage-comment/build-comment.mjs \
+            | node scripts/coverage-comment/post-comment.mjs
+
+      - name: Upload coverage summaries (consumed by the badges job)
+        # #2351 — "a main-push run" expressed as data, not event_name (which is
+        # literally 'workflow_call' in a callee — see the context-echo step):
+        # no PR payload + ref is main. The nightly's call also matches, which
+        # is harmless: it uploads an artifact nobody downloads (3-day
+        # retention) rather than starving badges of coverage on every merge.
+        if: always() && github.event.pull_request.number == null && github.ref == 'refs/heads/main'
+        # v4 requires GHES features Forgejo's actions backend doesn't expose.
+        # Pin to v3 — same constraint documented in e2e-full.yml.
+        uses: actions/upload-artifact@ff15f0306b3f739f7b6fd43fb5d26cd321bd4de5 # v3.2.1
+        with:
+          name: coverage-summaries
+          path: |
+            server/coverage/coverage-summary.json
+            server/coverage-combined/coverage-summary.json
+            client/coverage/coverage-summary.json
+          retention-days: 3
+
+  # ---------------------------------------------------------------------------
+  # smoke — critical-path Playwright specs against the built app. Runs on
+  # every PR and on push-to-main (the main-only gate is gone — #711). Builds
+  # its own server + client and owns its own mariadb service. The full E2E
+  # suite still lives in nightly-e2e via e2e-full.yml.
+  # ---------------------------------------------------------------------------
+
+  # #2336 — tell someone when the NIGHTLY suite goes red.
+  #
+  # Without this the nightly backstop is a backstop in name only: a scheduled
+  # failure would block the deploy (deploy `needs` this workflow) and otherwise
+  # land in a log nobody reads. The rolling `🔴 e2e-full is red` issue comes
+  # from e2e-full.yml's own notifier and says nothing about this suite.
+  #
+  # Deliberately leaner than e2e-full's notifier: that one downloads a
+  # Playwright JSON report and lists failing specs. vitest here produces no
+  # equivalent artifact, so this reports the run link + suspect commits and
+  # leaves the spec detail to the log. Reporting less, honestly, beats parsing
+  # output that isn't there.
+  notify-failure:
+    needs: test
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      # #2011 — gate on `needs.*.result`, NOT `needs.test.result`. Under
+      # workflow_call Forgejo namespaces the callee's jobs, so a literal key
+      # lookup is null even when that job just failed — it silently skipped
+      # every step on eight consecutive nightly reds. The wildcard survives the
+      # renaming. This job has exactly one `needs`, so it can't widen.
+      #
+      # PR runs are excluded — a PR already shows its own red — by testing for
+      # the PR payload, NOT `github.event_name != 'pull_request'` (#2351: under
+      # workflow_call the callee's event_name doesn't match the caller's
+      # normalized value, which would have made this fire on every PR red).
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        if: ${{ (needs.test.result == 'failure' || contains(needs.*.result, 'failure')) && github.event.pull_request.number == null }}
+        with:
+          # Suspect commits need history; #2315 — no blobs, this job opens no
+          # tracked file (git log + inline python only).
+          fetch-depth: 50
+          filter: blob:none
+          sparse-checkout: |
+            scripts/ci
+
+      - name: Comment the rolling "test suite is red" issue
+        # Same payload-keyed PR exclusion as the checkout above (#2351).
+        if: ${{ (needs.test.result == 'failure' || contains(needs.*.result, 'failure')) && github.event.pull_request.number == null }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          API_URL: ${{ github.api_url }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+          SERVER_URL: ${{ github.server_url }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os, json, subprocess
+
+          api, repo = os.environ["API_URL"], os.environ["REPO"]
+          run_url = f'{os.environ["SERVER_URL"]}/{repo}/actions/runs/{os.environ["RUN_ID"]}'
+          # Distinct from e2e-full's marker so the two rollups never collide.
+          MARKER = "<!-- test-suite-red -->"
+          TITLE = "🔴 nightly test suite is red"
+
+          # curl, NOT urllib: Cloudflare fingerprint-blocks Python-urllib with a
+          # 403 "error code: 1010" (see e2e-full.yml's notifier for the history).
+          def api_call(method, path, body=None):
+              cmd = ["curl", "-sS", "-X", method, f"{api}{path}",
+                     "-H", f"Authorization: token {os.environ['GH_TOKEN']}",
+                     "-H", "Content-Type: application/json"]
+              if body is not None:
+                  cmd += ["--data-binary", json.dumps(body)]
+              r = subprocess.run(cmd, capture_output=True, text=True)
+              try:
+                  return json.loads(r.stdout)
+              except Exception:
+                  print(f"api {method} {path} -> unparseable: {r.stdout[:200]}")
+                  return None
+
+          def git(*a):
+              return subprocess.run(["git", *a], capture_output=True, text=True).stdout.strip()
+
+          suspects = git("log", "--oneline", "-n", "15") or "(git history unavailable)"
+          body = (
+              f"{MARKER}\n"
+              f"The unit + integration suite failed on a **{os.environ['EVENT']}** run, "
+              f"so the deploy was blocked.\n\n"
+              f"**Run:** {run_url}\n\n"
+              f"This suite is not a deterministic function of the tree — int tests run "
+              f"against a real DB — so a red here can be a genuine regression OR a race "
+              f"that the per-PR run happened not to hit. Read the log before assuming "
+              f"either.\n\n"
+              f"**Recent commits on main:**\n```\n{suspects}\n```\n"
+          )
+
+          existing = api_call("GET", f"/repos/{repo}/issues?state=open&limit=50") or []
+          match = next((i for i in existing if isinstance(i, dict) and MARKER in (i.get("body") or "")), None)
+
+          if match:
+              api_call("POST", f"/repos/{repo}/issues/{match['number']}/comments", {"body": body})
+              print(f"updated rolling issue #{match['number']}")
+          else:
+              created = api_call("POST", f"/repos/{repo}/issues", {"title": TITLE, "body": body})
+              print(f"filed rolling issue #{(created or {}).get('number', '?')}")
+          PY

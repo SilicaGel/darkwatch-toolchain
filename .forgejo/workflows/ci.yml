@@ -37,8 +37,18 @@ permissions:
 
 jobs:
   # ---------------------------------------------------------------------------
-  # tree-gate — #2308. Push-to-main only. Decides whether this merge needs a
-  # fresh lint-typecheck / test / smoke run at all.
+  # tree-gate — #2308. Decides whether a push-to-main merge needs a fresh
+  # lint-typecheck / test / smoke run at all.
+  #
+  # THE JOB RUNS ON EVERY EVENT, BUT THE GATE DECIDES ONLY ON PUSH-TO-MAIN
+  # (#2351): on any other event the gate step short-circuits to skip=false
+  # before doing any work — no checkout, no fetch, a few seconds. It used to be
+  # pinned by a job-level `if: github.event_name == 'push'`, but `test` below is
+  # now a `uses:` job with `needs: [tree-gate]`, and Forgejo gives a reusable-
+  # workflow call no way to survive a skipped need: an `if:` on it is evaluated
+  # at PLAN time and baked in (#1620), and without one a skipped need fails the
+  # call in 0s with no log. The need must therefore never be skipped, so the
+  # push-only pin lives in the gate step's shell guard instead.
   #
   # A squash-merge whose TREE is byte-identical to the PR head tree that already
   # passed ci.yml re-proves nothing: the PR's run tested exactly these bytes.
@@ -65,7 +75,6 @@ jobs:
   tree-gate:
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     outputs:
       # `skip` is the only one other jobs consume. The warn-first "would have
       # skipped" signal is a log line in this job (grep the run log), not an
@@ -76,7 +85,12 @@ jobs:
     steps:
       # Default depth 1 is enough: the job needs HEAD's subject and tree, plus a
       # one-ref shallow fetch of the PR head it does itself.
+      #
+      # Step-level `if:` (unlike an `if:` on a `uses:` JOB, #1620) behaves
+      # normally: on non-push events these two setup steps skip, so PRs pay
+      # seconds for this job, not the ~25s checkout (#2315).
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         with:
           # #2315 — this job runs only `node scripts/ci/tree-gate*.mjs`, which
           # import nothing but `node:` builtins, and it never reads a tracked
@@ -105,6 +119,7 @@ jobs:
 
       - name: Setup Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         with:
           node-version: "22"
 
@@ -119,7 +134,21 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           # Add `TREE_GATE_ENFORCE: "1"` here to make skips real (see above).
         # No npm install: the script is Node built-ins + git + curl.
-        run: node scripts/ci/tree-gate.mjs
+        run: |
+          # ⚠️ SAFETY INVARIANT (#2351): the gate may only ever subtract a
+          # push-to-main run. On every other event — pull_request above all —
+          # it must emit skip=false unconditionally, because a skipped heavy
+          # job posts a `success` commit status and the gate would certify
+          # itself off it (see the lint-typecheck comment). This guard is the
+          # replacement for the job-level push-only `if:` (see the job comment
+          # for why that had to go).
+          if [ "$GITHUB_EVENT_NAME" != "push" ] || [ "$GITHUB_REF" != "refs/heads/main" ]; then
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+            echo "reason=not a push to main; the gate only ever subtracts a main run" >> "$GITHUB_OUTPUT"
+            echo "Not a push to main ($GITHUB_EVENT_NAME on $GITHUB_REF) — skip=false, gate logic not run."
+            exit 0
+          fi
+          node scripts/ci/tree-gate.mjs
 
   # ---------------------------------------------------------------------------
   # lint-typecheck — static checks + compile. No DB, no build artifacts.
@@ -129,21 +158,23 @@ jobs:
   lint-typecheck:
     runs-on: ubuntu-latest
     needs: [tree-gate]
-    # #2308. `!cancelled()` is load-bearing TWICE, and both are the fail-open:
-    #   1. On a PULL REQUEST, tree-gate is skipped by its own `if:`. A job whose
-    #      `needs` was skipped is itself skipped — UNLESS its `if:` uses a status
-    #      function. `!cancelled()` is that function, so PR runs are unchanged.
-    #   2. If tree-gate FAILS (or its script crashes), `skip` is empty, which is
-    #      != 'true', so these jobs run. A broken gate costs CI minutes, never
-    #      coverage. Do NOT swap in always(): that would also run these on an
-    #      explicitly cancelled run.
+    # #2308. `!cancelled()` is load-bearing as the fail-open: if tree-gate
+    # FAILS (or its script crashes), `skip` is empty, which is != 'true', so
+    # these jobs run — and a status function is what keeps a job alive when its
+    # need didn't succeed. A broken gate costs CI minutes, never coverage. Do
+    # NOT swap in always(): that would also run these on an explicitly
+    # cancelled run. (tree-gate used to be SKIPPED on PRs, which this condition
+    # also survived; since #2351 it runs on every event instead — see its job
+    # comment — so on a PR it completes with skip=false and this is an ordinary
+    # satisfied need.)
     #
     # ⚠️ This condition must never skip this job on a `pull_request`. Forgejo
     # posts a `success` commit status for a SKIPPED job (verified 2026-08-10:
     # `CI / badges (pull_request)` reads success on every PR), and tree-gate
     # reads exactly those statuses as proof the PR run was green. A job that can
-    # skip on a PR would therefore certify itself. tree-gate's own `if:` pins it
-    # to push-to-main so that the gate can only ever subtract a *main* run.
+    # skip on a PR would therefore certify itself. The shell guard at the top of
+    # tree-gate's decide step pins the gate to push-to-main (skip=false on
+    # everything else) so that it can only ever subtract a *main* run.
     if: ${{ !cancelled() && needs.tree-gate.outputs.skip != 'true' }}
     timeout-minutes: 15 # #1263 — npm install + static checks + tsc + build; ~5-8 min typical
     steps:
@@ -435,207 +466,25 @@ jobs:
   # mariadb + minio service containers.
   # ---------------------------------------------------------------------------
   test:
-    runs-on: ubuntu-latest
+    # #2336 — body lives in test.yml so nightly-deploy.yml can call the same
+    # suite. The tree-gate wiring stays HERE on the calling job: a reusable
+    # workflow cannot see its caller's `needs` context. Downstream `badges`
+    # and `notify-main-red` read `needs.test.result`, which a called-workflow
+    # job still provides, so their wiring is unchanged.
+    #
+    # ⚠️ This `needs` only works because tree-gate now runs on EVERY event
+    # (#2351). A `uses:` job cannot survive a skipped need: an `if:` on it is
+    # baked at plan time (#1620 — attempt 1 stored `if: false`), and without
+    # one a skipped need fails the call in 0s with no log (attempt 2). If you
+    # ever re-pin tree-gate to push-only, this call breaks on every PR.
     needs: [tree-gate]
-    # #2308 — see the full note on `lint-typecheck`. Must never skip on a PR.
-    if: ${{ !cancelled() && needs.tree-gate.outputs.skip != 'true' }}
-    timeout-minutes: 18 # #1355 — healthy ~4-9 min (worst legit ~14); trimmed from 25 (#1263) to backstop a hang below the ~20-min OOM-runaway range
-    services:
-      mariadb:
-        image: mariadb:11@sha256:d9f7eb2637296652f24b484afd5d246f759f49f5babcadc6a9e344c9acb75fbf
-        env:
-          # CI DB credentials come from Forgejo repo secrets (Settings → Secrets).
-          # Required: CI_DB_ROOT_PASSWORD, CI_DB_NAME, CI_DB_USER, CI_DB_PASSWORD.
-          # See .forgejo/workflows/README.md for details.
-          MYSQL_ROOT_PASSWORD: ${{ secrets.CI_DB_ROOT_PASSWORD }}
-          MYSQL_DATABASE: ${{ secrets.CI_DB_NAME }}
-          MYSQL_USER: ${{ secrets.CI_DB_USER }}
-          MYSQL_PASSWORD: ${{ secrets.CI_DB_PASSWORD }}
-        options: >-
-          --health-cmd="healthcheck.sh --connect --innodb_initialized"
-          --health-interval=2s
-          --health-timeout=5s
-          --health-retries=30
-          --tmpfs /var/lib/mysql:rw,noexec,nosuid,size=512m
-      minio:
-        # The official minio/minio image needs `server /data` as its command;
-        # Forgejo's act_runner supports `cmd:` in service definitions.
-        # The image-library int tests create + drop a per-suite bucket against
-        # this instance.
-        image: minio/minio:RELEASE.2025-04-08T15-41-24Z@sha256:8834ae47a2de3509b83e0e70da9369c24bbbc22de42f2a2eddc530eee88acd1b
-        cmd:
-          - server
-          - /data
-          - --console-address
-          - ":9001"
-        env:
-          MINIO_ROOT_USER: darkwatch_admin
-          MINIO_ROOT_PASSWORD: darkwatch_minio_dev
-        options: >-
-          --health-cmd="curl -fsS http://localhost:9000/minio/health/ready || exit 1"
-          --health-interval=2s
-          --health-timeout=5s
-          --health-retries=30
-    steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
-        with:
-          # The diff-coverage comment needs history to diff against the base ref.
-          fetch-depth: 0
+    uses: ./.forgejo/workflows/test.yml
+    with:
+      # #1620 — passed as an INPUT, not an `if:` on this job (see above).
+      # test.yml gates internally on this value with an ordinary job-level if:.
+      skip: ${{ needs.tree-gate.outputs.skip }}
+    secrets: inherit
 
-      - name: Setup Node.js
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
-        with:
-          node-version: "22"
-          cache: "npm"
-          cache-dependency-path: |
-            package-lock.json
-            server/package-lock.json
-            client/package-lock.json
-            tests/package-lock.json
-
-      - name: Install root devDependencies (c8 — coverage-bot scripts)
-        run: npm ci --no-audit --no-fund
-
-      - name: Install server dependencies
-        run: |
-          cd server && npm ci --no-audit --no-fund
-          ROLLDOWN_ARCH=$(node -p "process.arch")
-          if [ ! -d "node_modules/@rolldown/binding-linux-${ROLLDOWN_ARCH}-gnu" ]; then
-            VER=$(node -e "const l=JSON.parse(require('fs').readFileSync('package-lock.json','utf8')); console.log(l.packages['node_modules/@rolldown/binding-linux-'+process.arch+'-gnu'].version)")
-            echo "Patching missing rolldown linux-${ROLLDOWN_ARCH} binding @ $VER"
-            npm install --no-save --ignore-engines "@rolldown/binding-linux-${ROLLDOWN_ARCH}-gnu@$VER"
-          fi
-
-      - name: Install client dependencies
-        run: cd client && npm ci --no-audit --no-fund
-
-      - name: Test server (unit)
-        # Always emit coverage — PR uses it for the diff-coverage comment;
-        # main uses it to write the server-coverage badge.
-        run: cd server && npm run test:coverage
-
-      - name: Wait for MariaDB
-        run: |
-          for i in $(seq 1 30); do
-            (echo > /dev/tcp/mariadb/3306) 2>/dev/null && echo "MariaDB is ready" && break
-            echo "Waiting for MariaDB... ($i/30)"
-            sleep 2
-            [ "$i" -eq 30 ] && echo "MariaDB never became ready" && exit 1
-          done
-
-      - name: Wait for MinIO (image-library int tests need it)
-        run: |
-          for i in $(seq 1 30); do
-            (echo > /dev/tcp/minio/9000) 2>/dev/null && echo "MinIO is ready" && break
-            echo "Waiting for MinIO... ($i/30)"
-            sleep 2
-            [ "$i" -eq 30 ] && echo "MinIO never became ready" && exit 1
-          done
-
-      - name: Apply migrations to CI DB
-        env:
-          DB_HOST: mariadb
-          DB_PORT: "3306"
-          DB_USER: ${{ secrets.CI_DB_USER }}
-          DB_PASSWORD: ${{ secrets.CI_DB_PASSWORD }}
-          DB_NAME: ${{ secrets.CI_DB_NAME }}
-        run: cd server && npm run db:migrate
-
-      - name: Verify Kysely schema types are up-to-date
-        env:
-          DATABASE_URL: mysql://${{ secrets.CI_DB_USER }}:${{ secrets.CI_DB_PASSWORD }}@mariadb:3306/${{ secrets.CI_DB_NAME }}
-        run: cd server && npm run db:verify
-
-      - name: Seed core + shadowdark content (int tests assume seeded DB)
-        env:
-          DB_HOST: mariadb
-          DB_PORT: "3306"
-          DB_USER: ${{ secrets.CI_DB_USER }}
-          DB_PASSWORD: ${{ secrets.CI_DB_PASSWORD }}
-          DB_NAME: ${{ secrets.CI_DB_NAME }}
-        run: cd server && npm run seed:core && npm run seed:shadowdark
-
-      - name: Integration tests (repositories against real DB)
-        env:
-          DB_HOST: mariadb
-          DB_PORT: "3306"
-          DB_USER: ${{ secrets.CI_DB_USER }}
-          DB_PASSWORD: ${{ secrets.CI_DB_PASSWORD }}
-          DB_NAME: ${{ secrets.CI_DB_NAME }}
-          DATABASE_URL: mysql://${{ secrets.CI_DB_USER }}:${{ secrets.CI_DB_PASSWORD }}@mariadb:3306/${{ secrets.CI_DB_NAME }}
-          MINIO_ENDPOINT: http://minio:9000
-          MINIO_ROOT_USER: darkwatch_admin
-          MINIO_ROOT_PASSWORD: darkwatch_minio_dev
-        run: cd server && npm run test:int:coverage
-
-      - name: Combine server unit + integration coverage (for the badge)
-        # #1323 — the server-coverage badge should reflect unit ∪ integration,
-        # not unit-only (~37% → ~77%). The two suites emit separate
-        # coverage-final.json files; merge them into one summary the badges job
-        # reads. Runs on PRs too (writes a local file, logs the combined %) so
-        # the merge is exercised in CI; only the main run uploads/uses it.
-        # Cosmetic — never fail the build over it.
-        if: always()
-        continue-on-error: true
-        run: |
-          mkdir -p server/coverage-combined
-          node scripts/coverage-badge/combined-summary.mjs \
-            server/coverage/coverage-final.json \
-            server/coverage-int/coverage-final.json \
-            server/coverage-combined/coverage-summary.json
-
-      - name: Test client (unit)
-        # Always emit coverage — PR uses it for the diff-coverage comment;
-        # main uses it to write the client-coverage badge.
-        # #1355 — pin the worker heap. Node otherwise auto-sizes old-space from
-        # the runner's free RAM (~2 GB when the host is busy), which made this
-        # step flaky-OOM under memory pressure. The suite needs <1 GB; 4 GB is
-        # deterministic headroom regardless of runner load.
-        env:
-          NODE_OPTIONS: --max-old-space-size=4096
-        run: cd client && npm run test:coverage
-
-      - name: Test coverage-bot scripts
-        run: npm run test:scripts:coverage
-
-      - name: Post diff coverage comment
-        if: always() && github.event_name == 'pull_request'
-        env:
-          FORGEJO_URL: ${{ github.server_url }}
-          FORGEJO_TOKEN: ${{ github.token }}
-          REPO_OWNER: ${{ github.repository_owner }}
-          REPO_NAME: ${{ github.event.repository.name }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          BASE_REF: origin/${{ github.base_ref }}
-          # Dual-mode coverage: unit and integration datasets shown separately
-          # with per-line gutter markers (U/I/UI) in code snippets.
-          COVERAGE_FILES_UNIT: server/coverage/coverage-final.json,client/coverage/coverage-final.json,scripts/coverage/coverage-final.json
-          COVERAGE_FILES_INT: server/coverage-int/coverage-final.json
-          PR_TITLE: ${{ github.event.pull_request.title }}
-        run: |
-          git fetch origin ${{ github.base_ref }} --depth=50
-          node scripts/coverage-comment/build-comment.mjs \
-            | node scripts/coverage-comment/post-comment.mjs
-
-      - name: Upload coverage summaries (consumed by the badges job)
-        if: always() && github.event_name == 'push' && github.ref == 'refs/heads/main'
-        # v4 requires GHES features Forgejo's actions backend doesn't expose.
-        # Pin to v3 — same constraint documented in e2e-full.yml.
-        uses: actions/upload-artifact@ff15f0306b3f739f7b6fd43fb5d26cd321bd4de5 # v3.2.1
-        with:
-          name: coverage-summaries
-          path: |
-            server/coverage/coverage-summary.json
-            server/coverage-combined/coverage-summary.json
-            client/coverage/coverage-summary.json
-          retention-days: 3
-
-  # ---------------------------------------------------------------------------
-  # smoke — critical-path Playwright specs against the built app. Runs on
-  # every PR and on push-to-main (the main-only gate is gone — #711). Builds
-  # its own server + client and owns its own mariadb service. The full E2E
-  # suite still lives in nightly-e2e via e2e-full.yml.
-  # ---------------------------------------------------------------------------
   smoke:
     runs-on: ubuntu-latest
     needs: [tree-gate]

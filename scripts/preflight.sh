@@ -110,7 +110,14 @@ set -uo pipefail
 # CI remains the enforcer.)
 # (Previously reconciled 2026-07-19, #1736 Task 4: WT no-raw-color guard.)
 # (Previously reconciled 2026-07-14, #1360/#1701: smoke spec list.)
-EXPECTED_CI_HASH="f7dc4ef679be926e9b4f7c8a7b7f93e7d9fbd63c69e5cef98e7a04b76ccf9be3"
+EXPECTED_CI_HASH="9e19c0c835b76e68a1025ff90135c804184c11a4402da2fa5bab35a72c4dccf5"
+
+# #2336 — the `test` job MOVED from ci.yml to its own reusable workflow so the
+# nightly can call it too. The guard below hashed only ci.yml, so without this
+# second hash the suite preflight mirrors would have silently dropped off the
+# drift watch the moment it moved — the exact failure this guard exists to
+# prevent. Reconcile BOTH when either changes.
+EXPECTED_TEST_HASH="83509567870af8039d962a367d1335104d6424fdbc5d752c68334dae5735d614"
 
 # --- setup ------------------------------------------------------------------
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || {
@@ -189,11 +196,25 @@ ACTUAL_CI_HASH="$(sha256 .forgejo/workflows/ci.yml)"
 if [ "$ACTUAL_CI_HASH" != "$EXPECTED_CI_HASH" ]; then
   echo "${RED}${BOLD}✗ ci.yml drift guard FAILED${RESET}"
   echo "  .forgejo/workflows/ci.yml has changed since preflight was last reconciled."
-  echo "  ${BOLD}Action:${RESET} review the ci.yml diff. If the lint-typecheck / test jobs"
+  echo "  ${BOLD}Action:${RESET} review the ci.yml diff. If the lint-typecheck job"
   echo "  changed, update the checks in this script to match. Then set:"
   echo "    EXPECTED_CI_HASH=\"$ACTUAL_CI_HASH\""
   echo "  in scripts/preflight.sh. (If only unrelated jobs changed — smoke,"
   echo "  badges — just bump the hash; the reconciliation is the acknowledgement.)"
+  echo
+  exit 1
+fi
+
+# #2336 — same guard for the extracted test suite. Preflight mirrors this
+# workflow's unit + integration steps; if they change here, preflight drifts.
+ACTUAL_TEST_HASH="$(sha256 .forgejo/workflows/test.yml)"
+if [ "$ACTUAL_TEST_HASH" != "$EXPECTED_TEST_HASH" ]; then
+  echo "${RED}${BOLD}✗ test.yml drift guard FAILED${RESET}"
+  echo "  .forgejo/workflows/test.yml has changed since preflight was last reconciled."
+  echo "  ${BOLD}Action:${RESET} review the test.yml diff. If the unit/integration steps"
+  echo "  changed, update the checks in this script to match. Then set:"
+  echo "    EXPECTED_TEST_HASH=\"$ACTUAL_TEST_HASH\""
+  echo "  in scripts/preflight.sh."
   echo
   exit 1
 fi
