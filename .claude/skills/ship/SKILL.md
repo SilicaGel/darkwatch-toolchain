@@ -1,8 +1,8 @@
 ---
 name: ship
 description: Use when a development branch is ready to merge — the user invokes `/ship`, says "ship it", "ship this branch", or "open the PR". Handles the full docs + PR housekeeping for this repo; read the body before acting, the PR-body protocol has hard rules.
-version: 1.5.0
-last_changed: 2026-08-09
+version: 1.6.0
+last_changed: 2026-08-11
 ---
 
 # ship
@@ -200,11 +200,38 @@ git merge origin/main --no-edit
 ```
 
 If the merge hits a conflict in `docs/CHANGELOG.md`, resolve it by keeping
-**both** entries — the ones from main and ours — with ours on top, bumped
-to the next available version number. Then:
+**both** entries — the ones from main and ours — with ours on top. **Do not
+renumber by hand:** get the entries in the right order with the markers
+gone, then let the normalizer assign the versions.
 
 ```bash
+# after resolving the conflict markers, ours on top, both entries intact
+node scripts/changelog-normalize.mjs
 git add docs/CHANGELOG.md
+git commit --no-edit
+```
+
+**#2165 — why this stayed a conflict.** A `merge=union` driver on this file
+was built and rejected: it makes the merge succeed whether or not the result
+is right. `docs/CHANGELOG.md` is a *record* — an ordered history plus the
+version `scripts/app-version.mjs` reports as `APP_VERSION` on `/health` — so
+it has to fail loudly and be reconciled by a person. What the normalizer
+removes is only the **mechanical** half: working out the next version and
+proving the headings still descend. That part was hand-done and is exactly
+where a quiet mistake (a duplicated version, a dropped entry) used to slip
+through.
+
+`changelog-normalize.mjs` only touches spacing and version digits, never body
+text, and is a no-op on an already-clean file — so it is safe to run even
+when the merge reported no conflict, and doing so costs nothing. If it prints
+anything other than "already clean" / "fixed", read the diff it produced
+before moving on.
+
+If the merge conflicts in a file OTHER than `docs/CHANGELOG.md`, resolve
+that normally, then still run the normalizer before committing (a mixed
+conflict can touch the changelog too). Once resolved:
+
+```bash
 git commit --no-edit
 ```
 

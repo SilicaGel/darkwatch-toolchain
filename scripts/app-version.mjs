@@ -29,6 +29,25 @@ export function parseChangelogVersion(contents) {
   return m?.[1] ?? "0.0.0";
 }
 
+// Same date/version/em-dash grammar as HEADING_RE, plus the trailing title —
+// used by scripts/changelog-normalize-core.mjs (#2165) to reconstruct a
+// heading line after bumping a colliding version. Kept as a second regex
+// (not a refactor of HEADING_RE, which stays untouched/anchored per-line
+// with `m` for parseChangelogVersion's "first match anywhere" scan) — a
+// shared fixture in scripts/changelog-normalize.test.mjs asserts the two
+// agree on what counts as a valid heading, so they can't silently drift.
+const FULL_HEADING_RE = /^##\s+(\d{4}-\d{2}-\d{2})\s+—\s+v(\d+)\.(\d+)\.(\d+)\s+—\s+(.*)$/;
+
+/**
+ * Parse a single heading LINE (not a whole file) into its structured parts.
+ * Returns null if the line doesn't match the release-heading shape.
+ */
+export function parseHeading(line) {
+  const m = typeof line === "string" ? line.match(FULL_HEADING_RE) : null;
+  if (!m) return null;
+  return { date: m[1], version: [Number(m[2]), Number(m[3]), Number(m[4])], title: m[5] };
+}
+
 /** Read + parse a CHANGELOG file. Never throws — returns "0.0.0" on any error. */
 export function readChangelogVersion(changelogPath) {
   try {

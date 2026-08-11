@@ -7,6 +7,8 @@ import {
   parseReadyNumbers,
   parseTestPlanNumbers,
   changelogTouched,
+  compareBareVersions,
+  changelogVersionAdvanced,
   CHANGELOG_PATH,
   SKIP_MARKER,
 } from "./check.mjs";
@@ -77,6 +79,62 @@ describe("changelogTouched", () => {
   });
   it("does not match a path that merely contains the name", () => {
     assert.equal(changelogTouched(["docs/CHANGELOG.md.bak"]), false);
+  });
+});
+
+describe("compareBareVersions (#2165)", () => {
+  it("compares major.minor.patch numerically, not lexically", () => {
+    assert.ok(compareBareVersions("0.195.9", "0.195.58") < 0); // NOT a string compare
+    assert.ok(compareBareVersions("0.195.59", "0.195.58") > 0);
+    assert.equal(compareBareVersions("0.195.58", "0.195.58"), 0);
+    assert.ok(compareBareVersions("0.196.0", "0.195.999") > 0);
+    assert.ok(compareBareVersions("1.0.0", "0.999.999") > 0);
+  });
+});
+
+describe("changelogVersionAdvanced (#2165)", () => {
+  const top = (v) => `## 2026-08-11 — v${v} — some title\n\nbody\n`;
+
+  it("ok=true when the PR's top version is newer than main's", () => {
+    const r = changelogVersionAdvanced({
+      prContents: top("0.195.59"),
+      mainContents: top("0.195.58"),
+    });
+    assert.equal(r.ok, true);
+    assert.equal(r.prVersion, "0.195.59");
+    assert.equal(r.mainVersion, "0.195.58");
+  });
+
+  it("ok=false on a version collision (both branches guessed the same number)", () => {
+    const r = changelogVersionAdvanced({
+      prContents: top("0.195.58"),
+      mainContents: top("0.195.58"),
+    });
+    assert.equal(r.ok, false);
+  });
+
+  it("ok=false when the PR's copy is stale (behind main)", () => {
+    const r = changelogVersionAdvanced({
+      prContents: top("0.195.5"),
+      mainContents: top("0.195.58"),
+    });
+    assert.equal(r.ok, false);
+  });
+
+  it("fails OPEN (ok=true, versions null) when either side couldn't be read", () => {
+    assert.deepEqual(
+      changelogVersionAdvanced({ prContents: undefined, mainContents: top("0.1.0") }),
+      {
+        ok: true,
+        prVersion: null,
+        mainVersion: null,
+      },
+    );
+    assert.deepEqual(changelogVersionAdvanced({ prContents: top("0.1.0"), mainContents: null }), {
+      ok: true,
+      prVersion: null,
+      mainVersion: null,
+    });
   });
 });
 
@@ -188,5 +246,51 @@ Ready #1`;
     const r = decide({ body, title: "feat: x", changedFiles: [CHANGELOG_PATH] });
     assert.equal(r.ok, false);
     assert.match(r.reasons[0], /Missing a `### #N` Test-plan block for: #1/);
+  });
+
+  const top = (v) => `## 2026-08-11 — v${v} — some title\n\nbody\n`;
+
+  it("PASS — otherwise-good PR whose changelog top version advanced past main's (#2165)", () => {
+    const r = decide({
+      body: goodBody(694),
+      title: "feat: a thing",
+      changedFiles: [CHANGELOG_PATH],
+      changelogVersions: { prContents: top("0.195.59"), mainContents: top("0.195.58") },
+    });
+    assert.equal(r.ok, true, r.reasons.join("; "));
+  });
+
+  it("FAIL — changelog touched but PR's top version collides with main's (#2165)", () => {
+    const r = decide({
+      body: goodBody(694),
+      title: "feat: a thing",
+      changedFiles: [CHANGELOG_PATH],
+      changelogVersions: { prContents: top("0.195.58"), mainContents: top("0.195.58") },
+    });
+    assert.equal(r.ok, false);
+    assert.equal(r.reasons.length, 1);
+    assert.match(r.reasons[0], /not newer than origin\/main's/);
+    assert.match(r.reasons[0], /#2165/);
+  });
+
+  it("does not double-report when changelog isn't touched at all (reason (a) already covers it)", () => {
+    const r = decide({
+      body: goodBody(694),
+      title: "feat: a thing",
+      changedFiles: ["client/src/App.tsx"],
+      changelogVersions: { prContents: top("0.1.0"), mainContents: top("0.1.0") },
+    });
+    assert.equal(r.reasons.length, 1); // only the "does not touch" reason, not also (c)
+    assert.match(r.reasons[0], /does not touch docs\/CHANGELOG\.md/);
+  });
+
+  it("PASS — no changelogVersions supplied (git couldn't read one side) skips check (c) entirely", () => {
+    const r = decide({
+      body: goodBody(694),
+      title: "feat: a thing",
+      changedFiles: [CHANGELOG_PATH],
+      // changelogVersions omitted — mirrors the runner's fail-open path
+    });
+    assert.equal(r.ok, true, r.reasons.join("; "));
   });
 });

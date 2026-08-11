@@ -11,7 +11,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { parseChangelogVersion, readChangelogVersion } from "./app-version.mjs";
+import { parseChangelogVersion, readChangelogVersion, parseHeading } from "./app-version.mjs";
 
 function tmpChangelog(contents) {
   const dir = mkdtempSync(join(tmpdir(), "appver-"));
@@ -58,5 +58,46 @@ describe("readChangelogVersion (file)", () => {
 
   it("falls back to 0.0.0 on a missing file (never throws)", () => {
     assert.equal(readChangelogVersion("/no/such/CHANGELOG.md"), "0.0.0");
+  });
+});
+
+describe("parseHeading (pure) — #2165, shared with changelog-normalize", () => {
+  it("parses date, version parts, and title from a single heading line", () => {
+    const h = parseHeading(
+      "## 2026-08-10 — v0.195.58 — A Renovate digest bump stops redding everyone's preflight",
+    );
+    assert.deepEqual(h, {
+      date: "2026-08-10",
+      version: [0, 195, 58],
+      title: "A Renovate digest bump stops redding everyone's preflight",
+    });
+  });
+
+  it("returns null for a non-heading line", () => {
+    assert.equal(parseHeading("Some prose that isn't a heading."), null);
+    assert.equal(parseHeading("## v0.102.21 - title"), null); // hyphen, no date
+  });
+
+  it("returns null for non-string input", () => {
+    assert.equal(parseHeading(undefined), null);
+    assert.equal(parseHeading(null), null);
+  });
+
+  // Drift guard: every line parseChangelogVersion's HEADING_RE matches as a
+  // release heading must also be parseable by parseHeading, and vice versa —
+  // scripts/changelog-normalize-core.mjs relies on that agreement to avoid
+  // silently skipping (or mis-rewriting) an entry app-version.mjs would read.
+  it("agrees with parseChangelogVersion on what counts as a valid heading", () => {
+    const lines = [
+      "## 2026-08-10 — v0.195.58 — A Renovate digest bump stops redding everyone's preflight",
+      "## 2026-01-01 — v1.2.3 — x",
+      "## v0.102.21 - title", // malformed — neither should match
+      "not a heading at all",
+    ];
+    for (const line of lines) {
+      const viaFull = parseChangelogVersion(line) !== "0.0.0";
+      const viaHeading = parseHeading(line) !== null;
+      assert.equal(viaHeading, viaFull, `mismatch for: ${line}`);
+    }
   });
 });

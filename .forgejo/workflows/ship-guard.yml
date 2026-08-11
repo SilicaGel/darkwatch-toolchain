@@ -55,9 +55,22 @@ jobs:
           # checkout lazily re-fetches every tip blob (measured 82M, i.e.
           # worse than doing nothing). The sparse list is what does the work,
           # so keep it minimal — only what the job executes from disk.
+          #
+          # #2165 — "executes from disk" includes what those scripts IMPORT.
+          # check.mjs now imports ../app-version.mjs (deliberately: one
+          # changelog parser, so the guard can't drift from what /health
+          # reports as APP_VERSION), and reconcile.mjs imports check.mjs, so
+          # BOTH jobs need it present. A file outside the sparse list simply
+          # isn't there. On PR #2365 the blocking `ship-guard` job died with
+          # ERR_MODULE_NOT_FOUND — and the warn-first `acceptance-reconciliation`
+          # job hit the same missing module and still reported SUCCESS, i.e. it
+          # would have gone on gating nothing. A cross-directory import is
+          # invisible in the diff of the script that adds it: when you add one
+          # to a sparsely-checked-out job, widen this list in the same change.
           filter: blob:none
           sparse-checkout: |
             scripts/ship-guard
+            scripts/app-version.mjs
 
       - name: Use Node 22
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
@@ -218,9 +231,22 @@ jobs:
           # checkout lazily re-fetches every tip blob (measured 82M, i.e.
           # worse than doing nothing). The sparse list is what does the work,
           # so keep it minimal — only what the job executes from disk.
+          #
+          # #2165 — "executes from disk" includes what those scripts IMPORT.
+          # check.mjs now imports ../app-version.mjs (deliberately: one
+          # changelog parser, so the guard can't drift from what /health
+          # reports as APP_VERSION), and reconcile.mjs imports check.mjs, so
+          # BOTH jobs need it present. A file outside the sparse list simply
+          # isn't there. On PR #2365 the blocking `ship-guard` job died with
+          # ERR_MODULE_NOT_FOUND — and the warn-first `acceptance-reconciliation`
+          # job hit the same missing module and still reported SUCCESS, i.e. it
+          # would have gone on gating nothing. A cross-directory import is
+          # invisible in the diff of the script that adds it: when you add one
+          # to a sparsely-checked-out job, widen this list in the same change.
           filter: blob:none
           sparse-checkout: |
             scripts/ship-guard
+            scripts/app-version.mjs
 
       - name: Use Node 22
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0

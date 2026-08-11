@@ -1,8 +1,8 @@
 ---
 name: update-changelog
 description: Use when a feature has shipped, a bug has been fixed, or a feature has been removed — writes a new versioned entry in docs/CHANGELOG.md using semver rules and commits it.
-version: 1.0.0
-last_changed: 2026-07-05
+version: 1.1.0
+last_changed: 2026-08-11
 ---
 
 # update-changelog
@@ -11,7 +11,7 @@ Use this skill when a feature has shipped, a bug has been fixed, or a feature ha
 
 ## Process
 
-1. Read `docs/CHANGELOG.md` — find the current latest version number (top `## [x.y.z]` entry)
+1. Read `docs/CHANGELOG.md` — find the current latest version number (top `## YYYY-MM-DD — vX.Y.Z — title` entry). Note: you don't have to get this exactly right — if another PR merges the same guess first, `/ship`'s Step 2.5 (`scripts/changelog-normalize.mjs`, #2165) fixes the collision automatically, no hand edit needed.
 
 2. Check recent git history for context on what changed:
    ```bash
@@ -34,7 +34,12 @@ Use this skill when a feature has shipped, a bug has been fixed, or a feature ha
 6. Check the `## [Unreleased]` section — if it has content, include those items in the new version entry (move them, don't duplicate). Write the new entry **above** the previous version, using today's date and the bumped version:
 
    ```markdown
-   ## [0.2.0] - YYYY-MM-DD
+   ## YYYY-MM-DD — v0.2.0 — Short user-facing title for what shipped
+
+   Free-form prose lead-in (optional), then `### Added` / `### Changed` /
+   `### Fixed` / `### Removed` sections as they apply — see recent entries in
+   `docs/CHANGELOG.md` for the actual long-form, user-voiced style this
+   project uses; the skeleton below is the section-header shape only.
 
    ### Added
    - Feature name — brief description of what it does for users
@@ -49,7 +54,14 @@ Use this skill when a feature has shipped, a bug has been fixed, or a feature ha
    - What was removed and why
    ```
 
-   Only include sections that apply. Skip empty sections.
+   Only include sections that apply. Skip empty sections. **The exact version
+   number you write here is a best guess, not load-bearing** — #2165: if
+   another PR merges the same guess first, the `git merge origin/main` in
+   `/ship` Step 2.5 conflicts (deliberately — this file is a record, so it
+   fails loudly), you keep both entries with yours on top, and
+   `node scripts/changelog-normalize.mjs` assigns the versions. Nobody
+   renumbers by hand. Get the bump TYPE (patch/minor/major) right; the number
+   itself is disposable.
 
 7. Commit (skip this step if being called from the `ship` skill — ship handles the coordinated commit):
    ```bash
