@@ -47,9 +47,16 @@
 #   "fix" it by making every lane pristine.
 #
 # DRIFT GUARD
-#   This script pins a SHA-256 of ci.yml. If ci.yml changes, preflight fails
-#   until EXPECTED_CI_HASH below is reconciled — see the "ci.yml drift guard"
-#   check. That coupling is enforced, not a note someone has to remember.
+#   This script pins a SHA-256 of ci.yml and of test.yml. If either changes,
+#   preflight fails until EXPECTED_CI_HASH / EXPECTED_TEST_HASH below are
+#   reconciled — see the "ci.yml drift guard" check. That coupling is enforced,
+#   not a note someone has to remember.
+#
+#   The hash comes from scripts/ci/workflow-hash.mjs, which normalises pinned
+#   image digests (`image: mariadb:11@sha256:…`) out before hashing (#2333).
+#   A Renovate digest bump therefore does NOT trip the guard: same image, same
+#   tag, same job semantics, only the layer's content address moves. Everything
+#   else — including the image's name and tag — still counts.
 #
 # USAGE
 #   scripts/preflight.sh              run the full gate
@@ -66,11 +73,17 @@ set -uo pipefail
 # To update: review `git diff` of .forgejo/workflows/ci.yml, confirm this
 # script still mirrors the `lint-typecheck` + `test` jobs (update the checks
 # below if they changed), then set this to the value preflight prints.
-# Reconciled 2026-08-10 (#2303): notify-main-red's rolling-issue lookup now
-# anchors the marker at the START of the body and paginates. Same defect as
-# e2e-full.yml's notify-failure, which was live-armed (#2321 and #2303 quote
-# the e2e-full marker in prose). That is the notify-main-red job, not
-# lint-typecheck / test, so no check below moved — hash bump only.
+# Reconciled 2026-08-10 (#2333): BOTH hashes below changed value because the
+# guard now hashes the file with pinned image digests normalised out (see
+# scripts/ci/workflow-hash-core.mjs). No workflow content changed under this
+# branch, and no check below moved — a mechanical re-pin of the same bytes
+# under the new hash. From here on, a Renovate `image:` digest bump leaves the
+# guards green on its own.
+# (Previously reconciled 2026-08-10 (#2303): notify-main-red's rolling-issue
+# lookup now anchors the marker at the START of the body and paginates. Same
+# defect as e2e-full.yml's notify-failure, which was live-armed (#2321 and #2303
+# quote the e2e-full marker in prose). That is the notify-main-red job, not
+# lint-typecheck / test, so no check below moved — hash bump only.)
 # (Previously reconciled 2026-08-10 (#2315): the `tree-gate` job's checkout gained
 # `filter: blob:none` + `sparse-checkout: scripts/ci` — it needs commits and
 # trees, never a tracked file's contents. That is the `tree-gate` job, not
@@ -115,14 +128,14 @@ set -uo pipefail
 # CI remains the enforcer.)
 # (Previously reconciled 2026-07-19, #1736 Task 4: WT no-raw-color guard.)
 # (Previously reconciled 2026-07-14, #1360/#1701: smoke spec list.)
-EXPECTED_CI_HASH="852f909ca53aff555db359ae866e4e90be21efc346e0d9a6027e6986f42b7613"
+EXPECTED_CI_HASH="a158e7cae7b5ea97a2e64b8749e7dd7fd4bc8dc49b76b278d0e232d3ec25e394"
 
 # #2336 — the `test` job MOVED from ci.yml to its own reusable workflow so the
 # nightly can call it too. The guard below hashed only ci.yml, so without this
 # second hash the suite preflight mirrors would have silently dropped off the
 # drift watch the moment it moved — the exact failure this guard exists to
 # prevent. Reconcile BOTH when either changes.
-EXPECTED_TEST_HASH="194c569bbfbb4cfb57c80a587406a9ca470dafdc048758d657b486e18b6e8cec"
+EXPECTED_TEST_HASH="45e3207b5684ad26d06cba26b280f87788f36aeae73ca219afead39a1c07d3cc"
 
 # --- setup ------------------------------------------------------------------
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || {
@@ -169,9 +182,15 @@ PASS=(); FAIL=(); SKIP=()
 LOGDIR="$(mktemp -d)"
 trap 'rm -rf "$LOGDIR"' EXIT
 
-sha256() {
-  if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1" | awk '{print $1}'
-  else shasum -a 256 "$1" | awk '{print $1}'; fi
+# workflow_hash <file> — sets HASH to the drift-guard hash of a workflow file.
+# Called as a plain function (never in a `$( )` subshell) so that a failure here
+# exits preflight rather than silently comparing an empty string to the pin.
+workflow_hash() {
+  if ! HASH="$(node scripts/ci/workflow-hash.mjs "$1" 2>&1)"; then
+    echo "${RED}${BOLD}✗ preflight could not hash $1${RESET}"
+    echo "  $HASH"
+    exit 1
+  fi
 }
 
 # run_check <label> <command...> — runs the command, captures output, records
@@ -197,7 +216,7 @@ echo "${BOLD}━━━ Darkwatch preflight ━━━${RESET}  ${DIM}ci.yml lint-
 echo
 
 # --- 0. ci.yml drift guard (hard stop) --------------------------------------
-ACTUAL_CI_HASH="$(sha256 .forgejo/workflows/ci.yml)"
+workflow_hash .forgejo/workflows/ci.yml; ACTUAL_CI_HASH="$HASH"
 if [ "$ACTUAL_CI_HASH" != "$EXPECTED_CI_HASH" ]; then
   echo "${RED}${BOLD}✗ ci.yml drift guard FAILED${RESET}"
   echo "  .forgejo/workflows/ci.yml has changed since preflight was last reconciled."
@@ -205,14 +224,15 @@ if [ "$ACTUAL_CI_HASH" != "$EXPECTED_CI_HASH" ]; then
   echo "  changed, update the checks in this script to match. Then set:"
   echo "    EXPECTED_CI_HASH=\"$ACTUAL_CI_HASH\""
   echo "  in scripts/preflight.sh. (If only unrelated jobs changed — smoke,"
-  echo "  badges — just bump the hash; the reconciliation is the acknowledgement.)"
+  echo "  badges — just bump the hash; the reconciliation is the acknowledgement."
+  echo "  A pinned image DIGEST bump can't get you here at all — #2333.)"
   echo
   exit 1
 fi
 
 # #2336 — same guard for the extracted test suite. Preflight mirrors this
 # workflow's unit + integration steps; if they change here, preflight drifts.
-ACTUAL_TEST_HASH="$(sha256 .forgejo/workflows/test.yml)"
+workflow_hash .forgejo/workflows/test.yml; ACTUAL_TEST_HASH="$HASH"
 if [ "$ACTUAL_TEST_HASH" != "$EXPECTED_TEST_HASH" ]; then
   echo "${RED}${BOLD}✗ test.yml drift guard FAILED${RESET}"
   echo "  .forgejo/workflows/test.yml has changed since preflight was last reconciled."
