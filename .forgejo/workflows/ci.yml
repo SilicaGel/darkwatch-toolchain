@@ -67,10 +67,15 @@ jobs:
   # Logic lives in scripts/ci/tree-gate-core.mjs (pure, unit-tested); this job is
   # the I/O shell. It never fails — every unknown resolves to skip=false.
   #
-  # WARN-FIRST (mirrors ship-guard's RECONCILE_ENFORCE, #2297): the step below
-  # deliberately does NOT set TREE_GATE_ENFORCE, so it logs "WOULD SKIP" and
-  # skips nothing. Flip it by adding `TREE_GATE_ENFORCE: "1"` to that step's
-  # `env:` once a few merges have shown the decision reading correctly.
+  # ENFORCED since #2336 (flipped after a warn-first burn-in, #2308→#2337):
+  # six push-to-main runs showed the decision reading correctly on both
+  # branches (WOULD SKIP on identical trees, a named run-reason when main had
+  # advanced), and the nightly backstop (#2351) now re-runs the unit+int suite
+  # against main daily AND blocks the deploy on it — so skipping the per-merge
+  # duplicate of `test` trades a same-bytes-minutes-later rerun for a
+  # better-varied daily sample (the #1798 trade, accepted explicitly on #2336).
+  # To revert to warn-first, remove `TREE_GATE_ENFORCE` from the gate step's
+  # `env:` below — the decision logging stays identical either way.
   # ---------------------------------------------------------------------------
   tree-gate:
     runs-on: ubuntu-latest
@@ -132,7 +137,9 @@ jobs:
           # in notify-main-red below.
           FORGEJO_TOKEN: ${{ secrets.FORGEJO_TOKEN }}
           GH_TOKEN: ${{ github.token }}
-          # Add `TREE_GATE_ENFORCE: "1"` here to make skips real (see above).
+          # #2336 — skips are REAL. Remove this line to fall back to warn-first
+          # ("WOULD SKIP" logging with nothing skipped); see the job comment.
+          TREE_GATE_ENFORCE: "1"
         # No npm install: the script is Node built-ins + git + curl.
         run: |
           # ⚠️ SAFETY INVARIANT (#2351): the gate may only ever subtract a

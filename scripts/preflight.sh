@@ -126,9 +126,15 @@ set -uo pipefail
 # reads the LIVE advisory feed, so mirroring it would make preflight
 # non-deterministic and let an unrelated upstream advisory block local work.
 # CI remains the enforcer.)
+# (Reconciled 2026-08-11 (#2336): tree-gate flipped to enforce —
+# `TREE_GATE_ENFORCE: "1"` on the gate step plus comment rewrites. That's the
+# `tree-gate` job, not `lint-typecheck` / `test`, so no check below moved —
+# hash bump only. NOTE: compute the hash with `node
+# scripts/ci/workflow-hash.mjs`, not a raw shasum — the guard normalises
+# image digests out first (#2333).)
 # (Previously reconciled 2026-07-19, #1736 Task 4: WT no-raw-color guard.)
 # (Previously reconciled 2026-07-14, #1360/#1701: smoke spec list.)
-EXPECTED_CI_HASH="a158e7cae7b5ea97a2e64b8749e7dd7fd4bc8dc49b76b278d0e232d3ec25e394"
+EXPECTED_CI_HASH="4e474bb61854d9277466777df9d39c3cdb7456628d6f5b8c37896ffa7f216809"
 
 # #2336 — the `test` job MOVED from ci.yml to its own reusable workflow so the
 # nightly can call it too. The guard below hashed only ci.yml, so without this
