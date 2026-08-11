@@ -472,8 +472,29 @@ jobs:
       issues: write
       actions: read
     steps:
+      # #2303 — the gate here is now event-only, NOT result-gated. The flaky
+      # report has to run on GREEN runs: a spec that fails then passes on retry
+      # leaves the suite green, which is exactly the case nothing was reporting.
+      # The failure-only gates stay on the suspect-list steps below, so a green
+      # run does this checkout + artifact download and nothing else.
+      #
+      # Cost of the widening is small and got smaller: since #2315/#2340 this
+      # checkout is `blob:none` + sparse (~3.7M, ~2.2s) rather than the whole
+      # ~96M tip.
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
-        if: ${{ (needs.e2e-full.result == 'failure' || contains(needs.*.result, 'failure')) && github.event_name != 'pull_request' }}
+        if: ${{ github.event_name != 'pull_request' }}
+        # #2303 — REQUIRED by the widening above, not decoration. While this
+        # checkout only ran on already-red runs, a failure here cost nothing
+        # extra. Now it runs on every non-PR run, including green ones — and
+        # under the nightly-deploy `workflow_call` path a failed step reds this
+        # job, which reds the caller's aggregate, which blocks the deploy. That
+        # is the exact incident this job's header documents twice. Without this
+        # line a transient git fetch on a GREEN nightly could block a deploy.
+        # Degradation is already safe: no repo → the flaky step fails under its
+        # own continue-on-error → the dashboard is stale for one night and
+        # self-heals; the red-path suspect list already degrades to
+        # "(git history unavailable)".
+        continue-on-error: true
         with:
           # git log <last-green>..HEAD needs the merge-base history.
           #
@@ -504,13 +525,47 @@ jobs:
             scripts/ci
 
       - name: Download the e2e-full report artifact
-        if: ${{ (needs.e2e-full.result == 'failure' || contains(needs.*.result, 'failure')) && github.event_name != 'pull_request' }}
+        # #2303 — event-only for the same reason as the checkout above: the
+        # shard JSONs are uploaded `if: always()`, so a GREEN run's artifact
+        # exists and is the only place the flaky list is recorded.
+        if: ${{ github.event_name != 'pull_request' }}
         # v4 unsupported on Forgejo's actions backend; pin v3 (see ci.yml).
         uses: actions/download-artifact@9bc31d5ccc31df68ecc42ccf4149144866c47d8a # v3.0.2
         continue-on-error: true # a crash before upload must not muzzle the notify
         with:
           name: e2e-full-logs-${{ github.run_id }}
           path: /tmp/e2e-full-logs
+
+      # #2303 — the flaky dashboard. Runs on EVERY non-PR run, green or red,
+      # because a spec that fails then passes on retry leaves the suite green
+      # and was recorded nowhere a human would see. Node (not the inline python
+      # used below) so the logic can be a unit-tested pure module —
+      # scripts/ci/flaky-report-core.mjs, 18 cases.
+      - name: Setup Node.js (flaky report)
+        if: ${{ github.event_name != 'pull_request' }}
+        # Same reason as the checkout: this now runs on green runs too, so it
+        # must not be able to red a green nightly.
+        continue-on-error: true
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "22"
+
+      - name: Report specs that only passed on retry
+        if: ${{ github.event_name != 'pull_request' }}
+        # The script never exits non-zero — see its header. This job's own
+        # header records that a step failing here has twice silently blocked the
+        # nightly deploy, so a reliability report must not become the
+        # reliability problem. `continue-on-error` as a second layer.
+        continue-on-error: true
+        env:
+          API_URL: ${{ github.api_url }}
+          REPO: ${{ github.repository }}
+          FORGEJO_TOKEN: ${{ secrets.FORGEJO_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
+          E2E_LOG_DIR: /tmp/e2e-full-logs
+          RUN_LABEL: run-${{ github.run_number }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_number }}
+        run: node scripts/ci/flaky-report.mjs
 
       - name: Comment the rolling "e2e-full is red" issue
         if: ${{ (needs.e2e-full.result == 'failure' || contains(needs.*.result, 'failure')) && github.event_name != 'pull_request' }}
@@ -635,10 +690,37 @@ jobs:
           )
           # Find the existing rolling issue (best-effort — if the list read fails,
           # fall through to creating a fresh one rather than crashing).
-          issues, _ = call("GET", "/issues?state=open&type=issues&limit=50")
-          existing = None
-          if isinstance(issues, list):
-              existing = next((i["number"] for i in issues if MARKER in (i.get("body") or "")), None)
+          #
+          # #2303 — two fixes here, both found the hard way on 2026-08-10.
+          #
+          # (1) THE MARKER MUST LEAD THE BODY, not merely appear in it. An issue
+          #     that *discusses* a marker contains it — #2321 and #2303 both quote
+          #     `<!-- e2e-full-red -->` inside backticks — so the old substring
+          #     test matched a design ticket, and the next red would have
+          #     commented there while the real alert was never filed. That is the
+          #     #2010/#2011 "a stale marker eats tomorrow's real red" failure
+          #     arriving through a different door. Not hypothetical: the sibling
+          #     flaky reporter made this exact mistake on its first live run and
+          #     PATCHed #2303's body away. Every body this job creates begins
+          #     f"{MARKER}\n\n", so anchoring at the start is both correct and
+          #     unambiguous. The tested equivalent is pickDashboard() in
+          #     scripts/ci/flaky-report-core.mjs.
+          # (2) PAGINATE. One page is 50 issues against 280 open, so the rolling
+          #     issue falls off page 1 within days — and a rolling issue that
+          #     can't be found is re-created every red night, which quietly turns
+          #     "rolling" into "a new issue each time".
+          issues = []
+          for page in range(1, 9):
+              batch, _ = call("GET", f"/issues?state=open&type=issues&limit=50&page={page}")
+              if not isinstance(batch, list):
+                  break
+              issues.extend(batch)
+              if len(batch) < 50:
+                  break
+          existing = next(
+              (i["number"] for i in issues if (i.get("body") or "").lstrip().startswith(MARKER)),
+              None,
+          )
           if existing:
               res, name = call("POST", f"/issues/{existing}/comments", {"body": body})
               action = f"commented on existing issue #{existing}"

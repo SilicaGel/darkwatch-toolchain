@@ -1159,10 +1159,30 @@ jobs:
           # Find an existing open issue carrying the marker → comment; else create.
           # Best-effort read: if the list call fails, fall through to creating a
           # fresh issue rather than crashing with no alert at all.
-          issues, _ = call("GET", "/issues?state=open&type=issues&limit=50")
-          existing = None
-          if isinstance(issues, list):
-              existing = next((i["number"] for i in issues if MARKER in (i.get("body") or "")), None)
+          #
+          # #2303 — same two fixes as e2e-full.yml's `notify-failure`, applied
+          # here because the defect is identical, not because this one misfired.
+          # Nothing currently quotes `<!-- ci-main-red -->` in an open issue, so
+          # this half is fragile rather than armed — but the fix is the same line
+          # and leaving one copy naive is how it comes back. (1) the marker must
+          # LEAD the body: an issue discussing a marker contains it, and only the
+          # rolling issue starts with it — every body created below begins
+          # f"{MARKER}\n\n". (2) paginate: 50 per page against 280 open issues
+          # means the rolling issue drops off page 1 within days, after which a
+          # fresh one is filed every red push. Tested equivalent:
+          # pickDashboard() in scripts/ci/flaky-report-core.mjs.
+          issues = []
+          for page in range(1, 9):
+              batch, _ = call("GET", f"/issues?state=open&type=issues&limit=50&page={page}")
+              if not isinstance(batch, list):
+                  break
+              issues.extend(batch)
+              if len(batch) < 50:
+                  break
+          existing = next(
+              (i["number"] for i in issues if (i.get("body") or "").lstrip().startswith(MARKER)),
+              None,
+          )
           if existing:
               res, name = call("POST", f"/issues/{existing}/comments", {"body": body})
               action = f"commented on existing red-main issue #{existing}"

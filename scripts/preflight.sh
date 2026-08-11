@@ -66,10 +66,15 @@ set -uo pipefail
 # To update: review `git diff` of .forgejo/workflows/ci.yml, confirm this
 # script still mirrors the `lint-typecheck` + `test` jobs (update the checks
 # below if they changed), then set this to the value preflight prints.
-# Reconciled 2026-08-10 (#2315): the `tree-gate` job's checkout gained
+# Reconciled 2026-08-10 (#2303): notify-main-red's rolling-issue lookup now
+# anchors the marker at the START of the body and paginates. Same defect as
+# e2e-full.yml's notify-failure, which was live-armed (#2321 and #2303 quote
+# the e2e-full marker in prose). That is the notify-main-red job, not
+# lint-typecheck / test, so no check below moved — hash bump only.
+# (Previously reconciled 2026-08-10 (#2315): the `tree-gate` job's checkout gained
 # `filter: blob:none` + `sparse-checkout: scripts/ci` — it needs commits and
 # trees, never a tracked file's contents. That is the `tree-gate` job, not
-# `lint-typecheck` / `test`, so no check below moved — hash bump only.
+# `lint-typecheck` / `test`, so no check below moved — hash bump only.)
 # (Previously reconciled 2026-08-10 (#2308): a `tree-gate` job was added ahead of
 # lint-typecheck / test / smoke, and those three gained `needs: [tree-gate]` +
 # an `if:` so a push-to-main merge whose tree is byte-identical to an
@@ -110,14 +115,14 @@ set -uo pipefail
 # CI remains the enforcer.)
 # (Previously reconciled 2026-07-19, #1736 Task 4: WT no-raw-color guard.)
 # (Previously reconciled 2026-07-14, #1360/#1701: smoke spec list.)
-EXPECTED_CI_HASH="9e19c0c835b76e68a1025ff90135c804184c11a4402da2fa5bab35a72c4dccf5"
+EXPECTED_CI_HASH="852f909ca53aff555db359ae866e4e90be21efc346e0d9a6027e6986f42b7613"
 
 # #2336 — the `test` job MOVED from ci.yml to its own reusable workflow so the
 # nightly can call it too. The guard below hashed only ci.yml, so without this
 # second hash the suite preflight mirrors would have silently dropped off the
 # drift watch the moment it moved — the exact failure this guard exists to
 # prevent. Reconcile BOTH when either changes.
-EXPECTED_TEST_HASH="903bbe1ff35c85704c66648419264ed9519396664bffb58ce0dac94f3f2ac92b"
+EXPECTED_TEST_HASH="194c569bbfbb4cfb57c80a587406a9ca470dafdc048758d657b486e18b6e8cec"
 
 # --- setup ------------------------------------------------------------------
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || {

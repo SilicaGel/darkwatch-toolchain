@@ -365,8 +365,34 @@ jobs:
               f"**Recent commits on main:**\n```\n{suspects}\n```\n"
           )
 
-          existing = api_call("GET", f"/repos/{repo}/issues?state=open&limit=50") or []
-          match = next((i for i in existing if isinstance(i, dict) and MARKER in (i.get("body") or "")), None)
+          # #2303 — the third copy of this lookup, fixed with the other two.
+          #
+          # (1) THE MARKER MUST LEAD THE BODY. An issue that *discusses* a marker
+          #     contains it, so a substring test selects the design ticket
+          #     instead of the rolling issue and the real alert is never filed.
+          #     Live-proven the same day: the e2e-full copy would have picked
+          #     #2321 (a Lighthouse ticket) out of the 280 open issues, and the
+          #     flaky reporter's first run PATCHed #2303's body away. The body
+          #     built just above starts with f"{MARKER}\n", so anchoring is exact.
+          # (2) PAGINATE. 50 per page against 280 open issues means this rolling
+          #     issue drops off page 1 within days, after which every red night
+          #     files a new one instead of rolling.
+          existing = []
+          for page in range(1, 9):
+              batch = api_call("GET", f"/repos/{repo}/issues?state=open&limit=50&page={page}")
+              if not isinstance(batch, list):
+                  break
+              existing.extend(batch)
+              if len(batch) < 50:
+                  break
+          match = next(
+              (
+                  i
+                  for i in existing
+                  if isinstance(i, dict) and (i.get("body") or "").lstrip().startswith(MARKER)
+              ),
+              None,
+          )
 
           if match:
               api_call("POST", f"/repos/{repo}/issues/{match['number']}/comments", {"body": body})
