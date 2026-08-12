@@ -188,24 +188,55 @@ jobs:
         run: cp deploy/docker-compose.prod.yml ~/services/darkwatch/docker-compose.yml
 
       - name: Pre-migration DB dump — no backup, no deploy (#385)
-        # Zero-gap restore point immediately before the riskiest step
-        # (migrations run when the new container boots below). Deliberately
-        # NOT continue-on-error: a deploy that can't take a backup doesn't
+        # Zero-gap restore point immediately before the riskiest step (the
+        # gated migration run below, #2234). Deliberately NOT
+        # continue-on-error: a deploy that can't take a backup doesn't
         # deploy. Also refresh the cron's installed copy so it never drifts
         # from the repo (docs/BACKUPS.md).
         run: |
           bash scripts/backup-db.sh --suffix predeploy
           install -m 755 scripts/backup-db.sh ~/bin/darkwatch-backup-db.sh
 
-      - name: Build server image and (re)start container
-        # The Pi's public-facing reverse proxy is Caddy (host systemd unit,
+      - name: Build server image
+        run: |
+          cd ~/deploy/darkwatch/server
+          docker build -t darkwatch-server:latest .
+
+      - name: Migration gate — validate, then apply (#2234)
+        # Migrations used to run inside the app container's entrypoint under
+        # `restart: always`: a migration failing mid-file (MariaDB implicitly
+        # commits DDL, so partial application is real) crash-looped the
+        # container — the #2141 outage mode, 35h down. They are now a gated
+        # one-shot HERE, against the freshly built image, while the OLD
+        # container is still serving: a failure reds this job and the deploy
+        # stops with prod untouched (the container replace below never runs).
+        #
+        # Tradeoffs, stated: (1) between this step and the container replace,
+        # OLD code briefly serves the NEW schema — migrations must stay
+        # additive/expand-contract shaped, which the --validate lint nudges
+        # toward; (2) DDL now runs while the old server is live, so a long
+        # ALTER on a hot table blocks traffic instead of landing during the
+        # replace window. At this DB's size both beat a crash-loop.
+        #
+        # `compose run` (not `up`): one-shot container on the compose network
+        # with the service's full env block; --no-deps because maria/minio are
+        # already running in prod; the image's CMD (docker-entrypoint.sh) is
+        # overridden by the migrate.js invocation. --dry-run first logs what's
+        # pending (and any half-applied file it would resume) before anything
+        # is applied, so the job log reads as a plan → apply sequence.
+        run: |
+          cd ~/services/darkwatch
+          docker compose --env-file .env.deploy run --rm --no-deps server node dist/migrate.js --dry-run
+          docker compose --env-file .env.deploy run --rm --no-deps server node dist/migrate.js
+
+      - name: (Re)start container
+        # Only reached with the schema already current (gate above). The Pi's
+        # public-facing reverse proxy is Caddy (host systemd unit,
         # /etc/caddy/Caddyfile), serving static client assets from
         # /var/www/darkwatch and reverse-proxying /api/* + /socket.io/* +
         # /health to localhost:8080. The Caddyfile is installed + reloaded by
         # the step below (#1037).
         run: |
-          cd ~/deploy/darkwatch/server
-          docker build -t darkwatch-server:latest .
           docker rm -f darkwatch-server 2>/dev/null || true
           cd ~/services/darkwatch
           docker compose --env-file .env.deploy up -d --remove-orphans
