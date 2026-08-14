@@ -1,8 +1,8 @@
 ---
 name: update-changelog
 description: Use when a feature has shipped, a bug has been fixed, or a feature has been removed — writes a new versioned entry in docs/CHANGELOG.md using semver rules and commits it.
-version: 1.1.0
-last_changed: 2026-08-11
+version: 1.2.0
+last_changed: 2026-08-14
 ---
 
 # update-changelog
@@ -27,7 +27,14 @@ Use this skill when a feature has shipped, a bug has been fixed, or a feature ha
 
 5. **Same-day grouping check.** Read the topmost entry's date. If it matches today's date AND no external release was cut between that entry and now, **prefer extending the existing entry** (append to its sections, bump its version, retitle if the scope broadened) over creating a new adjacent entry. Same-day cascades of `vX.Y.0 / vX.Y.1 / vX.Y.2` make the changelog hard to scan retrospectively and dilute the "what shipped in vX.Y" signal. Create a new entry only when:
    - The work is conceptually separate from the existing same-day entry (different ticket, different surface), OR
-   - The existing entry has already been shipped to users (deployed, not just merged).
+   - The existing entry has already **merged to main**. Merged is the moment
+     another branch can start building on that version number, so extending it
+     stops being free and starts guaranteeing a conflict about entry *identity*
+     rather than version numbers — two sides holding the same entry in two
+     states. `changelog-normalize.mjs` cannot detect that (it reconciles
+     numbers), and `/ship`'s "keep both entries, ours on top" resolution
+     actively points the wrong way: following it duplicates every bullet under
+     two headings. Extending an unmerged entry of your own costs nothing.
 
    Otherwise extend in place.
 
