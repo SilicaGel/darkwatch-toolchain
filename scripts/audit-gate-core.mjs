@@ -141,26 +141,49 @@ export function evaluate({ report, allowlist, workspace, today, ambient = false 
   const byName = new Map(vulns.filter((v) => v?.name).map((v) => [v.name, v]));
   const forWorkspace = entries.filter((a) => a.workspaces.includes(workspace));
 
-  /** The entry covering a node in its own right, or null. */
-  const directEntry = (vuln) => {
+  /**
+   * EVERY advisory id on a node must have its own allowlist entry (#2397).
+   * Returns the covering entries (one per id), or null if any id is unjustified.
+   *
+   * This was an ANY-match until #2397, which meant a package carrying several
+   * advisories was cleared as soon as ONE was named — so a second, unrelated
+   * advisory landing on an already-allowlisted package was absorbed with no
+   * justification, no expiry and no gate red. That was live, and worse than it
+   * sounds: `tmp` reported GHSA-52f5-9888-hmc6 (LOW, allowlisted) alongside
+   * GHSA-ph9p-34f9-6g65 (HIGH, never reviewed). Only high/critical gate, so the
+   * allowlisted advisory would not have gated on its own — the entire
+   * suppression rested on an entry for the one advisory that wasn't the problem.
+   *
+   * There is deliberately NO `a.package === vuln.name` fallback any more. It was
+   * the widest surface in the matcher: an entry matching by name cleared
+   * whatever the package happened to carry, forever. It was load-bearing until
+   * #2397 only because the `js-yaml` entry named a GHSA the feed had stopped
+   * reporting, so it was silently suppressing three advisories nobody had read.
+   * Both packages were fixed upstream instead (see the `overrides` in the root
+   * package.json), so nothing depends on the fallback and it is gone.
+   *
+   * A path node carries no ids of its own and so never matches here; it is
+   * cleared by its carriers in pass 2 below, which is what #2388 made possible.
+   */
+  const directEntries = (vuln) => {
     const ids = [...advisoryIds(vuln)];
-    // Note the ANY-match on ids: a package carrying several advisories is
-    // suppressed when one of them is named. `tmp` reports two and only one is
-    // allowlisted, so GHSA-ph9p-34f9-6g65 is currently riding in on its
-    // neighbour's entry with no justification and no expiry. Tightening this to
-    // ALL would red the build on landing, so it is a separate decision —
-    // deliberately NOT folded into #2388, and filed as #2397.
-    //
-    // The `a.package === vuln.name` clause is load-bearing for the same reason:
-    // the js-yaml entry names a GHSA the live feed no longer reports, and only
-    // still works because the package name matches. #2397 covers both.
-    return forWorkspace.find((a) => ids.includes(a.ghsa) || a.package === vuln.name) ?? null;
+    if (ids.length === 0) return null;
+    const found = ids.map((id) => forWorkspace.find((a) => a.ghsa === id) ?? null);
+    return found.every(Boolean) ? found : null;
   };
 
-  const record = (vuln, entry) => {
-    matchedEntries.add(entry.ghsa);
-    if (today > entry.expires) expired.push({ name: vuln.name, entry });
-    else suppressed.push({ name: vuln.name, entry });
+  /** The advisory ids on a node that no entry covers — named in the failure. */
+  const unmatchedIds = (vuln) =>
+    [...advisoryIds(vuln)].filter((id) => !forWorkspace.some((a) => a.ghsa === id));
+
+  // Credit EVERY contributing entry, and let any one expired entry expire the
+  // whole node: a node is only suppressed while all of its justifications are
+  // live, so a lapsed entry must withdraw the suppression it was holding up.
+  const record = (vuln, covering) => {
+    for (const entry of covering) matchedEntries.add(entry.ghsa);
+    const lapsed = covering.find((e) => today > e.expires);
+    if (lapsed) expired.push({ name: vuln.name, entry: lapsed });
+    else suppressed.push({ name: vuln.name, entry: covering[0] });
   };
 
   // ── Pass 1: nodes that CARRY an advisory ────────────────────────────────
@@ -171,16 +194,32 @@ export function evaluate({ report, allowlist, workspace, today, ambient = false 
   const carriers = gating.filter(carriesAdvisory);
   const clearedCarriers = new Set();
   for (const vuln of carriers) {
-    const entry = directEntry(vuln);
-    if (!entry) {
-      blocked.push({ name: vuln.name, severity: vuln.severity, ids: [...advisoryIds(vuln)] });
+    const covering = directEntries(vuln);
+    if (!covering) {
+      // Credit the entries that DID match, even though the node still blocks.
+      // Without this a partially-covered node reports its live entries as
+      // "no longer matches ... It can be removed" — advice that would delete a
+      // real justification, which is the same defect this ticket is closing.
+      for (const id of advisoryIds(vuln)) {
+        const hit = forWorkspace.find((a) => a.ghsa === id);
+        if (hit) matchedEntries.add(hit.ghsa);
+      }
+      // Name the ids that are actually unjustified (#2397, `surfaced`). Listing
+      // every id on the node would re-hide the new one among its allowlisted
+      // neighbours, which is the failure this ticket is about.
+      blocked.push({
+        name: vuln.name,
+        severity: vuln.severity,
+        ids: [...advisoryIds(vuln)],
+        unmatched: unmatchedIds(vuln),
+      });
       continue;
     }
-    record(vuln, entry);
-    // Only a LIVE entry clears a carrier. An expired one already fails the gate
+    record(vuln, covering);
+    // Only LIVE entries clear a carrier. An expired one already fails the gate
     // on its own, and letting it clear the chain below it would quietly restore
     // the suppression the expiry exists to withdraw.
-    if (today <= entry.expires) clearedCarriers.add(vuln.name);
+    if (covering.every((e) => today <= e.expires)) clearedCarriers.add(vuln.name);
   }
 
   // ── Pass 2: path nodes, which carry no advisory of their own ────────────
@@ -190,14 +229,8 @@ export function evaluate({ report, allowlist, workspace, today, ambient = false 
   for (const vuln of gating) {
     if (carriesAdvisory(vuln)) continue;
 
-    // A direct entry still works, so an existing allowlist that names a path
-    // node keeps behaving exactly as it did.
-    const entry = directEntry(vuln);
-    if (entry) {
-      record(vuln, entry);
-      continue;
-    }
-
+    // A path node carries no advisory of its own, so with the package-name
+    // fallback gone (#2397) it can only be cleared by its carriers below.
     const reachable = reachableCarriers(vuln, byName);
     // EVERY reachable carrier must be cleared, not merely one: `@lhci/cli`
     // reaches extract-zip AND tmp, and it is reported for both. An un-cleared
@@ -215,8 +248,7 @@ export function evaluate({ report, allowlist, workspace, today, ambient = false 
     // Credit every entry that contributed, so none of them reads as stale.
     const contributing = [];
     for (const name of reachable) {
-      const carrierEntry = directEntry(byName.get(name));
-      if (carrierEntry) {
+      for (const carrierEntry of directEntries(byName.get(name)) ?? []) {
         matchedEntries.add(carrierEntry.ghsa);
         contributing.push(carrierEntry);
       }

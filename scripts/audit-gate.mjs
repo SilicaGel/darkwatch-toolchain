@@ -225,6 +225,16 @@ for (const v of result.blocked) {
   console.error(
     `audit-gate: BLOCKING ${v.severity} advisory in ${v.name}${v.ids.length ? ` (${v.ids.join(", ")})` : ""}`,
   );
+  // #2397 — when SOME of a node's ids are allowlisted and others are not, say
+  // exactly which are unjustified. Printing only the full id list would leave
+  // the new advisory hiding among its allowlisted neighbours, which is the
+  // failure this check exists to end.
+  const covered = v.ids?.filter((id) => !v.unmatched?.includes(id)) ?? [];
+  if (v.unmatched?.length && covered.length) {
+    console.error(
+      `audit-gate:   ↳ NOT allowlisted: ${v.unmatched.join(", ")} (${covered.join(", ")} ${covered.length === 1 ? "is" : "are"} allowlisted, but every advisory on a node needs its own reviewed entry — #2397)`,
+    );
+  }
 }
 
 if (result.failed) {

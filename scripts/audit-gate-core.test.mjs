@@ -37,7 +37,7 @@ function lhciReport() {
       "@lhci/cli": {
         name: "@lhci/cli",
         severity: "high",
-        via: ["@lhci/utils", "inquirer", "lighthouse", "tmp", "uuid"],
+        via: ["@lhci/utils", "lighthouse", "uuid"],
         effects: [],
       },
       "@lhci/utils": {
@@ -70,22 +70,49 @@ function lhciReport() {
         via: [adv("GHSA-jmr9-qjv8-65gv")],
         effects: ["@puppeteer/browsers"],
       },
-      tmp: {
-        name: "tmp",
-        severity: "high",
-        via: [adv("GHSA-52f5-9888-hmc6"), adv("GHSA-ph9p-34f9-6g65")],
-        effects: ["@lhci/cli", "external-editor"],
-      },
-      "js-yaml": {
-        name: "js-yaml",
-        severity: "high",
-        via: [adv("GHSA-h67p-54hq-rp68")],
-        effects: [],
-      },
-      inquirer: { name: "inquirer", severity: "moderate", via: ["external-editor"], effects: [] },
       uuid: { name: "uuid", severity: "moderate", via: [adv("GHSA-uuid-moderate")], effects: [] },
     },
   };
+}
+
+/**
+ * The SAME tree as it stood before #2397, when `tmp` and `js-yaml` were still
+ * vulnerable and allowlisted. Kept deliberately rather than deleted: it is the
+ * only fixture where a node carries two advisories and where `@lhci/cli`
+ * reaches two independent carriers, so it pins both the #2397 strictness rules
+ * and #2388's "every reachable carrier must be cleared".
+ *
+ * Its shape is real, not invented:
+ *   tmp     — GHSA-52f5-9888-hmc6 (LOW) + GHSA-ph9p-34f9-6g65 (HIGH). Only the
+ *             LOW one was ever allowlisted, and only high/critical gate — so the
+ *             suppression rested entirely on an entry for the advisory that
+ *             wasn't the problem.
+ *   js-yaml — the allowlist named GHSA-8cvf-q4jm-h6q8, which the live feed had
+ *             stopped reporting; the entry survived only on the package-name
+ *             fallback, silently covering three advisories nobody had reviewed.
+ */
+function lhciReportBefore2397() {
+  const r = lhciReport();
+  r.vulnerabilities["@lhci/cli"].via = ["@lhci/utils", "inquirer", "lighthouse", "tmp", "uuid"];
+  r.vulnerabilities.inquirer = {
+    name: "inquirer",
+    severity: "moderate",
+    via: ["external-editor"],
+    effects: [],
+  };
+  r.vulnerabilities.tmp = {
+    name: "tmp",
+    severity: "high",
+    via: [adv("GHSA-52f5-9888-hmc6"), adv("GHSA-ph9p-34f9-6g65")],
+    effects: ["@lhci/cli", "external-editor"],
+  };
+  r.vulnerabilities["js-yaml"] = {
+    name: "js-yaml",
+    severity: "high",
+    via: [adv("GHSA-h67p-54hq-rp68")],
+    effects: [],
+  };
+  return r;
 }
 
 const entry = (ghsa, pkg, over = {}) => ({
@@ -306,7 +333,11 @@ describe("carriesAdvisory / reachableCarriers — the transitive walk (#2388)", 
   });
 
   test("a node reached through several branches collects every carrier below it", () => {
-    assert.deepEqual([...reachableCarriers(byName.get("@lhci/cli"), byName)].sort(), [
+    // Uses the pre-#2397 tree: since tmp was fixed upstream, @lhci/cli reaches
+    // only one carrier in the current one, so a multi-branch walk needs the
+    // older shape to be exercised at all.
+    const before = new Map(Object.entries(lhciReportBefore2397().vulnerabilities));
+    assert.deepEqual([...reachableCarriers(before.get("@lhci/cli"), before)].sort(), [
       "extract-zip",
       "tmp",
     ]);
@@ -328,11 +359,9 @@ describe("carriesAdvisory / reachableCarriers — the transitive walk (#2388)", 
 });
 
 describe("evaluate — the real @lhci/cli fixture (#2388)", () => {
-  const realEntries = [
-    entry("GHSA-jmr9-qjv8-65gv", "extract-zip"),
-    entry("GHSA-52f5-9888-hmc6", "tmp"),
-    entry("GHSA-8cvf-q4jm-h6q8", "js-yaml"),
-  ];
+  // Post-#2397 the allowlist is ONE entry for this whole chain: `tmp` and
+  // `js-yaml` were fixed upstream via root `overrides` rather than justified.
+  const realEntries = [entry("GHSA-jmr9-qjv8-65gv", "extract-zip")];
 
   test("(deep-chain) ONE entry naming the carrier clears every node below it", () => {
     // This is the whole ticket: before #2388 this same allowlist left
@@ -345,7 +374,7 @@ describe("evaluate — the real @lhci/cli fixture (#2388)", () => {
       today: TODAY,
     });
     assert.deepEqual(r.blocked, [], "nothing should block");
-    assert.equal(r.gating.length, 8);
+    assert.equal(r.gating.length, 6);
     assert.deepEqual(
       r.suppressed.map((s) => s.name),
       [
@@ -353,10 +382,8 @@ describe("evaluate — the real @lhci/cli fixture (#2388)", () => {
         "@lhci/utils",
         "@puppeteer/browsers",
         "extract-zip",
-        "js-yaml",
         "lighthouse",
         "puppeteer-core",
-        "tmp",
       ],
     );
   });
@@ -382,10 +409,17 @@ describe("evaluate — the real @lhci/cli fixture (#2388)", () => {
 
   test("dropping the tmp entry re-blocks @lhci/cli — EVERY reachable carrier must be cleared", () => {
     // @lhci/cli is reported for extract-zip AND tmp. Clearing one of two is not
-    // clearing the node; a transitive walk must not become a wildcard.
+    // clearing the node; a transitive walk must not become a wildcard. Uses the
+    // pre-#2397 tree because that is where @lhci/cli reached two carriers.
     const r = evaluate({
-      report: lhciReport(),
-      allowlist: { allow: realEntries.filter((e) => e.package !== "tmp") },
+      report: lhciReportBefore2397(),
+      allowlist: {
+        allow: [
+          entry("GHSA-jmr9-qjv8-65gv", "extract-zip"),
+          entry("GHSA-8cvf-q4jm-h6q8", "js-yaml"),
+          entry("GHSA-h67p-54hq-rp68", "js-yaml"),
+        ],
+      },
       workspace: ".",
       today: TODAY,
     });
@@ -403,11 +437,7 @@ describe("evaluate — the real @lhci/cli fixture (#2388)", () => {
     const r = evaluate({
       report: lhciReport(),
       allowlist: {
-        allow: [
-          entry("GHSA-jmr9-qjv8-65gv", "extract-zip", { expires: "2026-01-01" }),
-          entry("GHSA-52f5-9888-hmc6", "tmp"),
-          entry("GHSA-8cvf-q4jm-h6q8", "js-yaml"),
-        ],
+        allow: [entry("GHSA-jmr9-qjv8-65gv", "extract-zip", { expires: "2026-01-01" })],
       },
       workspace: ".",
       today: TODAY,
@@ -505,3 +535,145 @@ describe("evaluate — the over-suppression direction (#2388)", () => {
 });
 
 export { lhciReport, adv, entry, TODAY };
+
+describe("evaluate — every advisory id needs its own entry (#2397)", () => {
+  const twoOnOneNode = () => ({
+    vulnerabilities: {
+      tmp: {
+        name: "tmp",
+        severity: "high",
+        via: [adv("GHSA-52f5-9888-hmc6"), adv("GHSA-ph9p-34f9-6g65")],
+        effects: [],
+      },
+    },
+  });
+
+  test("(surfaced) a second advisory does NOT ride in on its neighbour's entry", () => {
+    // The live case this ticket was filed for: `tmp` carried an allowlisted LOW
+    // advisory and an unreviewed HIGH one. Only high/critical gate, so the node
+    // was in the gating set BECAUSE of the un-allowlisted one — and the ANY-match
+    // cleared it anyway, on the strength of an entry for the advisory that was
+    // not the problem.
+    const r = evaluate({
+      report: twoOnOneNode(),
+      allowlist: { allow: [entry("GHSA-52f5-9888-hmc6", "tmp")] },
+      workspace: ".",
+      today: TODAY,
+    });
+    assert.equal(r.failed, true);
+    assert.deepEqual(
+      r.blocked.map((b) => b.name),
+      ["tmp"],
+    );
+  });
+
+  test("(surfaced) the failure names the UNJUSTIFIED id, not the whole list", () => {
+    // Reporting all ids would leave the new advisory hiding among its
+    // allowlisted neighbours — the same concealment, one layer out.
+    const r = evaluate({
+      report: twoOnOneNode(),
+      allowlist: { allow: [entry("GHSA-52f5-9888-hmc6", "tmp")] },
+      workspace: ".",
+      today: TODAY,
+    });
+    assert.deepEqual(r.blocked[0].unmatched, ["GHSA-ph9p-34f9-6g65"]);
+    assert.deepEqual(r.blocked[0].ids, ["GHSA-52f5-9888-hmc6", "GHSA-ph9p-34f9-6g65"]);
+  });
+
+  test("both ids allowlisted → suppressed, and BOTH entries are credited", () => {
+    // The stale-report half. Under the ANY-match this was a live bug: only the
+    // first matching entry was credited, so the second read as "no longer
+    // matches ... It can be removed" — advice which, if followed, would have
+    // deleted a live justification while the node still passed on its sibling.
+    // `image-size` carries two GHSAs and hit exactly this.
+    const r = evaluate({
+      report: twoOnOneNode(),
+      allowlist: {
+        allow: [entry("GHSA-52f5-9888-hmc6", "tmp"), entry("GHSA-ph9p-34f9-6g65", "tmp")],
+      },
+      workspace: ".",
+      today: TODAY,
+    });
+    assert.equal(r.failed, false);
+    assert.deepEqual(
+      r.suppressed.map((s) => s.name),
+      ["tmp"],
+    );
+    assert.deepEqual(r.stale, [], "neither entry should read as removable");
+  });
+
+  test("a partially-covered BLOCKED node does not report its live entry as removable", () => {
+    // Caught by a live positive control, not by a unit test: with one of
+    // image-size's two real entries removed, the gate blocked correctly AND
+    // told you to delete the remaining one. A blocked node still has to credit
+    // whatever genuinely matched, or the stale report invites you to throw away
+    // a justification you still need.
+    const r = evaluate({
+      report: twoOnOneNode(),
+      allowlist: { allow: [entry("GHSA-52f5-9888-hmc6", "tmp")] },
+      workspace: ".",
+      today: TODAY,
+    });
+    assert.equal(r.failed, true);
+    assert.deepEqual(r.stale, [], "the matching entry must not read as removable");
+  });
+
+  test("one of two covering entries EXPIRED expires the whole node", () => {
+    // A node is suppressed only while every justification holding it up is
+    // live; a lapsed entry must withdraw the cover it was providing.
+    const r = evaluate({
+      report: twoOnOneNode(),
+      allowlist: {
+        allow: [
+          entry("GHSA-52f5-9888-hmc6", "tmp"),
+          entry("GHSA-ph9p-34f9-6g65", "tmp", { expires: "2026-01-01" }),
+        ],
+      },
+      workspace: ".",
+      today: TODAY,
+    });
+    assert.equal(r.failed, true);
+    assert.deepEqual(
+      r.expired.map((e) => e.name),
+      ["tmp"],
+    );
+    assert.equal(r.expired[0].entry.ghsa, "GHSA-ph9p-34f9-6g65");
+  });
+
+  test("the package-name fallback is GONE — naming the package no longer suppresses", () => {
+    // This was the widest surface in the matcher: an entry matching by name
+    // cleared whatever that package carried, forever. It is how the js-yaml
+    // entry silently absorbed three advisories after the feed re-issued them
+    // under new ids.
+    const r = evaluate({
+      report: {
+        vulnerabilities: {
+          "js-yaml": { name: "js-yaml", severity: "high", via: [adv("GHSA-h67p-54hq-rp68")] },
+        },
+      },
+      allowlist: { allow: [entry("GHSA-8cvf-q4jm-h6q8", "js-yaml")] },
+      workspace: ".",
+      today: TODAY,
+    });
+    assert.equal(r.failed, true, "an entry naming the package must not cover a different advisory");
+    assert.deepEqual(r.blocked[0].unmatched, ["GHSA-h67p-54hq-rp68"]);
+  });
+
+  test("a path node is still cleared by its carrier, with no name entry involved", () => {
+    // Dropping the name clause must not re-break #2388: a path node carries no
+    // ids of its own and is cleared purely by the carriers it reaches.
+    const r = evaluate({
+      report: {
+        vulnerabilities: {
+          parent: { name: "parent", severity: "high", via: ["child"] },
+          child: { name: "child", severity: "high", via: [adv("GHSA-child")] },
+        },
+      },
+      allowlist: { allow: [entry("GHSA-child", "child")] },
+      workspace: ".",
+      today: TODAY,
+    });
+    assert.equal(r.failed, false);
+    assert.deepEqual(r.suppressed.map((s) => s.name).sort(), ["child", "parent"]);
+  });
+});
