@@ -1,0 +1,107 @@
+name: Audit watch
+
+# #2391 — the NON-blocking half of the npm-audit split.
+#
+# `npm audit` reads a LIVE advisory feed, so an advisory published by GitHub at
+# any moment used to red every open PR at once — twice in two days on branches
+# that changed no package.json and no lockfile (#2387, #2390). A blocking gate
+# should answer "did THIS change make things worse?"; the live feed answers "is
+# the world, right now, in a state npm dislikes?", which is the same answer on
+# every branch simultaneously and changes without anybody touching the repo.
+#
+# So ci.yml's blocking gate (scripts/audit-gate.mjs) now only fails a PR whose
+# diff could have moved the dependency tree. This workflow is where the rest
+# lands, so nothing is lost — only moved off the merge queue:
+#
+#   ambient-report (Job B) — the whole-tree gate against main, reported on a
+#     rolling Forgejo issue. Note that ci.yml's `notify-main-red` did NOT cover
+#     this: it fires only when lint-typecheck / test / smoke FAIL, and the audit
+#     is advisory on main (exit 0), so lint-typecheck stayed green and the
+#     rolling issue never opened. This job closes that gap.
+#
+#   fix-watch (Job C) — for every scripts/audit-allowlist.json entry, ask the
+#     npm registry whether a fixed version has been published, and say so on the
+#     entry's tracked issue WHILE THE ENTRY IS STILL SUPPRESSING. The two
+#     existing mechanisms cannot: `expires` is a deadline that fires regardless
+#     of upstream, and the stale-entry NOTE only notices cleanup that already
+#     happened.
+#
+# All the logic lives in unit-tested scripts (scripts/ci/audit-watch*.mjs,
+# scripts/ci/audit-fix-watch*.mjs, over scripts/audit-gate-core.mjs). This YAML
+# is deliberately near-trivial, because workflow YAML is the part that cannot be
+# exercised locally (#842).
+#
+# NEITHER JOB CAN GO RED. Both scripts catch every error and exit 0 — a
+# reporting job that fails is just a second thing to fix. The signal is the
+# issue they file.
+#
+# No `npm ci`: `npm audit --json` resolves the tree from the lockfile and asks
+# the registry, so a bare checkout is enough (verified 2026-08-14 against the
+# root workspace). That keeps a daily job off the Pi's install path entirely.
+
+on:
+  workflow_dispatch:
+  schedule:
+    # 08:00 UTC (4am ET) — after nightly-deploy's 06:00 gate, so it audits the
+    # tree that actually shipped. Scheduled runs only fire from the DEFAULT
+    # branch's copy of this file, so the cron is observable only after merge; a
+    # branch prove uses workflow_dispatch (#842).
+    - cron: "0 8 * * *"
+
+# One at a time. Two overlapping runs would race on the same rolling issue and
+# could file a duplicate.
+concurrency:
+  group: audit-watch
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  ambient-report:
+    name: Ambient advisories against main
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Use Node 22
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "22"
+
+      - name: Audit every workspace and update the rolling issue
+        env:
+          FORGEJO_TOKEN: ${{ secrets.FORGEJO_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
+          API_URL: ${{ github.api_url }}
+          REPO: ${{ github.repository }}
+          # QUOTED deliberately: in an unquoted YAML scalar ` #` opens a comment,
+          # so `run #${{ … }}` parses as the bare string "run" and the run
+          # number is silently discarded.
+          RUN_LABEL: "run #${{ github.run_number }}"
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_number }}
+          SHA: ${{ github.sha }}
+        run: node scripts/ci/audit-watch.mjs
+
+  fix-watch:
+    name: Upstream fixes for allowlisted advisories
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Use Node 22
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "22"
+
+      - name: Report published fixes on each allowlist entry's tracked issue
+        env:
+          FORGEJO_TOKEN: ${{ secrets.FORGEJO_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
+          API_URL: ${{ github.api_url }}
+          REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_number }}
+        run: node scripts/ci/audit-fix-watch.mjs

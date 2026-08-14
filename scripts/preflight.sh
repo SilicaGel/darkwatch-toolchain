@@ -137,9 +137,18 @@ set -uo pipefail
 # hash bump only. NOTE: compute the hash with `node
 # scripts/ci/workflow-hash.mjs`, not a raw shasum — the guard normalises
 # image digests out first (#2333).)
+# (Reconciled 2026-08-14 (#2391): COMMENTS ONLY in ci.yml — the three "Security
+# audit" steps are byte-identical, and audit-gate.mjs became diff-aware by
+# self-detecting GITHUB_EVENT_NAME / GITHUB_EVENT_PATH rather than by any
+# workflow change. The other edit corrects `notify-main-red`, whose header
+# claimed to surface ambient audit regressions when it fires only on a FAILED
+# gate — the audit is advisory on main, so it never did. That coverage now
+# lives in the new .forgejo/workflows/audit-watch.yml. No check below moved —
+# hash bump only. NOTE: compute the hash with `node
+# scripts/ci/workflow-hash.mjs`, not a raw shasum (#2333).)
 # (Previously reconciled 2026-07-19, #1736 Task 4: WT no-raw-color guard.)
 # (Previously reconciled 2026-07-14, #1360/#1701: smoke spec list.)
-EXPECTED_CI_HASH="22d4ab8ba611f090019a2a1987ac902baea3f64f82981d5600f0756469715cf9"
+EXPECTED_CI_HASH="fd7c4052866a966e65e5d3fd3a5839d756dbbdb0c5d5006585eb4cf39d33efc8"
 
 # #2336 — the `test` job MOVED from ci.yml to its own reusable workflow so the
 # nightly can call it too. The guard below hashed only ci.yml, so without this

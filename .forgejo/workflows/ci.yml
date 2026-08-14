@@ -330,6 +330,17 @@ jobs:
       # Gating it means a PR that adds a vulnerable dev tool says so at PR time,
       # which is the whole point of the gate; genuinely unfixable ones go in the
       # allowlist with an expiry, as tmp and js-yaml now are.
+      #
+      # #2391 — audit-gate.mjs is now DIFF-AWARE on `pull_request`, with no
+      # change to these steps. It self-detects the event from GITHUB_EVENT_NAME
+      # / GITHUB_EVENT_PATH, fetches the base branch tip and, when the diff
+      # touches no package.json, no lockfile and not the allowlist, reports
+      # findings as ::warning:: and exits 0 — because an advisory the live feed
+      # published mid-PR is equally true of the base, so the PR did not cause
+      # it. A PR that DOES touch dependencies still hard-fails here, and every
+      # error path (no event file, failed fetch, failed diff) runs the full
+      # blocking gate. Ambient advisories are reported by the scheduled
+      # .forgejo/workflows/audit-watch.yml, not dropped.
       - name: Security audit (root)
         run: |
           if node scripts/audit-gate.mjs .; then exit 0; fi
@@ -1090,10 +1101,17 @@ jobs:
 
   # notify-main-red — #1270. On a push to main where a primary gate failed, open
   # (or comment on) a rolling Forgejo issue so a red main is surfaced immediately
-  # instead of found by chance. Because npm audit is advisory on main (a fresh
-  # advisory can't block a merge), this is also how an audit regression that
-  # slipped in on an unrelated merge gets attention. Self-contained: uses the
-  # repo token, no external channel.
+  # instead of found by chance. Self-contained: uses the repo token, no external
+  # channel.
+  #
+  # #2391 — this job does NOT cover ambient npm-audit advisories, and a comment
+  # here used to claim it did. It fires only when lint-typecheck / test / smoke
+  # FAIL; the audit is advisory on main, so audit-gate.mjs exits 0, the step
+  # warns, lint-typecheck stays green and nothing here ever ran. A fresh
+  # advisory against an unchanged main therefore opened no issue at all. That
+  # gap is now filled by the scheduled `ambient-report` job in
+  # .forgejo/workflows/audit-watch.yml, which runs the whole-tree gate against
+  # main on its own rolling issue.
   #
   # #2308 — deliberately NOT taught about tree-gate. When the gate skips the
   # three jobs their result is 'skipped', which is not 'failure', so this stays
@@ -1136,8 +1154,8 @@ jobs:
           MARKER = "<!-- ci-main-red -->"
           body = (f"{MARKER}\n\n\U0001f534 **main CI is red** — run [#{os.environ['RUN_NUMBER']}]({run_url})\n\n"
                   f"- Commit: `{os.environ['SHA'][:12]}`\n- Failed job(s): {', '.join(failed) or 'unknown'}\n\n"
-                  "_Auto-filed by ci.yml `notify-main-red` (#1270). npm audit is advisory on main, "
-                  "so this also flags a fresh-advisory regression that did not block the merge._")
+                  "_Auto-filed by ci.yml `notify-main-red` (#1270). Ambient npm-audit advisories "
+                  "are NOT reported here — see audit-watch.yml's rolling issue (#2391)._")
 
           # HTTP via curl, NOT urllib (#1654): forge.example.com is behind
           # Cloudflare, which fingerprint-blocks Python-urllib with a 403

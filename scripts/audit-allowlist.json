@@ -10,6 +10,10 @@
     "  - An entry that no longer matches any advisory is reported as stale (warning),",
     "    so cleanup is prompted once upstream ships a fix.",
     "",
+    "  - A node reported ONLY because it depends on something vulnerable (a path node",
+    "    with no GHSA of its own) is cleared by the entry naming the package that",
+    "    actually CARRIES the advisory, however deep the chain (#2388). Never add an",
+    "    entry naming a package that is not itself vulnerable.",
     "Only ever allowlist something that is genuinely not exploitable in this app.",
     "'It is inconvenient to upgrade' is not a justification."
   ],
@@ -44,31 +48,7 @@
       "workspaces": ["."],
       "issue": 2159,
       "expires": "2026-11-30",
-      "reason": "Dev-only, and NO upstream fix exists. extract-zip@2.0.1 is the LATEST published release (2023) and the advisory range is <=2.0.1, so there is nothing to upgrade or override to. Single path into this repo: @lhci/cli@0.15.1 -> lighthouse -> puppeteer-core -> @puppeteer/browsers -> extract-zip, where it unpacks browser archives fetched over HTTPS from Google's CDN -- not attacker-supplied zips, which is what the symlink-traversal advisory needs. npm's fixAvailable is @lhci/cli@0.1.0 flagged isSemVerMajor: a DOWNGRADE to a 2019-era Lighthouse CI that would break the lighthouse jobs to silence this -- the same trap as the tmp and js-yaml entries above. The root workspace has zero runtime dependencies (\"dependencies\": {}), so nothing here reaches the production image or a user; this code runs only when Lighthouse CI does. Clearing it properly means dropping @lhci/cli -- tracked in the issue above."
-    },
-    {
-      "ghsa": "GHSA-jmr9-qjv8-65gv",
-      "package": "@puppeteer/browsers",
-      "workspaces": ["."],
-      "issue": 2159,
-      "expires": "2026-11-30",
-      "reason": "PATH NODE ONLY -- @puppeteer/browsers carries no advisory of its own. It is reported by `npm audit` solely because it depends on extract-zip, and the chain ends at extract-zip / GHSA-jmr9-qjv8-65gv, whose entry above carries the real justification (dev-only, no upstream fix exists). A separate entry is needed for each link because audit-gate.mjs resolves the `via` chain only ONE hop, so a deep chain cannot be cleared by a single entry -- that limitation is filed as #2388. Remove all four together when the extract-zip entry goes."
-    },
-    {
-      "ghsa": "GHSA-jmr9-qjv8-65gv",
-      "package": "puppeteer-core",
-      "workspaces": ["."],
-      "issue": 2159,
-      "expires": "2026-11-30",
-      "reason": "PATH NODE ONLY -- puppeteer-core carries no advisory of its own. It is reported by `npm audit` solely because it depends on @puppeteer/browsers, and the chain ends at extract-zip / GHSA-jmr9-qjv8-65gv, whose entry above carries the real justification (dev-only, no upstream fix exists). A separate entry is needed for each link because audit-gate.mjs resolves the `via` chain only ONE hop, so a deep chain cannot be cleared by a single entry -- that limitation is filed as #2388. Remove all four together when the extract-zip entry goes."
-    },
-    {
-      "ghsa": "GHSA-jmr9-qjv8-65gv",
-      "package": "lighthouse",
-      "workspaces": ["."],
-      "issue": 2159,
-      "expires": "2026-11-30",
-      "reason": "PATH NODE ONLY -- lighthouse carries no advisory of its own. It is reported by `npm audit` solely because it depends on puppeteer-core, and the chain ends at extract-zip / GHSA-jmr9-qjv8-65gv, whose entry above carries the real justification (dev-only, no upstream fix exists). A separate entry is needed for each link because audit-gate.mjs resolves the `via` chain only ONE hop, so a deep chain cannot be cleared by a single entry -- that limitation is filed as #2388. Remove all four together when the extract-zip entry goes."
+      "reason": "Dev-only, and NO upstream fix exists. extract-zip@2.0.1 is the LATEST published release (2023) and the advisory range is <=2.0.1, so there is nothing to upgrade or override to. Single path into this repo: @lhci/cli@0.15.1 -> lighthouse -> puppeteer-core -> @puppeteer/browsers -> extract-zip, where it unpacks browser archives fetched over HTTPS from Google's CDN -- not attacker-supplied zips, which is what the symlink-traversal advisory needs. npm's fixAvailable is @lhci/cli@0.1.0 flagged isSemVerMajor: a DOWNGRADE to a 2019-era Lighthouse CI that would break the lighthouse jobs to silence this -- the same trap as the tmp and js-yaml entries above. The root workspace has zero runtime dependencies (\"dependencies\": {}), so nothing here reaches the production image or a user; this code runs only when Lighthouse CI does. Clearing it properly means dropping @lhci/cli -- tracked in the issue above. This ONE entry now covers the whole chain: since #2388 audit-gate.mjs walks the `via` chain transitively, so lighthouse, puppeteer-core and @puppeteer/browsers -- none of which carry an advisory of their own -- are cleared by this entry instead of by three padding entries naming non-vulnerable packages."
     },
     {
       "ghsa": "GHSA-w3rx-r6r6-pgpr",
