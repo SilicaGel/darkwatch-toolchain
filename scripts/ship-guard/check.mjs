@@ -1,31 +1,34 @@
 // ship-guard/check.mjs — #1116 blocking guard for PRs that resolve issues but
-// skip the ship housekeeping (CHANGELOG entry + `## Test plans` block).
+// skip the ship housekeeping (changelog fragment + `## Test plans` block).
 //
 // The contract this enforces is the locked format produced by the `/ship`
 // skill (`.claude/skills/ship/SKILL.md`) and consumed by `qa-check`:
 //   - each resolved issue gets a standalone `Ready #N` line in the PR body;
-//   - the PR adds an entry to `docs/CHANGELOG.md`;
+//   - ONLY a release PR (title `release: …`) may touch docs/CHANGELOG.md
+//     (#2364) — every other PR that resolves an issue instead adds a fragment
+//     under docs/changelog.d/, unless its title carries [no-changelog];
 //   - the PR body has a `## Test plans` section with a `### #N` block per Ready.
-//   - the PR's changelog top entry is a NEWER version than origin/main's top
-//     entry (#2165) — the mechanical proof that Step 2.5's
-//     `git merge origin/main` + `node scripts/changelog-normalize.mjs` ran
+//   - a release PR's collated changelog top entry is a NEWER version than
+//     origin/main's top entry, and its headings are strictly descending
+//     (#2165) — the mechanical proof that the collate/normalize step ran
 //     against CURRENT main, not a stale local copy.
 //
-// If those four line up, the PR is ship-clean. This is a DUMB presence/order
+// If those line up, the PR is ship-clean. This is a DUMB presence/order
 // check, not a semantic review — whether the changelog wording is good, or
 // the test plan is reachable, stays a human / qa-check concern (the issue's
 // explicit scope boundary). Keep the matchers string/regex based and in sync
 // with the skill, so the guard never drifts from what `/ship` actually writes.
 //
 // #2165 background: two branches that each add a new top entry to
-// docs/CHANGELOG.md will both guess the same next version. The git conflict
-// catches that when Step 2.5 merges main, and scripts/changelog-normalize.mjs
-// assigns the versions once a human has kept both entries. THIS check is the
-// CI-side backstop for the case no local step can see: main advancing AFTER
-// Step 2.5 ran, in the window before push. It is deliberately a second,
-// independent layer rather than a substitute for the local one — see
-// parseChangelogVersion, reused unmodified from scripts/app-version.mjs so
-// there's exactly one "what version is this changelog's top entry" parser.
+// docs/CHANGELOG.md will both guess the same next version. #2364 mostly
+// retires this exposure for feature PRs (they no longer touch the file at
+// all), but a release PR still collates fragments into a new top entry, so
+// the same version-collision risk applies there — see changelogVersionAdvanced
+// and firstDescendingViolation below. It is deliberately a second, independent
+// layer rather than a substitute for the local `changelog-collate.mjs` /
+// `changelog-normalize.mjs` run — see parseChangelogVersion / parseHeading,
+// reused unmodified from scripts/app-version.mjs so there's exactly one
+// "what version is this changelog heading" parser.
 //
 // The runner (below `decide`) reads the PR body/title from the Forgejo event
 // payload via env (PR_BODY / PR_TITLE), and the changed-file list from
@@ -34,13 +37,53 @@
 // coverage-comment / dead-code-comment script style (Node built-ins only).
 
 import { execFileSync } from "node:child_process";
-import { parseChangelogVersion } from "../app-version.mjs";
+import { parseChangelogVersion, parseHeading } from "../app-version.mjs";
 
 export const CHANGELOG_PATH = "docs/CHANGELOG.md";
 
 // Escape hatch: a `[skip-ship-guard]` token anywhere in the PR TITLE passes the
 // guard. Mirrors the repo's other gates ([allow-dead-code], [allow-deps]).
 export const SKIP_MARKER = "[skip-ship-guard]";
+
+// #2364 — feature PRs write a fragment instead of editing docs/CHANGELOG.md.
+export const FRAGMENT_DIR = "docs/changelog.d/";
+
+// Exemption for a PR that genuinely warrants no changelog entry. A TITLE token,
+// not a body marker, and deliberately so: a PR body that DOCUMENTS the marker
+// contains it — at line start, inside a code fence — so even an anchored body
+// match would exempt the PR that documents it. This repo has shipped that bug
+// three times. Matches the repo's other title tokens ([allow-dead-code] etc).
+export const NO_CHANGELOG_MARKER = "[no-changelog]";
+
+// Release PRs are the ONLY ones allowed to touch docs/CHANGELOG.md. Detected
+// from the title prefix `/release` writes — NOT from head.ref, which reads as
+// `refs/pull/<n>/head` most of the time (#2084).
+export const RELEASE_TITLE_RE = /^\s*release:\s/i;
+
+/** True when the PR title marks this as a release PR. */
+export function isReleasePr(title) {
+  return typeof title === "string" && RELEASE_TITLE_RE.test(title);
+}
+
+/**
+ * The changelog fragments this PR adds (`.gitkeep` doesn't count). Only a
+ * file directly inside `docs/changelog.d/` counts — a further `/` after the
+ * prefix means a subdirectory, and `readFragments` in
+ * scripts/changelog-collate.mjs uses a non-recursive `readdirSync`, so a
+ * subdirectory fragment is never read there. This function and that one must
+ * agree on what a fragment is, or a fragment can pass this check and then be
+ * silently dropped at collation with no warning anywhere — the exact failure
+ * this function's test guards against.
+ */
+export function fragmentsAdded(changedFiles) {
+  const list = changedFiles instanceof Set ? [...changedFiles] : (changedFiles ?? []);
+  return list.filter((f) => {
+    if (typeof f !== "string") return false;
+    const trimmed = f.trim();
+    if (!trimmed.startsWith(FRAGMENT_DIR) || !trimmed.endsWith(".md")) return false;
+    return !trimmed.slice(FRAGMENT_DIR.length).includes("/");
+  });
+}
 
 // A standalone `Ready #N` line. `/ship` writes these one-per-line in the PR
 // body (NOT `Closes`, intentionally — see the skill). Anchored to line start
@@ -103,6 +146,49 @@ export function compareBareVersions(a, b) {
 }
 
 /**
+ * Whether the TOP TWO headings in a changelog are out of order — i.e. the top
+ * one is not strictly newer than the one directly below it. Returns
+ * `{ above, below }` on a violation, null when the top pair is fine (or there
+ * are fewer than two headings to compare).
+ *
+ * DELIBERATELY the top pair ONLY — this is an explicit comparison of
+ * `versions[0]` and `versions[1]`, not a scan of the file. A release PR can
+ * only ever have made ONE heading newly wrong: the one it just collated at
+ * the top. Everything below that is settled history from a previous,
+ * already-accepted release, and is not this function's to re-litigate.
+ * docs/CHANGELOG.md has a real, permanent, pre-#2364 anomaly proving why that
+ * matters: two `v0.20.0` headings at 2026-04-18 (lines ~8674/8683), deep in
+ * settled history, which `fixVersionCollisions` in
+ * scripts/changelog-normalize-core.mjs also documents by name and refuses to
+ * touch. Compare more than the top pair and this function would trip on that
+ * anomaly on EVERY future release PR forever, with no fix possible
+ * (`changelog-normalize.mjs` won't touch that zone either) short of
+ * `[skip-ship-guard]` — which also disables check (0). See the "does not flag
+ * a deep pre-existing anomaly" test below; that's the whole point of the
+ * bound, unproven without it. Do not "fix" this into a loop over every pair —
+ * that reads as more thorough but silently restores the unbounded scan this
+ * comment exists to warn against.
+ *
+ * Deliberately built from `parseHeading` (already imported from
+ * app-version.mjs) and this file's own `compareBareVersions`, NOT from
+ * changelog-normalize-core.mjs — see the sparse-checkout note in
+ * .forgejo/workflows/ship-guard.yml. Only the version ORDER is checked here;
+ * blank-line spacing is cosmetic and stays the local
+ * `changelog-normalize.mjs` run's job.
+ */
+export function firstDescendingViolation(contents) {
+  if (typeof contents !== "string") return null;
+  const versions = contents
+    .split("\n")
+    .map((line) => parseHeading(line))
+    .filter(Boolean)
+    .map((h) => h.version.join("."));
+  if (versions.length < 2) return null;
+  const [top, next] = versions;
+  return compareBareVersions(top, next) <= 0 ? { above: top, below: next } : null;
+}
+
+/**
  * #2165 — the PR's changelog top entry must be a strictly newer version than
  * origin/main's top entry. `prContents`/`mainContents` are the raw file text
  * of docs/CHANGELOG.md on each side (undefined/null means "couldn't read it",
@@ -128,19 +214,57 @@ export function decide({ body, title, changedFiles, changelogVersions }) {
     return { ok: true, reasons: [], skipped: true, ready: [] };
   }
 
-  const ready = [...parseReadyNumbers(body)];
-
-  // No `Ready #N` lines → pure-chore PR, nothing to enforce.
-  if (ready.length === 0) {
-    return { ok: true, reasons: [], skipped: false, ready: [] };
-  }
-
+  const release = isReleasePr(title);
   const reasons = [];
 
-  // (a) changelog must be touched.
-  if (!changelogTouched(changedFiles)) {
+  // (0) #2364 — only a release PR may touch docs/CHANGELOG.md. This is the
+  // check that keeps two PRs from colliding on the file's top anchor, so it
+  // applies to EVERY PR, Ready lines or not.
+  if (!release && changelogTouched(changedFiles)) {
     reasons.push(
-      `PR has Ready line(s) (${ready.map((n) => `#${n}`).join(", ")}) but does not touch ${CHANGELOG_PATH} — add a changelog entry.`,
+      `This PR edits ${CHANGELOG_PATH}, which only a release PR may do (#2364). ` +
+        `Add a fragment in ${FRAGMENT_DIR} instead — see the update-changelog skill.`,
+    );
+  }
+
+  // (c) #2165, now a RELEASE-PR check: the collated entry must be newer than
+  // main's top entry, and the file must still normalize clean. Feature PRs no
+  // longer set versions, so neither can apply to them. Runs BEFORE the
+  // chore-PR early return, because a release PR has no `Ready #N` lines.
+  if (release && changelogVersions) {
+    const { ok: advanced, prVersion, mainVersion } = changelogVersionAdvanced(changelogVersions);
+    if (!advanced) {
+      reasons.push(
+        `docs/CHANGELOG.md's top entry (v${prVersion}) is not newer than origin/main's (v${mainVersion}) — ` +
+          `merge origin/main and re-run \`node scripts/changelog-collate.mjs\`, then re-push.`,
+      );
+    }
+    const outOfOrder = firstDescendingViolation(changelogVersions.prContents);
+    if (outOfOrder) {
+      reasons.push(
+        `docs/CHANGELOG.md's headings are not strictly descending — v${outOfOrder.above} sits above ` +
+          `v${outOfOrder.below}. Run \`node scripts/changelog-normalize.mjs\` and re-push.`,
+      );
+    }
+  }
+
+  const ready = [...parseReadyNumbers(body)];
+
+  // No `Ready #N` lines → pure-chore PR, nothing further to enforce.
+  if (ready.length === 0) {
+    return { ok: reasons.length === 0, reasons, skipped: false, ready: [] };
+  }
+
+  // (a) #2364 — a Ready PR must add a fragment, unless it's a release PR or
+  // carries the title exemption. Replaces the old "must touch CHANGELOG" rule.
+  if (
+    !release &&
+    !(typeof title === "string" && title.includes(NO_CHANGELOG_MARKER)) &&
+    fragmentsAdded(changedFiles).length === 0
+  ) {
+    reasons.push(
+      `PR has Ready line(s) (${ready.map((n) => `#${n}`).join(", ")}) but adds no fragment in ` +
+        `${FRAGMENT_DIR} — add one, or put ${NO_CHANGELOG_MARKER} in the PR title.`,
     );
   }
 
@@ -153,21 +277,6 @@ export function decide({ body, title, changedFiles, changelogVersions }) {
     );
   }
 
-  // (c) #2165 — the changelog's top version must have moved past main's.
-  // Only checked when the caller supplied both file contents (the runner
-  // fails open below if either git read fails) and only when the changelog
-  // itself is the reason we'd know to look — a PR that already failed (a)
-  // has no changelog diff to compare, so skip this check in that case.
-  if (changelogVersions && changelogTouched(changedFiles)) {
-    const { ok: advanced, prVersion, mainVersion } = changelogVersionAdvanced(changelogVersions);
-    if (!advanced) {
-      reasons.push(
-        `docs/CHANGELOG.md's top entry (v${prVersion}) is not newer than origin/main's (v${mainVersion}) — ` +
-          `merge origin/main and run \`node scripts/changelog-normalize.mjs\` (#2165), then re-push.`,
-      );
-    }
-  }
-
   return { ok: reasons.length === 0, reasons, skipped: false, ready };
 }
 
@@ -176,9 +285,21 @@ export function decide({ body, title, changedFiles, changelogVersions }) {
 // the changed-file list from git, then prints the verdict and exits 0/1.
 // ---------------------------------------------------------------------------
 
+// maxBuffer: docs/CHANGELOG.md is >1MB (over a million bytes as of #2364) and
+// `git show HEAD:docs/CHANGELOG.md` returns the WHOLE file on stdout. Node's
+// execFileSync default maxBuffer is 1MiB, so without this the read throws
+// ENOBUFS — which the try/catch below silently swallows into `null`, which
+// `gitChangelogVersions` turns into `changelogVersions: undefined`, which
+// makes decide()'s `release && changelogVersions` guard false — i.e. check
+// (c) silently NEVER RUNS in production, no matter how broken a release PR's
+// changelog is. Matches the other 64MB call sites in this repo (e.g.
+// scripts/audit-gate.mjs, scripts/coverage-comment/build-comment.mjs). Do not
+// "tidy" this away — it is load-bearing, see check.test.mjs's >1MiB fixture.
+const GIT_MAX_BUFFER = 64 * 1024 * 1024;
+
 function tryGit(args) {
   try {
-    return execFileSync("git", args, { encoding: "utf8" });
+    return execFileSync("git", args, { encoding: "utf8", maxBuffer: GIT_MAX_BUFFER });
   } catch {
     return null;
   }
@@ -244,25 +365,46 @@ function main() {
     console.log(`ship-guard: ${SKIP_MARKER} present in PR title — skipped.`);
     process.exit(0);
   }
+
+  // #2364 — checks (0)/(c) can fail a PR with NO `Ready #N` lines at all (a
+  // non-release PR that edits docs/CHANGELOG.md directly, or — the common
+  // case — a release PR itself, which by design carries no Ready line and
+  // whose only exposure IS check (c)). So `result.ok` must be tested before
+  // `result.ready.length === 0`, not after: the old order let a failing
+  // Ready-less PR print "OK" and exit 0, silently disabling both checks.
+  if (!result.ok) {
+    console.error("ship-guard: FAIL.\n");
+    for (const r of result.reasons) console.error(`  • ${r}`);
+    // M1 — the remedy differs by PR shape: a release PR's failures are
+    // release-collation problems (each reason already names the exact
+    // command to re-run), never a `/ship`-skill problem, since `/ship` never
+    // touches a release PR. Telling every failing PR to run `/ship` was
+    // actively wrong for that case.
+    if (isReleasePr(title)) {
+      console.error(
+        "\nRelease-PR housekeeping: merge current origin/main, re-run\n" +
+          "`node scripts/changelog-collate.mjs` and `node scripts/changelog-normalize.mjs`, then re-push.\n" +
+          `Escape hatch for the rare legitimate case: put ${SKIP_MARKER} in the PR title.`,
+      );
+    } else {
+      console.error(
+        "\nRun the `/ship` skill (.claude/skills/ship/SKILL.md): it writes the changelog fragment and\n" +
+          "the `## Test plans` block (one `### #N` per `Ready #N`) that this guard checks for.\n" +
+          `Escape hatch for the rare legitimate case: put ${SKIP_MARKER} in the PR title.`,
+      );
+    }
+    process.exit(1);
+  }
+
   if (result.ready.length === 0) {
     console.log("ship-guard: no `Ready #N` lines — pure-chore PR, nothing to enforce. OK.");
     process.exit(0);
   }
-  if (result.ok) {
-    console.log(
-      `ship-guard: OK — Ready ${result.ready.map((n) => `#${n}`).join(", ")} each has a changelog entry + \`### #N\` test plan.`,
-    );
-    process.exit(0);
-  }
 
-  console.error("ship-guard: FAIL — this PR resolves issues but skips ship housekeeping.\n");
-  for (const r of result.reasons) console.error(`  • ${r}`);
-  console.error(
-    "\nRun the `/ship` skill (.claude/skills/ship/SKILL.md): it writes the CHANGELOG entry and the\n" +
-      "`## Test plans` block (one `### #N` per `Ready #N`) that this guard checks for.\n" +
-      `Escape hatch for the rare legitimate case: put ${SKIP_MARKER} in the PR title.`,
+  console.log(
+    `ship-guard: OK — Ready ${result.ready.map((n) => `#${n}`).join(", ")} each adds a changelog fragment + \`### #N\` test plan.`,
   );
-  process.exit(1);
+  process.exit(0);
 }
 
 const invokedDirectly =

@@ -1,5 +1,22 @@
 # ship — skill changelog
 
+## 1.7.0 — 2026-08-14 (#2364 changelog fragments)
+
+- **Step 2.5's hand-resolved changelog conflict is gone.** Feature PRs no
+  longer write to `docs/CHANGELOG.md` at all — `update-changelog` writes a
+  fragment to `docs/changelog.d/` instead, and `ship-guard` blocks any
+  non-release PR that touches the changelog directly. Two PRs writing two
+  different fragment filenames can't conflict, so there is nothing left to
+  reconcile in Step 2.5; the "keep both entries, ours on top" instruction and
+  the `changelog-normalize.mjs` run it depended on are both removed.
+- **Why removed, not just simplified:** the old resolution produced a corrupt
+  record when two sides held the *same* entry in two different states
+  (#2397, 2026-08-14) — this was a real failure, not a hypothetical one. The
+  #2165 fix (below) made the mechanical half of that resolution safe; #2364
+  removes the conflict surface itself.
+- Step 2 item 1 and Step 3's doc-staging list now point at
+  `docs/changelog.d/` instead of `docs/CHANGELOG.md`.
+
 ## 1.6.0 — 2026-08-11 (#2165 changelog collision fix)
 
 - **Step 2.5 still resolves the changelog conflict by hand — but no longer

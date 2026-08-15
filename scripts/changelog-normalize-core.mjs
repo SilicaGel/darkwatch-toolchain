@@ -19,6 +19,12 @@
 // Node built-ins only, mirrors the *-core.mjs pattern used by
 // scripts/ci/tree-gate-core.mjs etc. — no I/O here, see changelog-normalize.mjs
 // for the file-reading/writing CLI wrapper.
+//
+// #2364 UPDATE: feature PRs no longer edit this file at all — they drop a
+// fragment in docs/changelog.d/ and `/release` collates. This module is now a
+// RELEASE-PR check (`--check`, run by /release and by ship-guard on a release
+// PR) rather than a post-conflict repair tool. The logic is unchanged and still
+// correct; only who runs it, and when, has moved.
 
 import { parseHeading } from "./app-version.mjs";
 

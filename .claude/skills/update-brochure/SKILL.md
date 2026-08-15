@@ -1,8 +1,8 @@
 ---
 name: update-brochure
 description: Use when a user-facing feature is added, changed, or removed, or a new RPG system is added — keeps site/index.html and site/screenshots.js in sync with the app. Skip for backend-only changes.
-version: 1.0.0
-last_changed: 2026-07-05
+version: 1.1.0
+last_changed: 2026-08-14
 ---
 
 # update-brochure
@@ -43,8 +43,15 @@ Before picking a process, figure out what actually changed in this branch. Produ
 # Every client path touched in this branch
 git diff main...HEAD --stat -- client/
 
-# What the branch's new changelog entry says
-git diff main...HEAD -- docs/CHANGELOG.md | sed -n 's/^+//p' | head -40
+# What this branch's new changelog fragment(s) say — title + body only.
+# Frontmatter's `issues:`/`bump:` lines are YAML, not prose, so they're
+# dropped; only `title:` (re-labelled) and everything after the second `---`
+# are printed (#2364 — fragments replaced a direct docs/CHANGELOG.md diff).
+for f in $(git diff main...HEAD --name-only --diff-filter=A -- docs/changelog.d/); do
+  echo "=== $f ==="
+  awk '/^title:/{sub(/^title:[ \t]*/,""); print "Title: " $0; next}
+       /^---$/{n++; next} n>=2{print}' "$f"
+done | head -40
 ```
 
 ### B. Dispatch table — map changed paths to existing captures
@@ -103,12 +110,17 @@ This is the **manifest** the `--full-audit` should reconcile against; #130
 tracks automating this drift-detection. Until then, run a `--full-audit` to
 generate the missing captures + rows above so the brochure shows the whole app.
 
-### C. Use the changelog entry as a second signal
+### C. Use the fragment body as a second signal
 
-- `### Added` / `### New Features` → almost always need a new `.feature-row` (Feature added process)
-- `### Changed` / `### UX Polish` → likely need refreshed screenshots and possibly copy updates (Feature changed process)
-- `### Removed` → delete the corresponding row + capture + PNGs (Feature removed process)
-- `### Tech` / `### Performance` / `### Security` → usually **SKIP** (backend-only, nothing to capture)
+A fragment's body only ever uses the fixed section set from the
+`update-changelog` skill (#2364): `#### Added` / `#### Changed` / `#### Fixed`
+/ `#### Removed` / `#### Internal` — not the freer headings a hand-written
+CHANGELOG.md entry used to carry.
+
+- `#### Added` → almost always needs a new `.feature-row` (Feature added process)
+- `#### Changed` → likely needs refreshed screenshots and possibly copy updates (Feature changed process)
+- `#### Removed` → delete the corresponding row + capture + PNGs (Feature removed process)
+- `#### Fixed` / `#### Internal` → usually **SKIP** (bug fixes and internal changes rarely need a new capture — re-check if the fix visibly changed layout)
 
 ### D. Write the plan and confirm
 

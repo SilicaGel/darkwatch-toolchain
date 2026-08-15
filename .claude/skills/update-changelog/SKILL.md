@@ -1,84 +1,68 @@
 ---
 name: update-changelog
-description: Use when a feature has shipped, a bug has been fixed, or a feature has been removed — writes a new versioned entry in docs/CHANGELOG.md using semver rules and commits it.
-version: 1.2.0
+description: Use when a feature has shipped, a bug has been fixed, or a feature has been removed — writes a changelog fragment to docs/changelog.d/, which `/release` later collates into a versioned docs/CHANGELOG.md entry (#2364).
+version: 2.0.0
 last_changed: 2026-08-14
 ---
 
 # update-changelog
 
-Use this skill when a feature has shipped, a bug has been fixed, or a feature has been removed. It updates `docs/CHANGELOG.md` with a new versioned entry.
+Use this skill when a feature has shipped, a bug has been fixed, or a feature has been removed. It writes a changelog fragment to `docs/changelog.d/` — never `docs/CHANGELOG.md` directly, which only the `/release` skill may touch (#2364).
 
 ## Process
 
-1. Read `docs/CHANGELOG.md` — find the current latest version number (top `## YYYY-MM-DD — vX.Y.Z — title` entry). Note: you don't have to get this exactly right — if another PR merges the same guess first, `/ship`'s Step 2.5 (`scripts/changelog-normalize.mjs`, #2165) fixes the collision automatically, no hand edit needed.
+1. **Write a fragment, not a changelog entry.** Create
+   `docs/changelog.d/<issue>-<slug>.md`. Never edit `docs/CHANGELOG.md` —
+   `ship-guard` blocks a non-release PR that touches it (#2364).
 
 2. Check recent git history for context on what changed:
    ```bash
    git log --oneline -20
    ```
 
-3. Read `docs/ROADMAP.md` — check what moved to Completed since the last changelog entry
+3. Determine the bump — this is the ONE thing you must get right, because the
+   release takes the largest bump across all its fragments:
+   - **patch** — bug fixes, minor polish, no new user-facing features
+   - **minor** — new features or meaningful enhancements
+   - **major** — breaking changes or significant redesigns (rare)
 
-4. Determine the version bump:
-   - **Patch** (0.1.x → 0.1.x+1): bug fixes, minor UI polish, no new user-facing features
-   - **Minor** (0.x.0 → 0.x+1.0): new features or meaningful enhancements
-   - **Major** (x.0.0 → x+1.0.0): breaking changes or significant redesigns (rare)
-
-5. **Same-day grouping check.** Read the topmost entry's date. If it matches today's date AND no external release was cut between that entry and now, **prefer extending the existing entry** (append to its sections, bump its version, retitle if the scope broadened) over creating a new adjacent entry. Same-day cascades of `vX.Y.0 / vX.Y.1 / vX.Y.2` make the changelog hard to scan retrospectively and dilute the "what shipped in vX.Y" signal. Create a new entry only when:
-   - The work is conceptually separate from the existing same-day entry (different ticket, different surface), OR
-   - The existing entry has already **merged to main**. Merged is the moment
-     another branch can start building on that version number, so extending it
-     stops being free and starts guaranteeing a conflict about entry *identity*
-     rather than version numbers — two sides holding the same entry in two
-     states. `changelog-normalize.mjs` cannot detect that (it reconciles
-     numbers), and `/ship`'s "keep both entries, ours on top" resolution
-     actively points the wrong way: following it duplicates every bullet under
-     two headings. Extending an unmerged entry of your own costs nothing.
-
-   Otherwise extend in place.
-
-6. Check the `## [Unreleased]` section — if it has content, include those items in the new version entry (move them, don't duplicate). Write the new entry **above** the previous version, using today's date and the bumped version:
+4. Write the fragment:
 
    ```markdown
-   ## YYYY-MM-DD — v0.2.0 — Short user-facing title for what shipped
+   ---
+   title: Short user-facing title for what shipped
+   issues: [1234]
+   bump: patch
+   ---
 
-   Free-form prose lead-in (optional), then `### Added` / `### Changed` /
-   `### Fixed` / `### Removed` sections as they apply — see recent entries in
-   `docs/CHANGELOG.md` for the actual long-form, user-voiced style this
-   project uses; the skeleton below is the section-header shape only.
+   Free-form prose lead-in, then `#### Added` / `#### Changed` / `#### Fixed` /
+   `#### Removed` / `#### Internal` sections as they apply.
 
-   ### Added
-   - Feature name — brief description of what it does for users
+   #### Fixed
 
-   ### Changed
-   - What changed and why
-
-   ### Fixed
-   - Bug description — what was wrong and what's right now
-
-   ### Removed
-   - What was removed and why
+   - **What was wrong** (#1234): what's right now, and why it mattered.
    ```
 
-   Only include sections that apply. Skip empty sections. **The exact version
-   number you write here is a best guess, not load-bearing** — #2165: if
-   another PR merges the same guess first, the `git merge origin/main` in
-   `/ship` Step 2.5 conflicts (deliberately — this file is a record, so it
-   fails loudly), you keep both entries with yours on top, and
-   `node scripts/changelog-normalize.mjs` assigns the versions. Nobody
-   renumbers by hand. Get the bump TYPE (patch/minor/major) right; the number
-   itself is disposable.
+   **Headings are `####`, not `###`.** The fragment body is placed verbatim
+   under a `###` sub-heading that collation generates from `title`, so the body
+   is authored at the depth it will occupy. Collation never rewrites body text —
+   that is what makes it impossible for the mechanism to garble the record.
 
-7. Commit (skip this step if being called from the `ship` skill — ship handles the coordinated commit):
+   See recent entries in `docs/CHANGELOG.md` for the long-form, user-voiced
+   style this project uses. Write for users, not developers.
+
+5. **There is no version number to guess and no same-day grouping decision to
+   make.** The version is assigned once, at collation, and grouping is what
+   collation does. Two PRs on the same day write two fragments; they become two
+   sub-entries of one release.
+
+6. Commit (skip if being called from `/ship` — ship handles the coordinated commit):
    ```bash
-   git add docs/CHANGELOG.md
-   git commit -m "chore: changelog v0.2.0"  # use the actual new version number
+   git add docs/changelog.d/
+   git commit -m "docs: changelog fragment for #1234"
    ```
 
 ## Versioning rules
 
 - Write entries for users, not developers ("Added initiative tracker" not "Added registerInitiativeHandlers to socket.ts")
-- One entry per version bump — don't create multiple entries for the same version
-- The `[Unreleased]` section at the top is for changes not yet assigned a version; move them down when cutting a release
 - Keep descriptions brief but specific — "Fixed HP leak exposing enemy stats to players" beats "Fixed bug"

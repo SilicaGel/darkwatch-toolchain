@@ -1,8 +1,8 @@
 ---
 name: ship
 description: Use when a development branch is ready to merge — the user invokes `/ship`, says "ship it", "ship this branch", or "open the PR". Handles the full docs + PR housekeeping for this repo; read the body before acting, the PR-body protocol has hard rules.
-version: 1.6.0
-last_changed: 2026-08-11
+version: 1.7.0
+last_changed: 2026-08-14
 ---
 
 # ship
@@ -93,7 +93,7 @@ branch's diff warrants it, run those too. See `scripts/preflight.sh` header.)
 
 Run these in order. **Tell each sub-skill to skip its commit step** — ship handles one coordinated commit in Step 3.
 
-1. **Update the changelog** — use the `update-changelog` skill (skip its commit). This is the per-ticket record of what shipped.
+1. **Update the changelog** — use the `update-changelog` skill (skip its commit). This writes a fragment to `docs/changelog.d/`, the per-ticket record of what shipped; `docs/CHANGELOG.md` itself is only ever touched by a release PR (#2364).
 2. **Update the handbook** — use the `update-handbook` skill if any user-facing feature / product behaviour changed (skip its commit). Skip entirely if the diff is pure internal refactor / tooling.
 3. **Update the onboarding doc** — use the `update-onboarding` skill if any dev workflow, convention, stack item, npm script, env var, repo structure, new skill, or setup step changed (skip its commit). Skip entirely if the diff doesn't affect how a new contributor gets set up or what conventions they follow.
 4. **Update the README** — use the `update-readme` skill if the diff touches README-visible facts. Two path-based checks (modified-files for most paths, add-or-delete-only for docs since the README links to docs by name, not content):
@@ -188,48 +188,32 @@ Run these in order. **Tell each sub-skill to skip its commit step** — ship han
 
 ## Step 2.5: Merge latest main into the branch
 
-Before committing docs, merge `origin/main` into the branch so the changelog
-entry lands on top of any entries that shipped while this branch was open.
-**Do not rebase** — PRs squash-merge here, so branch history is discarded
-anyway, and rebasing rewrites the remote-side commits which forces a
-force-push (which CLAUDE.md forbids). Merging keeps the push linear.
+Before committing docs, merge `origin/main` into the branch so this branch
+sits on top of anything that merged while it was open — every file this step
+touches (handbook, onboarding, README, feature inventory, and any code this
+PR itself changed) can conflict with concurrent work, so this merge runs
+regardless of what Step 2 did. **Do not rebase** — PRs squash-merge here, so
+branch history is discarded anyway, and rebasing rewrites the remote-side
+commits which forces a force-push (which CLAUDE.md forbids). Merging keeps
+the push linear.
 
 ```bash
 git fetch origin main
 git merge origin/main --no-edit
 ```
 
-If the merge hits a conflict in `docs/CHANGELOG.md`, resolve it by keeping
-**both** entries — the ones from main and ours — with ours on top. **Do not
-renumber by hand:** get the entries in the right order with the markers
-gone, then let the normalizer assign the versions.
+`docs/CHANGELOG.md` cannot conflict any more: your PR does not touch it (#2364).
+Your changelog entry is a fragment in `docs/changelog.d/`, and two PRs write two
+different filenames. If the merge reports a conflict in `docs/CHANGELOG.md`,
+something is wrong — do not resolve it by hand; check whether this branch
+edited the file directly, which `ship-guard` will block anyway.
 
-```bash
-# after resolving the conflict markers, ours on top, both entries intact
-node scripts/changelog-normalize.mjs
-git add docs/CHANGELOG.md
-git commit --no-edit
-```
+The old "keep both entries with yours on top" instruction is GONE, and
+deliberately: it produced a corrupt record when two sides held the same entry in
+different states (#2397, 2026-08-14). That failure mode no longer exists,
+because extend-in-place no longer exists.
 
-**#2165 — why this stayed a conflict.** A `merge=union` driver on this file
-was built and rejected: it makes the merge succeed whether or not the result
-is right. `docs/CHANGELOG.md` is a *record* — an ordered history plus the
-version `scripts/app-version.mjs` reports as `APP_VERSION` on `/health` — so
-it has to fail loudly and be reconciled by a person. What the normalizer
-removes is only the **mechanical** half: working out the next version and
-proving the headings still descend. That part was hand-done and is exactly
-where a quiet mistake (a duplicated version, a dropped entry) used to slip
-through.
-
-`changelog-normalize.mjs` only touches spacing and version digits, never body
-text, and is a no-op on an already-clean file — so it is safe to run even
-when the merge reported no conflict, and doing so costs nothing. If it prints
-anything other than "already clean" / "fixed", read the diff it produced
-before moving on.
-
-If the merge conflicts in a file OTHER than `docs/CHANGELOG.md`, resolve
-that normally, then still run the normalizer before committing (a mixed
-conflict can touch the changelog too). Once resolved:
+If the merge conflicts in some other file, resolve it normally, then:
 
 ```bash
 git commit --no-edit
@@ -244,14 +228,14 @@ One coordinated commit covering whatever actually changed. Don't blind-add paths
 git status --short docs/ site/ README.md
 
 # Stage only the changed files (mix-and-match from this list)
-git add docs/CHANGELOG.md
+git add docs/changelog.d/      # the fragment(s) update-changelog wrote
 git add docs/HANDBOOK.md       # only if changed
 git add docs/ONBOARDING.md     # only if changed
 git add README.md              # only if changed
 git add docs/ROADMAP.md        # only if changed (rare — see Step 2.5)
 git add site/                  # only if brochure changed
 
-git commit -m "docs: update <comma-separated list of docs touched> for vX.Y.Z"
+git commit -m "docs: update <comma-separated list of docs touched>"
 ```
 
 ## Step 4: Push the branch

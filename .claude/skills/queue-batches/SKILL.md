@@ -1,8 +1,8 @@
 ---
 name: queue-batches
 description: Use whenever the user invokes `/queue-batches` or `/queue-batches NxM` (e.g. `/queue-batches 3x5`), or says "queue up some batches", "kick off parallel work on some tickets", "run N groups of M issues in parallel".
-version: 1.2.0
-last_changed: 2026-07-30
+version: 1.3.0
+last_changed: 2026-08-14
 ---
 
 # Queue Batches
@@ -229,16 +229,18 @@ When all agents return:
 **Always tell the user to ship sequentially**, not in parallel:
 
 > Ship one branch at a time: `/ship` → wait for the PR to merge → `/ship` next.
-> Each `/ship` adds a CHANGELOG entry at the same anchor (`# Darkwatch Changelog\n\n---\n\n`),
-> so concurrent PRs *will* conflict on `docs/CHANGELOG.md`. Serial shipping keeps each
-> conflict-free; the merge after one ship is what unblocks the next.
+> Since #2364, `/ship` no longer touches `docs/CHANGELOG.md` directly — each
+> branch drops a changelog fragment in `docs/changelog.d/` instead, and two
+> branches write two different filenames, so concurrent PRs no longer
+> conflict on the changelog. **That specific reason is gone, but the
+> instruction stands on a second, independent one:** `/ship` Step 1.5 runs
+> the full `scripts/preflight.sh` suite, and this skill's own rule above
+> (Step 5) is "one batch's preflight at a time" — two concurrent `/ship`s
+> would hit exactly that same preflight-against-preflight contention. Ship
+> one branch at a time for that reason.
 
 Same applies if the orchestrator (you) is asked to run `/ship` on multiple branches —
 do them one at a time, waiting for the user to confirm each merge before moving on.
-
-If a queue produced a lot of branches (e.g. a 3×5 night) and serial `/ship` feels
-heavy, mention the towncrier-style fragment-changelog option as a future fix
-(see `docs/superpowers/specs/` for any existing ticket).
 
 ## Status log format (contract)
 

@@ -1,8 +1,8 @@
 ---
 name: update-help
 description: Use when a user-facing feature is added, changed, or removed — keeps the in-app help page (client/src/pages/help/) in sync with the app. Skip for backend-only changes.
-version: 1.0.0
-last_changed: 2026-07-10
+version: 1.1.0
+last_changed: 2026-08-14
 ---
 
 # update-help
@@ -27,8 +27,15 @@ is visible to every role by design.
 # Every client path touched in this branch
 git diff main...HEAD --stat -- client/
 
-# What the branch's new changelog entry says
-git diff main...HEAD -- docs/CHANGELOG.md | sed -n 's/^+//p' | head -40
+# What this branch's new changelog fragment(s) say — title + body only.
+# Frontmatter's `issues:`/`bump:` lines are YAML, not prose, so they're
+# dropped; only `title:` (re-labelled) and everything after the second `---`
+# are printed (#2364 — fragments replaced a direct docs/CHANGELOG.md diff).
+for f in $(git diff main...HEAD --name-only --diff-filter=A -- docs/changelog.d/); do
+  echo "=== $f ==="
+  awk '/^title:/{sub(/^title:[ \t]*/,""); print "Title: " $0; next}
+       /^---$/{n++; next} n>=2{print}' "$f"
+done | head -40
 ```
 
 Backend-only diff (nothing under `client/src/` except tests/plumbing) →

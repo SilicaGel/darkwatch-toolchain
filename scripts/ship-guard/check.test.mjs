@@ -1,7 +1,17 @@
 // Tests for the pure ship-guard decision (#1116).
 // Run: node --test scripts/ship-guard/check.test.mjs
+//
+// This test FILE is free to import beyond `node:` + ../app-version.mjs — the
+// sparse-checkout constraint (see check.mjs's header comment) only binds the
+// SUBJECT UNDER TEST, check.mjs itself, since that's what actually ships to
+// the ship-guard CI job. The test file runs outside that sparse job.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   decide,
   parseReadyNumbers,
@@ -9,9 +19,17 @@ import {
   changelogTouched,
   compareBareVersions,
   changelogVersionAdvanced,
+  firstDescendingViolation,
   CHANGELOG_PATH,
   SKIP_MARKER,
+  fragmentsAdded,
+  isReleasePr,
+  FRAGMENT_DIR,
+  NO_CHANGELOG_MARKER,
 } from "./check.mjs";
+
+const HERE = dirname(fileURLToPath(import.meta.url));
+const CHECK_CLI = resolve(HERE, "check.mjs");
 
 // A well-formed body in the locked /ship format for a single resolved issue.
 const goodBody = (n = 694) => `## Summary
@@ -145,18 +163,18 @@ describe("decide", () => {
     assert.deepEqual(r.ready, []);
   });
 
-  it("PASS — Ready + changelog touched + matching ### #N", () => {
+  it("PASS — Ready + fragment added + matching ### #N (#2364 — replaces the old CHANGELOG-touch rule)", () => {
     const r = decide({
       body: goodBody(694),
       title: "feat: a thing",
-      changedFiles: [CHANGELOG_PATH, "client/src/App.tsx"],
+      changedFiles: ["docs/changelog.d/694-a-thing.md", "client/src/App.tsx"],
     });
     assert.equal(r.ok, true, r.reasons.join("; "));
     assert.deepEqual(r.reasons, []);
     assert.deepEqual(r.ready, ["694"]);
   });
 
-  it("FAIL — Ready but changelog NOT touched", () => {
+  it("FAIL — Ready but adds no fragment (#2364 — replaces the old CHANGELOG-touch rule)", () => {
     const r = decide({
       body: goodBody(694),
       title: "feat: a thing",
@@ -164,7 +182,7 @@ describe("decide", () => {
     });
     assert.equal(r.ok, false);
     assert.equal(r.reasons.length, 1);
-    assert.match(r.reasons[0], /does not touch docs\/CHANGELOG\.md/);
+    assert.match(r.reasons[0], /adds no fragment/);
   });
 
   it("FAIL — Ready but a ### #N block missing for one of the Ready numbers", () => {
@@ -176,7 +194,11 @@ Expected: ok
 
 Ready #1
 Ready #2`;
-    const r = decide({ body, title: "feat: two things", changedFiles: [CHANGELOG_PATH] });
+    const r = decide({
+      body,
+      title: "feat: two things",
+      changedFiles: ["docs/changelog.d/1-x.md"],
+    });
     assert.equal(r.ok, false);
     assert.equal(r.reasons.length, 1);
     assert.match(r.reasons[0], /Missing a `### #N` Test-plan block for: #2/);
@@ -213,12 +235,16 @@ Expected: ok
 Ready #1
 Ready #2
 Ready #3`;
-    const r = decide({ body, title: "feat: three things", changedFiles: [CHANGELOG_PATH] });
+    const r = decide({
+      body,
+      title: "feat: three things",
+      changedFiles: ["docs/changelog.d/1-x.md"],
+    });
     assert.equal(r.ok, true, r.reasons.join("; "));
     assert.deepEqual(r.ready, ["1", "2", "3"]);
   });
 
-  it("FAIL — multiple Ready lines, one missing its block AND no changelog", () => {
+  it("FAIL — multiple Ready lines, one missing its block AND no fragment", () => {
     const body = `## Test plans
 
 ### #1 — first
@@ -229,7 +255,7 @@ Ready #2
 Ready #3`;
     const r = decide({ body, title: "feat: three", changedFiles: [] });
     assert.equal(r.ok, false);
-    // one reason for changelog, one for the missing #2/#3 blocks
+    // one reason for the missing fragment, one for the missing #2/#3 blocks
     assert.equal(r.reasons.length, 2);
     assert.match(
       r.reasons.find((x) => /Missing/.test(x)),
@@ -243,54 +269,384 @@ Ready #3`;
 ### #1 — this is in Summary, not Test plans
 
 Ready #1`;
-    const r = decide({ body, title: "feat: x", changedFiles: [CHANGELOG_PATH] });
+    const r = decide({ body, title: "feat: x", changedFiles: ["docs/changelog.d/1-x.md"] });
     assert.equal(r.ok, false);
     assert.match(r.reasons[0], /Missing a `### #N` Test-plan block for: #1/);
   });
 
   const top = (v) => `## 2026-08-11 — v${v} — some title\n\nbody\n`;
 
-  it("PASS — otherwise-good PR whose changelog top version advanced past main's (#2165)", () => {
+  it("PASS — release PR whose changelog top version advanced past main's (#2165, now release-only per #2364)", () => {
     const r = decide({
-      body: goodBody(694),
-      title: "feat: a thing",
+      body: "cutting a release",
+      title: "release: v0.195.59",
       changedFiles: [CHANGELOG_PATH],
       changelogVersions: { prContents: top("0.195.59"), mainContents: top("0.195.58") },
     });
     assert.equal(r.ok, true, r.reasons.join("; "));
   });
 
-  it("FAIL — changelog touched but PR's top version collides with main's (#2165)", () => {
+  it("FAIL — release PR's top version collides with main's (#2165, now release-only per #2364)", () => {
     const r = decide({
-      body: goodBody(694),
-      title: "feat: a thing",
+      body: "cutting a release",
+      title: "release: v0.195.58",
       changedFiles: [CHANGELOG_PATH],
       changelogVersions: { prContents: top("0.195.58"), mainContents: top("0.195.58") },
     });
     assert.equal(r.ok, false);
     assert.equal(r.reasons.length, 1);
     assert.match(r.reasons[0], /not newer than origin\/main's/);
-    assert.match(r.reasons[0], /#2165/);
+    assert.match(r.reasons[0], /changelog-collate\.mjs/);
   });
 
-  it("does not double-report when changelog isn't touched at all (reason (a) already covers it)", () => {
+  it("does not double-report when a feature PR adds no fragment (reason (a) already covers it)", () => {
     const r = decide({
       body: goodBody(694),
       title: "feat: a thing",
       changedFiles: ["client/src/App.tsx"],
       changelogVersions: { prContents: top("0.1.0"), mainContents: top("0.1.0") },
     });
-    assert.equal(r.reasons.length, 1); // only the "does not touch" reason, not also (c)
-    assert.match(r.reasons[0], /does not touch docs\/CHANGELOG\.md/);
+    // Not a release PR, so check (c) never runs regardless of changelogVersions —
+    // only the "adds no fragment" reason from (a) should appear.
+    assert.equal(r.reasons.length, 1);
+    assert.match(r.reasons[0], /adds no fragment/);
   });
 
-  it("PASS — no changelogVersions supplied (git couldn't read one side) skips check (c) entirely", () => {
+  it("PASS — release PR with no changelogVersions supplied (git couldn't read one side) skips check (c) entirely", () => {
     const r = decide({
-      body: goodBody(694),
-      title: "feat: a thing",
+      body: "cutting a release",
+      title: "release: v0.1.0",
       changedFiles: [CHANGELOG_PATH],
       // changelogVersions omitted — mirrors the runner's fail-open path
     });
     assert.equal(r.ok, true, r.reasons.join("; "));
+  });
+});
+
+describe("#2364 — fragment rules", () => {
+  const READY_BODY = "Ready #123\n\n## Test plans\n\n### #123 — a plan\n\nsteps";
+
+  it("blocks a non-release PR that edits docs/CHANGELOG.md", () => {
+    const r = decide({
+      body: READY_BODY,
+      title: "fix: a thing",
+      changedFiles: ["docs/CHANGELOG.md", "docs/changelog.d/123-x.md"],
+    });
+    assert.equal(r.ok, false);
+    assert.ok(r.reasons.some((x) => /docs\/CHANGELOG\.md/.test(x) && /fragment/i.test(x)));
+  });
+
+  it("blocks a chore PR that edits docs/CHANGELOG.md, even with no Ready lines", () => {
+    const r = decide({
+      body: "just a chore",
+      title: "chore: x",
+      changedFiles: ["docs/CHANGELOG.md"],
+    });
+    assert.equal(r.ok, false);
+  });
+
+  it("allows a release PR to edit docs/CHANGELOG.md", () => {
+    const r = decide({
+      body: "cutting a release",
+      title: "release: v0.198.0",
+      changedFiles: ["docs/CHANGELOG.md", "docs/changelog.d/123-x.md"],
+    });
+    assert.equal(r.ok, true, r.reasons.join("; "));
+  });
+
+  it("blocks a Ready PR that adds no fragment", () => {
+    const r = decide({
+      body: READY_BODY,
+      title: "fix: a thing",
+      changedFiles: ["server/src/x.ts"],
+    });
+    assert.equal(r.ok, false);
+    assert.ok(r.reasons.some((x) => new RegExp(FRAGMENT_DIR).test(x)));
+  });
+
+  it("passes a Ready PR that adds a fragment", () => {
+    const r = decide({
+      body: READY_BODY,
+      title: "fix: a thing",
+      changedFiles: ["server/src/x.ts", "docs/changelog.d/123-a-thing.md"],
+    });
+    assert.equal(r.ok, true, r.reasons.join("; "));
+  });
+
+  // Final wave item 2 — `fragmentsAdded` must agree with `readFragments` in
+  // scripts/changelog-collate.mjs about what a fragment is. readFragments'
+  // readdirSync is non-recursive, so a fragment one level down is never read
+  // at collation time; if this check counted it as "added", a PR could pass
+  // ship-guard while its fragment silently vanishes at release. Proven red by
+  // reverting the `.includes("/")` guard in `fragmentsAdded` back to a bare
+  // `startsWith`/`endsWith` check and re-running this test.
+  it("blocks a Ready PR whose only fragment lives in a subdirectory of docs/changelog.d/", () => {
+    const r = decide({
+      body: READY_BODY,
+      title: "fix: a thing",
+      changedFiles: ["server/src/x.ts", "docs/changelog.d/sub/x.md"],
+    });
+    assert.equal(r.ok, false);
+    assert.ok(r.reasons.some((x) => new RegExp(FRAGMENT_DIR).test(x)));
+  });
+
+  it("exempts a Ready PR carrying [no-changelog] in the TITLE", () => {
+    const r = decide({
+      body: READY_BODY,
+      title: `fix: a thing ${NO_CHANGELOG_MARKER}`,
+      changedFiles: ["server/src/x.ts"],
+    });
+    assert.equal(r.ok, true, r.reasons.join("; "));
+  });
+
+  it("does NOT exempt a PR that merely documents the marker in its body", () => {
+    const r = decide({
+      body: `${READY_BODY}\n\n\`\`\`\n${NO_CHANGELOG_MARKER}\n\`\`\`\n`,
+      title: "feat: document the marker",
+      changedFiles: ["server/src/x.ts"],
+    });
+    assert.equal(r.ok, false, "a documented marker must not exempt the PR that documents it");
+  });
+
+  it("leaves a chore PR with no Ready lines and no changelog edit alone", () => {
+    const r = decide({ body: "chore", title: "chore: x", changedFiles: ["scripts/x.mjs"] });
+    assert.equal(r.ok, true, r.reasons.join("; "));
+  });
+
+  it("does not count a fragment nested in a subdirectory of docs/changelog.d/", () => {
+    assert.deepEqual(fragmentsAdded(["docs/changelog.d/sub/x.md"]), []);
+    assert.deepEqual(fragmentsAdded(["docs/changelog.d/a/b/x.md"]), []);
+  });
+
+  it("ignores .gitkeep when looking for added fragments", () => {
+    assert.deepEqual(fragmentsAdded(["docs/changelog.d/.gitkeep"]), []);
+    assert.deepEqual(fragmentsAdded(["docs/changelog.d/123-x.md"]), ["docs/changelog.d/123-x.md"]);
+  });
+
+  it("recognises a release title case-insensitively", () => {
+    assert.equal(isReleasePr("release: v0.198.0"), true);
+    assert.equal(isReleasePr("Release: v0.198.0"), true);
+    assert.equal(isReleasePr("fix: prepare for release: soon"), false);
+  });
+
+  it("blocks a release PR whose headings are not strictly descending", () => {
+    const r = decide({
+      body: "cut",
+      title: "release: v0.198.0",
+      changedFiles: ["docs/CHANGELOG.md"],
+      changelogVersions: {
+        prContents: "## 2026-08-15 — v0.198.0 — new\n\nx\n\n## 2026-08-15 — v0.198.0 — dupe\n\ny\n",
+        mainContents: "## 2026-08-14 — v0.197.9 — old\n\nz\n",
+      },
+    });
+    assert.equal(r.ok, false);
+    assert.ok(r.reasons.some((x) => /strictly descending/.test(x)));
+  });
+
+  it("only checks the version-advanced rule on release PRs", () => {
+    const stale = {
+      prContents: "## 2026-08-14 — v0.1.0 — x",
+      mainContents: "## 2026-08-14 — v0.2.0 — y",
+    };
+    // A feature PR no longer sets versions at all, so this must not fire.
+    const feature = decide({
+      body: READY_BODY,
+      title: "fix: a thing",
+      changedFiles: ["docs/changelog.d/123-x.md"],
+      changelogVersions: stale,
+    });
+    assert.equal(feature.ok, true, feature.reasons.join("; "));
+    const release = decide({
+      body: "cut",
+      title: "release: v0.1.0",
+      changedFiles: ["docs/CHANGELOG.md"],
+      changelogVersions: stale,
+    });
+    assert.equal(release.ok, false);
+  });
+
+  // Fix round 1 — finding C2: firstDescendingViolation must be BOUNDED to the
+  // leading run, exactly like fixVersionCollisions' `zoneEnd` walk in
+  // scripts/changelog-normalize-core.mjs. docs/CHANGELOG.md has a real
+  // pre-#2364 anomaly (two v0.20.0 headings, 2026-04-18) deep in settled
+  // history that must never trip this check — there is no possible fix for
+  // it (changelog-normalize.mjs also refuses to touch it), so an unbounded
+  // scan would red every future release PR forever.
+  it("does not flag a deep pre-existing anomaly below an in-order leading run (mirrors fixVersionCollisions' zoneEnd bound)", () => {
+    const contents =
+      "## 2026-08-11 — v0.3.0 — new top\n\nNew text.\n\n" +
+      "## 2026-08-10 — v0.2.0 — settled\n\nSettled text.\n\n" +
+      "## 2026-01-01 — v0.1.0 — old\n\nOld.\n\n" +
+      "## 2025-12-31 — v0.1.0 — also old (pre-existing dupe, untouched)\n\nOlder.\n";
+    assert.equal(firstDescendingViolation(contents), null);
+  });
+
+  it("release PR: the deep pre-existing anomaly does not block an otherwise-clean release", () => {
+    const contents =
+      "## 2026-08-11 — v0.3.0 — new top\n\nNew text.\n\n" +
+      "## 2026-08-10 — v0.2.0 — settled\n\nSettled text.\n\n" +
+      "## 2026-01-01 — v0.1.0 — old\n\nOld.\n\n" +
+      "## 2025-12-31 — v0.1.0 — also old (pre-existing dupe, untouched)\n\nOlder.\n";
+    const r = decide({
+      body: "cut",
+      title: "release: v0.3.0",
+      changedFiles: ["docs/CHANGELOG.md"],
+      changelogVersions: {
+        prContents: contents,
+        mainContents: "## 2026-08-10 — v0.2.0 — settled\n\nSettled text.\n",
+      },
+    });
+    assert.equal(r.ok, true, r.reasons.join("; "));
+  });
+
+  it("still flags a violation that IS at the very top (the bound doesn't blind the top pair)", () => {
+    const contents =
+      "## 2026-08-11 — v0.3.0 — dupe A\n\nx\n\n## 2026-08-11 — v0.3.0 — dupe B\n\ny\n";
+    const violation = firstDescendingViolation(contents);
+    assert.deepEqual(violation, { above: "0.3.0", below: "0.3.0" });
+  });
+
+  // Fix round 1 — finding I2: `release:` must not be a silent bypass for
+  // checks other than (0)/(a). Check (b) — the ### #N test-plan block — must
+  // still apply to a release PR that happens to carry a Ready line.
+  it("release: does not bypass check (b) — a Ready line still needs its ### #N test-plan block", () => {
+    const r = decide({
+      body: "Ready #9",
+      title: "release: v0.198.0",
+      changedFiles: [CHANGELOG_PATH],
+    });
+    assert.equal(r.ok, false);
+    assert.ok(r.reasons.some((x) => /Missing a `### #N` Test-plan block for: #9/.test(x)));
+  });
+});
+
+// Fix round 1 — finding I1: `main()` (the CLI runner, not decide()) has
+// silently disabled this gate three separate times — #2365's
+// ERR_MODULE_NOT_FOUND, the ready.length-before-ok ordering bug, and C1's
+// ENOBUFS-swallowed-by-tryGit bug — and all three passed a fully green
+// decide() suite, because decide() is only ever handed in-memory strings.
+// These tests invoke check.mjs as a real child process against a throwaway
+// git repo and assert on the EXIT CODE, so the runner itself is covered.
+describe("#2364 — main() runner (subprocess, real git repo)", () => {
+  /** A throwaway git repo with a "main" branch check.mjs's resolveMainRef finds. */
+  function tmpRepo() {
+    const dir = mkdtempSync(join(tmpdir(), "ship-guard-check-"));
+    execFileSync("git", ["init", "-q", "-b", "main"], { cwd: dir });
+    execFileSync("git", ["config", "user.email", "t@t.test"], { cwd: dir });
+    execFileSync("git", ["config", "user.name", "T"], { cwd: dir });
+    return dir;
+  }
+
+  function writeAndCommit(dir, files, message) {
+    for (const [relPath, content] of Object.entries(files)) {
+      const full = join(dir, relPath);
+      mkdirSync(dirname(full), { recursive: true });
+      writeFileSync(full, content);
+    }
+    execFileSync("git", ["add", "-A"], { cwd: dir });
+    execFileSync("git", ["commit", "-qm", message], { cwd: dir });
+  }
+
+  /** Runs check.mjs as a child process against `dir`, returns { status, stdout, stderr }. */
+  function runCheck(dir, { prBody = "", prTitle = "" } = {}) {
+    try {
+      const stdout = execFileSync("node", [CHECK_CLI], {
+        cwd: dir,
+        encoding: "utf8",
+        env: { ...process.env, PR_BODY: prBody, PR_TITLE: prTitle },
+      });
+      return { status: 0, stdout, stderr: "" };
+    } catch (e) {
+      return { status: e.status, stdout: e.stdout ?? "", stderr: e.stderr ?? "" };
+    }
+  }
+
+  it("(a) a chore PR that edits docs/CHANGELOG.md directly exits 1", () => {
+    const dir = tmpRepo();
+    writeAndCommit(
+      dir,
+      { "docs/CHANGELOG.md": "## 2026-08-10 — v0.100.0 — base\n\nBase text.\n" },
+      "base",
+    );
+    execFileSync("git", ["checkout", "-q", "-b", "pr"], { cwd: dir });
+    writeAndCommit(
+      dir,
+      {
+        "docs/CHANGELOG.md":
+          "## 2026-08-10 — v0.100.0 — base\n\nBase text.\n\nSneaky extra line.\n",
+      },
+      "chore: edit changelog directly",
+    );
+    const r = runCheck(dir, { prBody: "just a chore", prTitle: "chore: edit changelog directly" });
+    assert.equal(r.status, 1, `expected exit 1, got ${r.status}. stderr: ${r.stderr}`);
+    assert.match(r.stderr, /only a release PR may do/);
+  });
+
+  it("(c) [skip-ship-guard] in the title exits 0 even for the same illegitimate edit", () => {
+    const dir = tmpRepo();
+    writeAndCommit(
+      dir,
+      { "docs/CHANGELOG.md": "## 2026-08-10 — v0.100.0 — base\n\nBase text.\n" },
+      "base",
+    );
+    execFileSync("git", ["checkout", "-q", "-b", "pr"], { cwd: dir });
+    writeAndCommit(
+      dir,
+      {
+        "docs/CHANGELOG.md":
+          "## 2026-08-10 — v0.100.0 — base\n\nBase text.\n\nSneaky extra line.\n",
+      },
+      "chore: edit changelog directly",
+    );
+    const r = runCheck(dir, {
+      prBody: "just a chore",
+      prTitle: `chore: edit changelog directly ${SKIP_MARKER}`,
+    });
+    assert.equal(r.status, 0, `expected exit 0, got ${r.status}. stderr: ${r.stderr}`);
+  });
+
+  // (b) — this is the test that pins C1 shut. A small fixture would pass
+  // check (c) either way (a truncated read fails OPEN, same as a clean file
+  // read in full) and prove nothing; the fixture MUST exceed the 1MiB
+  // execFileSync default AND contain a genuine violation, so the only way to
+  // see exit 1 is for check (c) to have actually read and evaluated the real
+  // content — proving maxBuffer, not luck, is what makes this pass.
+  it("(b) a release PR whose >1MiB changelog fails to advance past main's version is still caught", () => {
+    const dir = tmpRepo();
+    writeAndCommit(
+      dir,
+      { "docs/CHANGELOG.md": "## 2026-08-10 — v0.100.0 — base\n\nBase text.\n" },
+      "base",
+    );
+    execFileSync("git", ["checkout", "-q", "-b", "pr"], { cwd: dir });
+    // >1MiB (default execFileSync maxBuffer) and colliding with main's top
+    // version, so check (c) must fire — a truncated/failed read would
+    // instead skip check (c) entirely and pass.
+    const padding = "x".repeat(1_200_000);
+    const big = `## 2026-08-10 — v0.100.0 — same version as main\n\n${padding}\n`;
+    writeAndCommit(dir, { "docs/CHANGELOG.md": big }, "release: v0.100.0");
+    const r = runCheck(dir, { prBody: "cutting a release", prTitle: "release: v0.100.0" });
+    assert.equal(r.status, 1, `expected exit 1, got ${r.status}. stderr: ${r.stderr}`);
+    assert.match(r.stderr, /not newer than origin\/main's/);
+  });
+
+  it("release PR with an advancing, in-order, small changelog exits 0", () => {
+    const dir = tmpRepo();
+    writeAndCommit(
+      dir,
+      { "docs/CHANGELOG.md": "## 2026-08-10 — v0.100.0 — base\n\nBase text.\n" },
+      "base",
+    );
+    execFileSync("git", ["checkout", "-q", "-b", "pr"], { cwd: dir });
+    writeAndCommit(
+      dir,
+      {
+        "docs/CHANGELOG.md":
+          "## 2026-08-11 — v0.100.1 — new top\n\nNew text.\n\n## 2026-08-10 — v0.100.0 — base\n\nBase text.\n",
+      },
+      "release: v0.100.1",
+    );
+    const r = runCheck(dir, { prBody: "cutting a release", prTitle: "release: v0.100.1" });
+    assert.equal(r.status, 0, `expected exit 0, got ${r.status}. stderr: ${r.stderr}`);
   });
 });
