@@ -146,9 +146,15 @@ set -uo pipefail
 # lives in the new .forgejo/workflows/audit-watch.yml. No check below moved —
 # hash bump only. NOTE: compute the hash with `node
 # scripts/ci/workflow-hash.mjs`, not a raw shasum (#2333).)
+# (Reconciled 2026-08-15: SMOKE_SPECS gained the two @durable specs promoted
+# out of the 2026-08-15 qa-check pass — 2380-wt-classic-nav-hidden and
+# 2330-load-error-retry. That's the smoke spec LIST only; no `lint-typecheck` /
+# `test` job step changed, so no check below moved — hash bump only. Same shape
+# as the 2026-07-14 reconciliation. NOTE: compute the hash with `node
+# scripts/ci/workflow-hash.mjs`, not a raw shasum (#2333).)
 # (Previously reconciled 2026-07-19, #1736 Task 4: WT no-raw-color guard.)
 # (Previously reconciled 2026-07-14, #1360/#1701: smoke spec list.)
-EXPECTED_CI_HASH="fd7c4052866a966e65e5d3fd3a5839d756dbbdb0c5d5006585eb4cf39d33efc8"
+EXPECTED_CI_HASH="cf2427abacb644d64d5c3942b00278016aca0098cfb89f0053afbd23421588f3"
 
 # #2336 — the `test` job MOVED from ci.yml to its own reusable workflow so the
 # nightly can call it too. The guard below hashed only ci.yml, so without this

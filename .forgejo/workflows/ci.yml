@@ -560,6 +560,8 @@ jobs:
         e2e/2114-wave1-wt-chrome.spec.ts
         e2e/2115-wave2-wt-chrome.spec.ts
         e2e/2116-wave3-wt-chrome.spec.ts
+        e2e/2380-wt-classic-nav-hidden.spec.ts
+        e2e/2330-load-error-retry.spec.ts
     # #969 — run inside the prebuilt CI image (Node 22 + Chromium + Playwright
     # system deps baked). No apt install-deps, no browser download, no
     # actions/setup-node. Pinned to the @playwright/test version; rebuilt by
