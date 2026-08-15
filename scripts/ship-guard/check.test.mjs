@@ -5,10 +5,10 @@
 // sparse-checkout constraint (see check.mjs's header comment) only binds the
 // SUBJECT UNDER TEST, check.mjs itself, since that's what actually ships to
 // the ship-guard CI job. The test file runs outside that sparse job.
-import { describe, it } from "node:test";
+import { describe, it, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -168,6 +168,7 @@ describe("decide", () => {
       body: goodBody(694),
       title: "feat: a thing",
       changedFiles: ["docs/changelog.d/694-a-thing.md", "client/src/App.tsx"],
+      addedFiles: ["docs/changelog.d/694-a-thing.md"],
     });
     assert.equal(r.ok, true, r.reasons.join("; "));
     assert.deepEqual(r.reasons, []);
@@ -198,6 +199,7 @@ Ready #2`;
       body,
       title: "feat: two things",
       changedFiles: ["docs/changelog.d/1-x.md"],
+      addedFiles: ["docs/changelog.d/1-x.md"],
     });
     assert.equal(r.ok, false);
     assert.equal(r.reasons.length, 1);
@@ -239,6 +241,7 @@ Ready #3`;
       body,
       title: "feat: three things",
       changedFiles: ["docs/changelog.d/1-x.md"],
+      addedFiles: ["docs/changelog.d/1-x.md"],
     });
     assert.equal(r.ok, true, r.reasons.join("; "));
     assert.deepEqual(r.ready, ["1", "2", "3"]);
@@ -269,7 +272,12 @@ Ready #3`;
 ### #1 — this is in Summary, not Test plans
 
 Ready #1`;
-    const r = decide({ body, title: "feat: x", changedFiles: ["docs/changelog.d/1-x.md"] });
+    const r = decide({
+      body,
+      title: "feat: x",
+      changedFiles: ["docs/changelog.d/1-x.md"],
+      addedFiles: ["docs/changelog.d/1-x.md"],
+    });
     assert.equal(r.ok, false);
     assert.match(r.reasons[0], /Missing a `### #N` Test-plan block for: #1/);
   });
@@ -369,6 +377,7 @@ describe("#2364 — fragment rules", () => {
       body: READY_BODY,
       title: "fix: a thing",
       changedFiles: ["server/src/x.ts", "docs/changelog.d/123-a-thing.md"],
+      addedFiles: ["docs/changelog.d/123-a-thing.md"],
     });
     assert.equal(r.ok, true, r.reasons.join("; "));
   });
@@ -385,6 +394,7 @@ describe("#2364 — fragment rules", () => {
       body: READY_BODY,
       title: "fix: a thing",
       changedFiles: ["server/src/x.ts", "docs/changelog.d/sub/x.md"],
+      addedFiles: ["docs/changelog.d/sub/x.md"],
     });
     assert.equal(r.ok, false);
     assert.ok(r.reasons.some((x) => new RegExp(FRAGMENT_DIR).test(x)));
@@ -453,6 +463,7 @@ describe("#2364 — fragment rules", () => {
       body: READY_BODY,
       title: "fix: a thing",
       changedFiles: ["docs/changelog.d/123-x.md"],
+      addedFiles: ["docs/changelog.d/123-x.md"],
       changelogVersions: stale,
     });
     assert.equal(feature.ok, true, feature.reasons.join("; "));
@@ -520,6 +531,54 @@ describe("#2364 — fragment rules", () => {
   });
 });
 
+describe("#2410 — added-only fragment list (deletion can't satisfy check a)", () => {
+  const READY_BODY = "Ready #123\n\n## Test plans\n\n### #123 — a plan\n\nsteps";
+
+  it("blocks a PR that DELETES a fragment and adds none, even though the path is in changedFiles", () => {
+    // PR A merged a fragment earlier; PR B deletes it. `git diff --name-only`
+    // (no filter) puts the deleted path in changedFiles too — that's the
+    // whole bug: without a separate added-only list, this used to satisfy
+    // check (a) by destroying someone else's pending entry instead of adding
+    // its own.
+    const r = decide({
+      body: READY_BODY,
+      title: "fix: a thing",
+      changedFiles: ["docs/changelog.d/999-someone-elses.md"],
+      addedFiles: [], // git --diff-filter=A: nothing was ADDED
+    });
+    assert.equal(r.ok, false);
+    assert.ok(r.reasons.some((x) => /adds no fragment/.test(x)));
+  });
+
+  it("passes when the fragment is in addedFiles, regardless of what else changedFiles contains", () => {
+    const r = decide({
+      body: READY_BODY,
+      title: "fix: a thing",
+      changedFiles: ["docs/changelog.d/999-someone-elses.md"], // a deletion, unrelated
+      addedFiles: ["docs/changelog.d/123-a-thing.md"],
+    });
+    assert.equal(r.ok, true, r.reasons.join("; "));
+  });
+
+  // The absent-addedFiles decision (#2410 review comment): an older caller
+  // that doesn't supply addedFiles must NOT silently fall back to
+  // changedFiles — that would quietly resurrect the exact deletion exploit
+  // this fix closes. decide() fails CLOSED instead: no addedFiles means no
+  // fragment is ever recognised as added, so a Ready PR blocks until the
+  // caller is updated to supply the added-only list. This is safe because
+  // the only real caller (main(), below) always supplies it or skips the
+  // WHOLE guard open on a git failure — decide() never needs to guess.
+  it("fails closed (blocks) when addedFiles is omitted entirely, rather than reusing changedFiles", () => {
+    const r = decide({
+      body: READY_BODY,
+      title: "fix: a thing",
+      changedFiles: ["docs/changelog.d/123-a-thing.md"], // present, but no addedFiles given
+    });
+    assert.equal(r.ok, false);
+    assert.ok(r.reasons.some((x) => /adds no fragment/.test(x)));
+  });
+});
+
 // Fix round 1 — finding I1: `main()` (the CLI runner, not decide()) has
 // silently disabled this gate three separate times — #2365's
 // ERR_MODULE_NOT_FOUND, the ready.length-before-ok ordering bug, and C1's
@@ -528,9 +587,22 @@ describe("#2364 — fragment rules", () => {
 // These tests invoke check.mjs as a real child process against a throwaway
 // git repo and assert on the EXIT CODE, so the runner itself is covered.
 describe("#2364 — main() runner (subprocess, real git repo)", () => {
+  // #2411 (tmpdir-cleanup) — every tmpRepo() call used to leak its directory
+  // into the OS tmpdir forever (~4 per run). Track everything tmpRepo() hands
+  // out and remove it after each test, pass or fail, so a red assertion can't
+  // skip cleanup either.
+  const liveDirs = [];
+  afterEach(() => {
+    while (liveDirs.length) {
+      const dir = liveDirs.pop();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   /** A throwaway git repo with a "main" branch check.mjs's resolveMainRef finds. */
   function tmpRepo() {
     const dir = mkdtempSync(join(tmpdir(), "ship-guard-check-"));
+    liveDirs.push(dir);
     execFileSync("git", ["init", "-q", "-b", "main"], { cwd: dir });
     execFileSync("git", ["config", "user.email", "t@t.test"], { cwd: dir });
     execFileSync("git", ["config", "user.name", "T"], { cwd: dir });
@@ -648,5 +720,117 @@ describe("#2364 — main() runner (subprocess, real git repo)", () => {
     );
     const r = runCheck(dir, { prBody: "cutting a release", prTitle: "release: v0.100.1" });
     assert.equal(r.status, 0, `expected exit 0, got ${r.status}. stderr: ${r.stderr}`);
+  });
+
+  // #2410(a), test-a — the real bug: a PR that DELETES someone else's
+  // fragment and adds none of its own must not satisfy check (a). Before the
+  // fix, `git diff --name-only` (no filter) put the deleted path in the same
+  // list check (a) scanned for fragments, so the deletion counted as if it
+  // were an addition.
+  it("#2410(a) a PR that deletes an existing fragment and adds none fails check (a)", () => {
+    const dir = tmpRepo();
+    writeAndCommit(
+      dir,
+      {
+        "docs/CHANGELOG.md": "## 2026-08-10 — v0.100.0 — base\n\nBase text.\n",
+        "docs/changelog.d/999-someone-elses.md":
+          "---\ntitle: Someone else's pending entry\nissues: [999]\nbump: patch\n---\n\nBody.\n",
+      },
+      "base",
+    );
+    execFileSync("git", ["checkout", "-q", "-b", "pr"], { cwd: dir });
+    execFileSync("git", ["rm", "-q", "docs/changelog.d/999-someone-elses.md"], { cwd: dir });
+    execFileSync("git", ["commit", "-qm", "fix: delete a fragment, add none"], { cwd: dir });
+    const body =
+      "## Test plans\n\n### #123 — a plan\n\nsteps\n\nReady #123\n\n" +
+      "🤖 Generated with [Claude Code](https://claude.com/claude-code)";
+    const r = runCheck(dir, { prBody: body, prTitle: "fix: delete a fragment, add none" });
+    assert.equal(r.status, 1, `expected exit 1, got ${r.status}. stderr: ${r.stderr}`);
+    assert.match(r.stderr, /adds no fragment/);
+  });
+
+  // #2410(a) positive control — a PR that genuinely ADDS a fragment (even
+  // alongside an unrelated deletion) still passes.
+  it("#2410(a) a PR that adds its own fragment passes, even alongside an unrelated deletion", () => {
+    const dir = tmpRepo();
+    writeAndCommit(
+      dir,
+      {
+        "docs/CHANGELOG.md": "## 2026-08-10 — v0.100.0 — base\n\nBase text.\n",
+        "docs/changelog.d/999-someone-elses.md":
+          "---\ntitle: Someone else's pending entry\nissues: [999]\nbump: patch\n---\n\nBody.\n",
+      },
+      "base",
+    );
+    execFileSync("git", ["checkout", "-q", "-b", "pr"], { cwd: dir });
+    execFileSync("git", ["rm", "-q", "docs/changelog.d/999-someone-elses.md"], { cwd: dir });
+    writeAndCommit(
+      dir,
+      {
+        "docs/changelog.d/123-a-thing.md":
+          "---\ntitle: A thing\nissues: [123]\nbump: patch\n---\n\nBody.\n",
+      },
+      "fix: delete one fragment, add my own",
+    );
+    const body =
+      "## Test plans\n\n### #123 — a plan\n\nsteps\n\nReady #123\n\n" +
+      "🤖 Generated with [Claude Code](https://claude.com/claude-code)";
+    const r = runCheck(dir, { prBody: body, prTitle: "fix: delete one fragment, add my own" });
+    assert.equal(r.status, 0, `expected exit 0, got ${r.status}. stderr: ${r.stderr}`);
+  });
+
+  // #2410(b), test-b — gitChangelogVersions returning null (docs/CHANGELOG.md
+  // unreadable on one side) must both skip check (c) AND print a notice, like
+  // every other fail-open branch in this runner. Here neither ref has the
+  // file at all, so `git show <ref>:docs/CHANGELOG.md` fails on both sides.
+  it("#2410(b) an unreadable docs/CHANGELOG.md skips check (c) with a printed notice, not silently", () => {
+    const dir = tmpRepo();
+    writeAndCommit(dir, { "README.md": "base\n" }, "base");
+    execFileSync("git", ["checkout", "-q", "-b", "pr"], { cwd: dir });
+    writeAndCommit(dir, { "README.md": "base\n\nchanged\n" }, "release: v0.2.0");
+    const r = runCheck(dir, { prBody: "cutting a release", prTitle: "release: v0.2.0" });
+    assert.equal(r.status, 0, `expected exit 0, got ${r.status}. stderr: ${r.stderr}`);
+    assert.match(r.stdout, /skipping check \(c\)/);
+  });
+
+  // #2410 review finding — gitAddedFiles must pass --no-renames, or the
+  // result silently depends on the runner's git config/version. Git's
+  // porcelain rename detection (diff.renames, default on since git 2.9) can
+  // pair a delete+add across the PR into a single `R100` status instead of a
+  // `D` + `A` pair — and `--diff-filter=A` then MISSES it entirely (proven by
+  // hand: `git diff --name-only --diff-filter=A` returns nothing for a pure
+  // rename, vs the new path for a `--no-renames` diff). Fails SAFE (a false
+  // block) rather than unsafe, but a gate's behaviour must not vary with git
+  // config either way. Here the fragment already exists on `base` (as if
+  // merged by an earlier PR) and this PR renames it via `git mv` with no
+  // content change — the single most rename-detection-friendly shape there is.
+  it("#2410 (--no-renames) a fragment renamed via git mv is still seen as added at its new path", () => {
+    const dir = tmpRepo();
+    writeAndCommit(
+      dir,
+      {
+        "docs/CHANGELOG.md": "## 2026-08-10 — v0.100.0 — base\n\nBase text.\n",
+        "docs/changelog.d/999-old-name.md":
+          "---\ntitle: A thing\nissues: [123]\nbump: patch\n---\n\n" +
+          "Body text long enough to be realistic fragment content for this test.\n",
+      },
+      "base",
+    );
+    execFileSync("git", ["checkout", "-q", "-b", "pr"], { cwd: dir });
+    execFileSync(
+      "git",
+      ["mv", "docs/changelog.d/999-old-name.md", "docs/changelog.d/123-new-name.md"],
+      { cwd: dir },
+    );
+    execFileSync("git", ["commit", "-qm", "fix: rename my fragment before merging"], { cwd: dir });
+    const body =
+      "## Test plans\n\n### #123 — a plan\n\nsteps\n\nReady #123\n\n" +
+      "🤖 Generated with [Claude Code](https://claude.com/claude-code)";
+    const r = runCheck(dir, { prBody: body, prTitle: "fix: rename my fragment before merging" });
+    assert.equal(
+      r.status,
+      0,
+      `expected exit 0 (not falsely blocked), got ${r.status}. stderr: ${r.stderr}`,
+    );
   });
 });

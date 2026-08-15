@@ -1,8 +1,8 @@
 ---
 name: update-onboarding
 description: Use when a dev workflow, convention, tooling, repo structure, or setup step changes — keeps docs/ONBOARDING.md accurate for new contributors. Trigger on new npm scripts, new skills, new env vars, new worktree patterns, new test commands, file reorganizations, or changes to the brainstorm→spec→plan→implement cycle.
-version: 1.0.0
-last_changed: 2026-07-05
+version: 1.0.1
+last_changed: 2026-08-14
 ---
 
 # update-onboarding
@@ -35,8 +35,10 @@ Use this skill when something that affects a new developer joining the project h
 5. **Update the "Last updated" changelog (top of the doc).** It's a reverse-chronological bullet list (#861) — **not** a paragraph. Prepend a new entry to the **top** of the list as a single dated bullet:
 
    ```markdown
-   - **YYYY-MM-DD — <short title> (vX.Y.Z and/or #N).** One or two sentences on what changed and where, with `code spans` and §-refs as needed.
+   - **YYYY-MM-DD — <short title> (#N).** One or two sentences on what changed and where, with `code spans` and §-refs as needed.
    ```
+
+   **No version number** — since #2364, a PR author no longer knows their release version at authoring time (it's assigned once, at `/release` collation), so citing `vX.Y.Z` here would either be a guess or would point at whatever entry happens to be on top at release time, which belongs to someone else's work. Cite the issue number only.
 
    Keep the most-recent few entries inline; everything older lives in the `<details><summary>Older changes…</summary>` block below them. When the inline list grows past ~4–5 entries, move the oldest inline one down into the `<details>` block so the top stays skimmable. **Never** append to an existing bullet or collapse entries back into one paragraph — that's the exact regression #861 fixed. Bump the `**Last updated:** YYYY-MM-DD` date on the lead line to match your new entry.
 

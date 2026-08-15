@@ -1,7 +1,7 @@
 ---
 name: queue-batches
 description: Use whenever the user invokes `/queue-batches` or `/queue-batches NxM` (e.g. `/queue-batches 3x5`), or says "queue up some batches", "kick off parallel work on some tickets", "run N groups of M issues in parallel".
-version: 1.3.0
+version: 1.3.1
 last_changed: 2026-08-14
 ---
 
@@ -235,7 +235,7 @@ When all agents return:
 > conflict on the changelog. **That specific reason is gone, but the
 > instruction stands on a second, independent one:** `/ship` Step 1.5 runs
 > the full `scripts/preflight.sh` suite, and this skill's own rule above
-> (Step 5) is "one batch's preflight at a time" — two concurrent `/ship`s
+> (Step 5.5) is "one batch's preflight at a time" — two concurrent `/ship`s
 > would hit exactly that same preflight-against-preflight contention. Ship
 > one branch at a time for that reason.
 

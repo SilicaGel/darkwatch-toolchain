@@ -1,5 +1,14 @@
 # queue-batches — skill changelog
 
+## 1.3.1 — 2026-08-14 (#2411 doc corrections)
+
+- **Fixed the step citation** in the "ship sequentially" note: it said
+  "(Step 5)" for the preflight-serialisation rule; that rule actually lives
+  at Step 5.5.
+- **Fixed the 1.3.0 entry below**, which itself said this skill "serialises
+  agents" on preflight — Step 5.5 states the ORCHESTRATOR runs preflight,
+  never the agent.
+
 ## 1.3.0 — 2026-08-14 (#2364 changelog fragments)
 
 - **Fixed the "ship sequentially" justification.** It claimed concurrent PRs
@@ -8,8 +17,9 @@
   two branches can no longer collide on the changelog. The instruction to
   ship one branch at a time is unchanged, but now rests on the real,
   surviving reason: `/ship` Step 1.5 runs the full preflight suite, and this
-  skill already serialises agents on "one batch's preflight at a time" —
-  concurrent `/ship`s would hit that same contention.
+  skill's Step 5.5 already has the ORCHESTRATOR (never the agent) run
+  preflight one batch at a time — concurrent `/ship`s would hit that same
+  preflight-against-preflight contention.
 
 ## 1.0.0 — 2026-07-05 (#765 hygiene baseline)
 

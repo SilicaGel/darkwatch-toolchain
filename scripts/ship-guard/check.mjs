@@ -65,26 +65,6 @@ export function isReleasePr(title) {
   return typeof title === "string" && RELEASE_TITLE_RE.test(title);
 }
 
-/**
- * The changelog fragments this PR adds (`.gitkeep` doesn't count). Only a
- * file directly inside `docs/changelog.d/` counts — a further `/` after the
- * prefix means a subdirectory, and `readFragments` in
- * scripts/changelog-collate.mjs uses a non-recursive `readdirSync`, so a
- * subdirectory fragment is never read there. This function and that one must
- * agree on what a fragment is, or a fragment can pass this check and then be
- * silently dropped at collation with no warning anywhere — the exact failure
- * this function's test guards against.
- */
-export function fragmentsAdded(changedFiles) {
-  const list = changedFiles instanceof Set ? [...changedFiles] : (changedFiles ?? []);
-  return list.filter((f) => {
-    if (typeof f !== "string") return false;
-    const trimmed = f.trim();
-    if (!trimmed.startsWith(FRAGMENT_DIR) || !trimmed.endsWith(".md")) return false;
-    return !trimmed.slice(FRAGMENT_DIR.length).includes("/");
-  });
-}
-
 // A standalone `Ready #N` line. `/ship` writes these one-per-line in the PR
 // body (NOT `Closes`, intentionally — see the skill). Anchored to line start
 // (after optional list markup / whitespace) so a `Ready #5` buried mid-sentence
@@ -125,6 +105,48 @@ export function parseTestPlanNumbers(body) {
   const section = nextSection === -1 ? rest : rest.slice(0, nextSection);
   for (const m of section.matchAll(TEST_PLAN_BLOCK)) out.add(m[1]);
   return out;
+}
+
+/**
+ * The changelog fragments this PR ADDED (`.gitkeep` doesn't count). Only a
+ * file directly inside `docs/changelog.d/` counts — a further `/` after the
+ * prefix means a subdirectory, and `readFragments` in
+ * scripts/changelog-collate.mjs uses a non-recursive `readdirSync`, so a
+ * subdirectory fragment is never read there. This function and that one must
+ * agree on what a fragment is, or a fragment can pass this check and then be
+ * silently dropped at collation with no warning anywhere.
+ *
+ * #2410(a) — `addedFiles` MUST be an added-only list (the runner's
+ * `git diff --diff-filter=A`), a deliberately SEPARATE input from the plain
+ * `changedFiles` list `changelogTouched` reads below. Before this fix, both
+ * checks shared one unfiltered list, so a PR that DELETED someone else's
+ * still-pending fragment satisfied "this PR adds a fragment" just because the
+ * deleted path showed up in a plain `git diff --name-only` — check (a) never
+ * distinguished "added" from "removed". `changelogTouched` must keep reading
+ * the FULL unfiltered list, though: docs/CHANGELOG.md is always MODIFIED,
+ * never ADDED, so if it read an added-only list too, that check would never
+ * fire and silently disable the #2364 CHANGELOG-edit guard. Do not collapse
+ * these two inputs back into one list.
+ *
+ * `addedFiles` absent/undefined (an older caller, or the runner choosing not
+ * to compute it) is treated as "nothing was added" — see the `?? []` below —
+ * NOT as "fall back to changedFiles". That's a deliberate fail-CLOSED choice:
+ * falling back would silently resurrect the exact deletion exploit this fix
+ * closes, for any caller that simply forgot to pass the new argument. Failing
+ * closed instead means a Ready PR just blocks (loudly, in CI) until the
+ * caller supplies it — never a silent re-opening of the hole. This is safe
+ * for the real runner because it either supplies a real added-only list or
+ * skips the WHOLE guard open on a git failure (see gitAddedFiles/main below),
+ * matching how gitChangedFiles failures are already handled.
+ */
+export function fragmentsAdded(addedFiles) {
+  const list = addedFiles instanceof Set ? [...addedFiles] : (addedFiles ?? []);
+  return list.filter((f) => {
+    if (typeof f !== "string") return false;
+    const trimmed = f.trim();
+    if (!trimmed.startsWith(FRAGMENT_DIR) || !trimmed.endsWith(".md")) return false;
+    return !trimmed.slice(FRAGMENT_DIR.length).includes("/");
+  });
 }
 
 /** Did the PR add/modify the changelog? */
@@ -208,7 +230,7 @@ export function changelogVersionAdvanced({ prContents, mainContents }) {
  * Pure decision. Returns { ok, reasons } where `reasons` is a list of
  * human-readable failures (empty when ok). Exported for exhaustive testing.
  */
-export function decide({ body, title, changedFiles, changelogVersions }) {
+export function decide({ body, title, changedFiles, addedFiles, changelogVersions }) {
   // Escape hatch — title token bypasses everything.
   if (typeof title === "string" && title.includes(SKIP_MARKER)) {
     return { ok: true, reasons: [], skipped: true, ready: [] };
@@ -257,10 +279,12 @@ export function decide({ body, title, changedFiles, changelogVersions }) {
 
   // (a) #2364 — a Ready PR must add a fragment, unless it's a release PR or
   // carries the title exemption. Replaces the old "must touch CHANGELOG" rule.
+  // #2410(a) — reads `addedFiles` (added-only), NOT `changedFiles` — see
+  // fragmentsAdded's doc comment for why the two lists must stay separate.
   if (
     !release &&
     !(typeof title === "string" && title.includes(NO_CHANGELOG_MARKER)) &&
-    fragmentsAdded(changedFiles).length === 0
+    fragmentsAdded(addedFiles).length === 0
   ) {
     reasons.push(
       `PR has Ready line(s) (${ready.map((n) => `#${n}`).join(", ")}) but adds no fragment in ` +
@@ -325,6 +349,35 @@ function gitChangedFiles(base) {
 }
 
 /**
+ * #2410(a) — the added-only counterpart to gitChangedFiles, for check (a)'s
+ * `addedFiles`. Same `base...HEAD` range, plus `--diff-filter=A` so a deleted
+ * or modified path (e.g. someone else's still-pending fragment) never appears
+ * here. Returns null on any git failure, same fail-open contract as
+ * gitChangedFiles — main() skips the WHOLE guard rather than let decide()'s
+ * fail-closed default (see fragmentsAdded's doc comment) block a legitimate
+ * PR on an infra hiccup.
+ *
+ * `--no-renames` is REQUIRED, not cosmetic: git's porcelain rename detection
+ * (`diff.renames`) defaults to on for git >= 2.9, so a fragment added via a
+ * rename-shaped diff (e.g. `git mv` an unrelated file onto a fragment path,
+ * or a big enough content match) can be reported as status `R` instead of
+ * `A` — and `--diff-filter=A` would then silently MISS it, fragmentsAdded
+ * would treat it as not-added, and a genuinely fine PR would get blocked.
+ * That fails in the SAFE direction (a false block, never a false pass), but
+ * it would still make this guard's behaviour depend on the runner's git
+ * config/version rather than being deterministic. `--no-renames` makes the
+ * result independent of `diff.renames` either way.
+ */
+function gitAddedFiles(base) {
+  const out = tryGit(["diff", "--name-only", "--no-renames", "--diff-filter=A", `${base}...HEAD`]);
+  if (out === null) return null;
+  return out
+    .split("\n")
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+/**
  * #2165 — read docs/CHANGELOG.md as it stands on HEAD (the PR) and on `base`
  * (main), for the version-advanced check. null on any git failure (missing
  * file on one side reads as "" via `git show`, which is fine — it just
@@ -355,11 +408,33 @@ function main() {
     process.exit(0);
   }
 
-  // Fails open to undefined on any git error — decide() then skips check (c)
-  // rather than blocking on an infra hiccup.
-  const changelogVersions = gitChangelogVersions(base) ?? undefined;
+  // #2410(a) — a SEPARATE, added-only list for check (a); see
+  // fragmentsAdded's doc comment for why it must not be merged with
+  // changedFiles. Fails the WHOLE guard open on a git error, same as
+  // gitChangedFiles above — decide()'s own fail-closed default for a missing
+  // addedFiles exists for callers that skip this computation entirely, not
+  // for this runner to lean on when git itself is broken.
+  const addedFiles = gitAddedFiles(base);
+  if (addedFiles === null) {
+    console.log("ship-guard: could not compute added files vs main — skipping (non-blocking).");
+    process.exit(0);
+  }
 
-  const result = decide({ body, title, changedFiles, changelogVersions });
+  // #2410(b) — fails open to undefined on any git error, same as every other
+  // fail-open branch in this runner, but (unlike before) NEVER silently: a
+  // notice prints so a broken/oversized read doesn't look identical to a
+  // clean pass. This is exactly the shape of bug C1 (see the GIT_MAX_BUFFER
+  // comment above) — decide() then skips check (c) rather than blocking on
+  // an infra hiccup, but now that skip is visible in the log.
+  const changelogVersionsRaw = gitChangelogVersions(base);
+  if (changelogVersionsRaw === null) {
+    console.log(
+      `ship-guard: could not read ${CHANGELOG_PATH} on one side (PR or main) — skipping check (c) (non-blocking).`,
+    );
+  }
+  const changelogVersions = changelogVersionsRaw ?? undefined;
+
+  const result = decide({ body, title, changedFiles, addedFiles, changelogVersions });
 
   if (result.skipped) {
     console.log(`ship-guard: ${SKIP_MARKER} present in PR title — skipped.`);

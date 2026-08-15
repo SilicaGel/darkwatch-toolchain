@@ -19,7 +19,13 @@ import {
 import { tmpdir } from "node:os";
 import { join, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { parseFragment, nextVersion, currentVersion, collate } from "./changelog-collate-core.mjs";
+import {
+  parseFragment,
+  nextVersion,
+  currentVersion,
+  collate,
+  insertEntry,
+} from "./changelog-collate-core.mjs";
 import { parseHeading } from "./app-version.mjs";
 import { compareVersions } from "./changelog-normalize-core.mjs";
 
@@ -111,6 +117,44 @@ describe("currentVersion", () => {
 
   it("returns 0.0.0 for a changelog with no entries", () => {
     assert.deepEqual(currentVersion("# Darkwatch Changelog\n"), [0, 0, 0]);
+  });
+});
+
+describe("insertEntry", () => {
+  it("inserts above the newest existing ## heading, leaving older entries untouched", () => {
+    const contents =
+      "# Darkwatch Changelog\n\n---\n\n## 2026-08-14 — v0.197.9 — Old\n\nOld body.\n";
+    const entry = "## 2026-08-15 — v0.198.0 — New\n\nNew body.\n";
+    const out = insertEntry(contents, entry);
+    assert.ok(out.startsWith("# Darkwatch Changelog\n\n---\n\n" + entry));
+    assert.ok(out.includes("## 2026-08-14 — v0.197.9 — Old\n\nOld body.\n"));
+  });
+
+  // #2411 (insert-entry-no-heading) — a changelog with NO `## ` heading at
+  // all (idx === -1: `contents.search(/^## /m)` finds nothing) is the empty
+  // side of the file/collation lifecycle: the very first release ever
+  // collated, or a from-scratch changelog. Manually verified correct during
+  // #2364's review; this pins it with an assertion.
+  it("appends the entry when the changelog has no ## heading at all", () => {
+    const contents = "# Darkwatch Changelog\n\n---\n";
+    const entry = "## 2026-08-15 — v0.1.0 — First release\n\nBody.\n";
+    const out = insertEntry(contents, entry);
+    assert.ok(out.startsWith("# Darkwatch Changelog\n\n---\n"), "header preserved");
+    assert.ok(out.includes(entry), "entry present");
+    // The entry must appear strictly AFTER the header, not interleaved into it.
+    assert.ok(out.indexOf(entry) > out.indexOf("---"));
+  });
+
+  it("appends cleanly even when the no-heading changelog has ragged trailing whitespace", () => {
+    const contents = "# Darkwatch Changelog\n\n---\n\n\n   \n";
+    const entry = "## 2026-08-15 — v0.1.0 — First release\n\nBody.\n";
+    const out = insertEntry(contents, entry);
+    assert.ok(out.includes(entry));
+    // No triple-blank-line mess left behind from the ragged trailing whitespace.
+    assert.ok(
+      !/\n{3,}/.test(out.split(entry)[0]),
+      "trailing whitespace normalized before the entry",
+    );
   });
 });
 
@@ -226,6 +270,36 @@ describe("collate", () => {
       /no fragments/i,
     );
   });
+
+  // #2411 (fragment-nested-heading) — a fragment body is placed verbatim, so
+  // nothing should special-case a `### ` line that happens to appear INSIDE a
+  // fragment's own body (as opposed to the `### ` sub-heading collation
+  // itself generates from `title`). Verified correct by execution during
+  // #2364's review; this pins it with an assertion instead of leaving the
+  // adversarial case unproven.
+  it("preserves a fragment body's own ### line verbatim, without it being mistaken for a real heading", () => {
+    const nestedBody =
+      "Lead.\n\n#### Fixed\n\n- **A** (#1): x\n\n" +
+      "### Not a real sub-heading — just body text quoting the format\n\nMore body.";
+    const frag = parseFragment(
+      `---\ntitle: A thing\nissues: [1]\nbump: patch\n---\n\n${nestedBody}\n`,
+      "1-x.md",
+    );
+    const { contents } = collate({
+      changelogContents: CHANGELOG,
+      fragments: [frag],
+      date: "2026-08-15",
+      title: "T",
+    });
+    // The nested "### " line survives byte-for-byte inside the rendered entry.
+    assert.ok(contents.includes(nestedBody), "nested ### line preserved verbatim in the body");
+    // And app-version.mjs's `## ` heading parser is never confused by it: the
+    // only headings found are the new release entry plus CHANGELOG's one
+    // pre-existing entry — the fragment's own "### " line isn't among them.
+    const headings = contents.split("\n").map(parseHeading).filter(Boolean);
+    assert.equal(headings.length, 2, "exactly the new entry + the pre-existing one");
+    assert.equal(headings[0].title, "T");
+  });
 });
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -292,6 +366,50 @@ describe("changelog-collate CLI", () => {
       execFileSync("node", [CLI, "--title", "A release"], { cwd: dir, stdio: "pipe" }),
     );
     assert.equal(readFileSync(join(dir, "docs", "CHANGELOG.md"), "utf8"), before);
+  });
+
+  // #2411 (collate-parseargs-tests) — parseArgs()'s error branches had no
+  // test coverage at all. Run through the real CLI (parseArgs isn't
+  // exported), asserting the exit is non-zero, the message names the
+  // problem, and — like every other abort path — nothing gets written.
+  describe("parseArgs error branches (#2411)", () => {
+    it("rejects an unknown argument, naming it", () => {
+      const dir = tmpRepo([["2397-a.md", fragText("Good", [2397], "patch", "Body A.")]]);
+      const before = readFileSync(join(dir, "docs", "CHANGELOG.md"), "utf8");
+      assert.throws(
+        () =>
+          execFileSync("node", [CLI, "--title", "A release", "--bogus", "x"], {
+            cwd: dir,
+            stdio: "pipe",
+          }),
+        /unknown argument "--bogus"/,
+      );
+      assert.equal(readFileSync(join(dir, "docs", "CHANGELOG.md"), "utf8"), before);
+    });
+
+    it("rejects a run with no --title", () => {
+      const dir = tmpRepo([["2397-a.md", fragText("Good", [2397], "patch", "Body A.")]]);
+      const before = readFileSync(join(dir, "docs", "CHANGELOG.md"), "utf8");
+      assert.throws(
+        () => execFileSync("node", [CLI], { cwd: dir, stdio: "pipe" }),
+        /--title is required/,
+      );
+      assert.equal(readFileSync(join(dir, "docs", "CHANGELOG.md"), "utf8"), before);
+    });
+
+    it("rejects a malformed --date", () => {
+      const dir = tmpRepo([["2397-a.md", fragText("Good", [2397], "patch", "Body A.")]]);
+      const before = readFileSync(join(dir, "docs", "CHANGELOG.md"), "utf8");
+      assert.throws(
+        () =>
+          execFileSync("node", [CLI, "--title", "A release", "--date", "08/15/2026"], {
+            cwd: dir,
+            stdio: "pipe",
+          }),
+        /--date must be YYYY-MM-DD/,
+      );
+      assert.equal(readFileSync(join(dir, "docs", "CHANGELOG.md"), "utf8"), before);
+    });
   });
 
   it("exits non-zero and writes nothing when a fragment is malformed", () => {

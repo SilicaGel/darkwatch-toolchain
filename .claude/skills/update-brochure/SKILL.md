@@ -1,7 +1,7 @@
 ---
 name: update-brochure
 description: Use when a user-facing feature is added, changed, or removed, or a new RPG system is added — keeps site/index.html and site/screenshots.js in sync with the app. Skip for backend-only changes.
-version: 1.1.0
+version: 1.1.1
 last_changed: 2026-08-14
 ---
 
@@ -47,10 +47,14 @@ git diff main...HEAD --stat -- client/
 # Frontmatter's `issues:`/`bump:` lines are YAML, not prose, so they're
 # dropped; only `title:` (re-labelled) and everything after the second `---`
 # are printed (#2364 — fragments replaced a direct docs/CHANGELOG.md diff).
+# Only the FIRST TWO `---` lines (the frontmatter fence) are treated
+# specially — a bare `---` inside the body itself (a markdown horizontal
+# rule) prints like any other body line, instead of being silently eaten.
 for f in $(git diff main...HEAD --name-only --diff-filter=A -- docs/changelog.d/); do
   echo "=== $f ==="
-  awk '/^title:/{sub(/^title:[ \t]*/,""); print "Title: " $0; next}
-       /^---$/{n++; next} n>=2{print}' "$f"
+  awk '/^---$/{if(n<2){n++; next}}
+       /^title:/{sub(/^title:[ \t]*/,""); print "Title: " $0; next}
+       n>=2{print}' "$f"
 done | head -40
 ```
 
