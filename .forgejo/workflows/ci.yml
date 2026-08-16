@@ -544,6 +544,19 @@ jobs:
       # a real step-3 PATCH waiter race, separate from the Zod cascade that #501
       # fixed. Re-enable only after the underlying race is investigated and the
       # waiter is hardened (or the wizard's debounce is stabilised).
+      #
+      # NOTHING BUT SPEC PATHS GOES IN THE BLOCK BELOW. `>-` is a folded scalar,
+      # so a `#` line inside it is CONTENT, not a comment — it folds into the
+      # value and Playwright receives the prose as spec filters. #2187 learned
+      # this the expensive way: an explanatory comment between two entries made
+      # smoke die on `Invalid regular expression: /(~5ms/gi`. Annotate here,
+      # above the key, never between the entries.
+      #
+      # 2187-combat-leak-guard.spec.ts is in the per-PR set rather than
+      # nightly-only.txt because it is four pure-logic tests with no browser and
+      # no database (~5ms). It pins the combat leak guard's verdict rules, and
+      # that guard runs on EVERY invocation of this suite — if its logic drifts,
+      # either every run goes red or the guard goes silently blind.
       SMOKE_SPECS: >-
         e2e/a11y.spec.ts
         e2e/dashboard.spec.ts
@@ -570,6 +583,7 @@ jobs:
         e2e/2116-wave3-wt-chrome.spec.ts
         e2e/2380-wt-classic-nav-hidden.spec.ts
         e2e/2330-load-error-retry.spec.ts
+        e2e/2187-combat-leak-guard.spec.ts
     # #969 — run inside the prebuilt CI image (Node 22 + Chromium + Playwright
     # system deps baked). No apt install-deps, no browser download, no
     # actions/setup-node. Pinned to the @playwright/test version; rebuilt by
