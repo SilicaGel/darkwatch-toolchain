@@ -52,15 +52,36 @@ jobs:
   # determine what to deploy, which must stop the nightly rather than guess.
   decide:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    # 10, not 5 (#2440). The work is now seconds, but this job is a single point
+    # of failure for the whole nightly — every gate and the deploy `need` it —
+    # and 5 was already blown once (run 9818, 300s+) by an infrastructure blip
+    # rather than by the work. Headroom here costs nothing and buys the
+    # difference between a slow night and a dead one.
+    timeout-minutes: 10
     outputs:
       ref: ${{ steps.pick.outputs.ref }}
       skip: ${{ steps.pick.outputs.skip }}
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
-          # Tags are the whole input to this job, and a shallow clone has none.
+          # Tags are the whole input to this job, and a shallow clone has none —
+          # so the history has to come down. What does NOT have to come down is
+          # every blob in it (#2440). This job runs `git tag -l` and two scripts
+          # that import only `node:` builtins; it never reads a tracked file
+          # outside `scripts/`.
+          #
+          # `filter: blob:none` alone would be a no-op — a full working tree
+          # lazily re-fetches every tip blob — so the sparse list is what does
+          # the work. Same recipe as ci.yml's `tree-gate` (#2315), which
+          # documents why this is safe.
+          #
+          # Measured against this repo: a blob-filtered clone of the full
+          # history is 3.2M of .git, versus 385M unfiltered. Run 9817 spent 84s
+          # here and run 9818 blew past 300s and killed the nightly.
           fetch-depth: 0
+          filter: blob:none
+          sparse-checkout: |
+            scripts
 
       - name: Pick the newest release tag and compare it with production
         id: pick
@@ -140,8 +161,54 @@ jobs:
       ref: ${{ needs.decide.outputs.ref }}
     secrets: inherit
 
+  # #2440 — THIS JOB EXISTS TO WORK AROUND A FORGEJO BUG. Do not "simplify" it
+  # away by pointing `deploy` back at the three gates directly; that is the
+  # exact shape that deadlocked run 9817 and it reproduces 100% of the time.
+  #
+  # In services/actions/job_emitter.go (v15.0.0, and still on forgejo/main):
+  #   1. `Resolve()` is a fixpoint over an IN-MEMORY status map, so ONE pass
+  #      can predict e2e-full -> Success and, in that same pass, deploy ->
+  #      Waiting.
+  #   2. `checkJobsOfRun` then applies those updates looping the run's jobs in
+  #      DB row order, i.e. ascending id.
+  #   3. A job entering Waiting goes through `tryHandleIncompleteMatrix`, which
+  #      re-reads each needed job's COMMITTED DB status and hard-errors if one
+  #      is not done.
+  #   4. That error aborts the whole surrounding `db.WithTx`, so the gate's
+  #      success never commits either — and it is retried every 5s forever.
+  #
+  # The id ordering in (2) is the trigger, and #2409 inverted it: a job whose
+  # `with:` interpolates `${{ needs.*.outputs.* }}` is stored INCOMPLETE and is
+  # deleted and RE-INSERTED at a new higher id once its needs finish. Giving the
+  # gates `with: ref:` moved them ABOVE `deploy`, which has sat at its
+  # run-creation id since the run began. Before #2409 `deploy` had no
+  # needs-interpolated `with:`, so it early-returned out of
+  # `tryHandleIncompleteMatrix` and this path was unreachable — which is why the
+  # nightly ran for months without hitting it.
+  #
+  # A plain job breaks the cycle twice over: it is never "incomplete", so its
+  # position in the id-ordered loop cannot matter, AND it has to be dispatched
+  # to a runner and finish, which forces `deploy`'s resolution into a LATER
+  # transaction where the gate statuses are committed — the read step (3) gets
+  # wrong today.
+  #
+  # Proven on this instance before merge, per #842: run 9820 (gate needed
+  # directly) livelocked with the error above; run 9821 (identical but for this
+  # barrier) went green end to end with zero emitter errors.
+  #
+  # Gate failure still blocks the deploy: a failed gate skips `gates-passed`,
+  # and a skipped `need` resolves a `uses:` caller to FAILURE (#2368) — the same
+  # red as before, not a silent pass. Keep it free of `if:` and of `with:`.
+  gates-passed:
+    needs: [e2e-full, smoke-walk, test]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Record that every gate passed
+        run: echo "e2e-full, smoke-walk and test all passed — releasing the deploy."
+
   deploy:
-    needs: [decide, e2e-full, smoke-walk, test]
+    needs: [decide, gates-passed]
     uses: ./.forgejo/workflows/deploy.yml
     with:
       ref: ${{ needs.decide.outputs.ref }}
