@@ -37,7 +37,24 @@ on:
         type: string
         required: false
         default: "false"
+      # #2409 — the nightly gate must test the SAME ref the deploy ships.
+      # Empty is deliberate: actions/checkout reads an empty `ref` as "this
+      # event's default", so PR / push / dispatch runs are unaffected.
+      ref:
+        description: "git ref to test; empty = this event's default"
+        type: string
+        required: false
+        default: ""
   workflow_dispatch:
+    inputs:
+      # #2409 — mirrored from workflow_call so a dispatch can PROVE the ref
+      # actually reaches the checkout. Without it `inputs.ref` is undefined on a
+      # dispatch and checkout silently falls back to the branch — which is
+      # exactly what run 9801 did, making that proof run worthless.
+      ref:
+        description: "git ref to test (e.g. v0.198.0); empty = default"
+        required: false
+        default: ""
 
 jobs:
   test:
@@ -107,6 +124,7 @@ jobs:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         if: ${{ inputs.skip != 'true' }}
         with:
+          ref: ${{ inputs.ref }}
           # The diff-coverage comment needs history to diff against the base ref.
           fetch-depth: 0
 
@@ -329,6 +347,8 @@ jobs:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         if: ${{ (needs.test.result == 'failure' || contains(needs.*.result, 'failure')) && !github.event.pull_request.number }}
         with:
+          # #2409 — report on the ref that was actually tested.
+          ref: ${{ inputs.ref }}
           # Suspect commits need history; #2315 — no blobs, this job opens no
           # tracked file (git log + inline python only).
           fetch-depth: 50

@@ -11,7 +11,22 @@ name: Smoke Walk
 
 on:
   workflow_call: # called by nightly-deploy.yml
+    inputs:
+      # #2409 — the nightly gate must test the SAME ref the deploy ships, or it
+      # stops covering what goes out. Empty is deliberate: actions/checkout
+      # treats an empty `ref` as "use this event's default", so schedule / PR /
+      # dispatch runs behave exactly as before.
+      ref:
+        description: "git ref to test; empty = this event's default"
+        type: string
+        required: false
+        default: ""
   workflow_dispatch:
+    inputs:
+      ref:
+        description: "git ref to test (e.g. v0.198.0); empty = default"
+        required: false
+        default: ""
 
 jobs:
   smoke-walk:
@@ -35,6 +50,8 @@ jobs:
           --health-retries=30
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          ref: ${{ inputs.ref }}
 
       # #969 — Node 22 baked into the image; cache only the npm download dir.
       - name: Cache npm downloads

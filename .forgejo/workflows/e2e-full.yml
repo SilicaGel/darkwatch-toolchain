@@ -23,7 +23,22 @@ name: E2E Full Suite
 
 on:
   workflow_call:
+    inputs:
+      # #2409 — the nightly gate must test the SAME ref the deploy ships, or it
+      # stops covering what goes out. Empty is deliberate: actions/checkout
+      # treats an empty `ref` as "use this event's default", so schedule / PR /
+      # dispatch runs behave exactly as before.
+      ref:
+        description: "git ref to test; empty = this event's default"
+        type: string
+        required: false
+        default: ""
   workflow_dispatch:
+    inputs:
+      ref:
+        description: "git ref to test (e.g. v0.198.0); empty = default"
+        required: false
+        default: ""
   schedule:
     # #1622 — midday no-deploy backstop at 19:00 UTC (3pm ET). The deploy gate
     # runs at 06:00 UTC (2am ET, nightly-deploy.yml); a spec-breaking merge made
@@ -99,6 +114,8 @@ jobs:
           --health-retries=30
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          ref: ${{ inputs.ref }}
 
       - name: Cache npm downloads
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
@@ -496,6 +513,9 @@ jobs:
         # "(git history unavailable)".
         continue-on-error: true
         with:
+          # #2409 — this job reports on the ref that was TESTED, so it must
+          # check out the same one the suite did.
+          ref: ${{ inputs.ref }}
           # git log <last-green>..HEAD needs the merge-base history.
           #
           # #1958 — DELIBERATELY still fetch-depth: 0, unlike ship-guard and
@@ -580,12 +600,31 @@ jobs:
           SHA: ${{ github.sha }}
           EVENT: ${{ github.event_name }}
           REF: ${{ github.ref_name }}
+          # #2409 — when the suite was pinned to a release tag, `github.sha` /
+          # `github.ref_name` describe the CALLER (main's tip), not the code that
+          # was actually tested. Reporting those would point the next
+          # investigation at the wrong commit — the same defect #2435 records for
+          # this marker's suspect range. Prefer the tested ref when there is one.
+          TESTED_REF: ${{ inputs.ref }}
         run: |
           python3 - <<'PY'
           import os, json, glob, subprocess
           api, repo = os.environ["API_URL"], os.environ["REPO"]
           server, run_number, run_id = os.environ["SERVER_URL"], os.environ["RUN_NUMBER"], os.environ["RUN_ID"]
           sha, event, ref = os.environ["SHA"], os.environ.get("EVENT", "?"), os.environ.get("REF", "?")
+          # #2409 — a pinned run tested a TAG, not the caller's tip. Report what
+          # ran, and resolve its real sha from the checkout (this job checks out
+          # the same ref), so the marker names the commit that actually failed.
+          tested_ref = os.environ.get("TESTED_REF", "").strip()
+          if tested_ref:
+              ref = tested_ref
+              try:
+                  out = subprocess.run(["git", "rev-parse", tested_ref],
+                                       capture_output=True, text=True, timeout=15)
+                  if out.returncode == 0 and out.stdout.strip():
+                      sha = out.stdout.strip()
+              except Exception:
+                  pass  # keep the caller's sha rather than lose the marker entirely
           run_url = f"{server}/{repo}/actions/runs/{run_number}"
           MARKER = "<!-- e2e-full-red -->"
 

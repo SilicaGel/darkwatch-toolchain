@@ -1,7 +1,7 @@
 name: Nightly Deploy
 
-# Orchestrates the overnight gate: (e2e-full ‖ smoke-walk) → deploy.
-# The deploy gate must pass; a failure in either blocks the deploy.
+# Orchestrates the overnight gate: decide → (e2e-full ‖ smoke-walk ‖ test) → deploy.
+# The deploy gate must pass; a failure in any of the three blocks the deploy.
 #
 # e2e-full runs the ENTIRE Playwright suite (#1141) — every spec, no allow-list.
 # It is a deploy GATE (deploy `needs` it): the nightly deploy must not ship if
@@ -14,6 +14,23 @@ name: Nightly Deploy
 # keeping it only meant a second hand-maintained allow-list that could drift.
 # smoke-walk (the exploratory crawler) now runs in parallel with e2e-full rather
 # than gating on e2e, so the nightly wall-clock is max(e2e-full, smoke-walk).
+#
+# #2409 — THE GATE AND THE DEPLOY NOW SHARE ONE RESOLVED REF.
+#
+# `decide` resolves the newest release tag ONCE and every downstream job takes
+# it as an input. Resolving per-job would reintroduce the race it closes: a
+# release merging mid-run would let the deploy ship a tag the gates never
+# tested. "The gate covers what ships" only holds if there is a single
+# resolution.
+#
+# Two Forgejo constraints shape this and rule out the obvious alternative:
+# Forgejo IGNORES `if:` on a `uses:` job (#1620), and a `uses:` job cannot
+# survive a skipped `need` — it fails in 0s with no log (#2351, #2308).
+# Worse, a callee job that SKIPS makes the caller's expanded placeholder report
+# FAILURE (#2368, measured on this instance: probe run 9785). So the
+# "already deployed" skip CANNOT be an `if:` on the three gate jobs, and cannot
+# be a skippable check-job they `need`. It arrives as an INPUT, and deploy.yml
+# no-ops per-step — the shape #2368 proved.
 #
 # Logic lives in the called workflows — this file is intentionally just an
 # orchestrator. Curate the per-PR spec set in ci.yml's `smoke` job (guarded by
@@ -28,14 +45,85 @@ on:
   workflow_dispatch:
 
 jobs:
-  # Whole suite (no allow-list), sharded 3×.
+  # #2409 — resolve WHAT to ship, once, before anything else runs.
+  #
+  # A normal job, never a `uses:` call, so an ordinary job-level `if:` and
+  # `outputs` behave. It always runs; it fails only when it genuinely cannot
+  # determine what to deploy, which must stop the nightly rather than guess.
+  decide:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      ref: ${{ steps.pick.outputs.ref }}
+      skip: ${{ steps.pick.outputs.skip }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          # Tags are the whole input to this job, and a shallow clone has none.
+          fetch-depth: 0
+
+      - name: Pick the newest release tag and compare it with production
+        id: pick
+        env:
+          HEALTH_URL: https://app.example.com/health
+        run: |
+          set -uo pipefail
+
+          # Newest by SEMVER. Deliberately not `sort`/`--sort=-v:refname`,
+          # which rank v0.99.0 above v0.100.0 — we are past that boundary
+          # already, so a lexical pick would be wrong today. See
+          # scripts/newest-release-tag-core.mjs.
+          if ! TAG="$(git tag -l 'v*' | node scripts/newest-release-tag.mjs)"; then
+            echo "::error::No release tag to deploy. The nightly is pinned to tags (#2409),"
+            echo "so it cannot proceed until one exists. Bootstrap the tag at the release"
+            echo "merge commit, then re-run."
+            exit 1
+          fi
+          echo "ref=$TAG" >> "$GITHUB_OUTPUT"
+
+          # What is live right now? APP_VERSION is "<version>+<short-sha>";
+          # the version half is what the tag encodes.
+          LIVE_RAW="$(curl -fsS --max-time 15 "$HEALTH_URL" 2>/dev/null \
+            | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{process.stdout.write(JSON.parse(s).version??"")}catch{}})' || true)"
+          LIVE="${LIVE_RAW%%+*}"
+          WANT="${TAG#v}"
+
+          if [ -z "$LIVE" ]; then
+            # Unknown, not "different". Fail SAFE toward shipping: a skip on an
+            # unreadable /health could park an unshipped release indefinitely,
+            # and if production really is down, deploying is what we want.
+            echo "::warning::Could not read $HEALTH_URL — proceeding with the deploy rather than skipping."
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          elif [ "$LIVE" = "$WANT" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "Production already runs $LIVE — $TAG is live. The gate still runs against it; the deploy will no-op."
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+            echo "Production runs $LIVE; newest tag is $TAG ($WANT). Deploying."
+          fi
+
+  # Whole suite (no allow-list), sharded 3×. Runs against the pinned tag.
+  #
+  # NOTE it runs even when the deploy will no-op. That is deliberate: with the
+  # deploy pinned to a tag, `main` is no longer nightly regression-tested (the
+  # accepted consequence recorded on #2409), so this is the one remaining
+  # nightly signal on the code that is actually live. Skipping it would need a
+  # step-level guard on all 27 of its steps — every future step would have to
+  # remember the guard, and one that forgot would run silently during a
+  # "skipped" nightly. Not worth the drift risk to reclaim idle runner time.
   e2e-full:
+    needs: [decide]
     uses: ./.forgejo/workflows/e2e-full.yml
+    with:
+      ref: ${{ needs.decide.outputs.ref }}
     secrets: inherit
 
   # Exploratory crawler — independent of e2e-full; both gate the deploy.
   smoke-walk:
+    needs: [decide]
     uses: ./.forgejo/workflows/smoke-walk.yml
+    with:
+      ref: ${{ needs.decide.outputs.ref }}
     secrets: inherit
 
   # #2336 — the unit + integration suite. Added to the nightly because the
@@ -43,15 +131,21 @@ jobs:
   # re-ran it against main: e2e-full and smoke-walk were the only nightly jobs,
   # and neither covers the unit/int suite. It GATES the deploy for the same
   # reason e2e-full does — a blocked deploy beats shipping something broken in
-  # a way nobody looked for. ~10-15 min, once a day, against a nightly that is
-  # otherwise only 2-3 jobs, so it costs no burst pressure.
+  # a way nobody looked for.
   test:
+    needs: [decide]
     uses: ./.forgejo/workflows/test.yml
     with:
       skip: "false" # the nightly always runs it — that is the whole point
+      ref: ${{ needs.decide.outputs.ref }}
     secrets: inherit
 
   deploy:
-    needs: [e2e-full, smoke-walk, test]
+    needs: [decide, e2e-full, smoke-walk, test]
     uses: ./.forgejo/workflows/deploy.yml
+    with:
+      ref: ${{ needs.decide.outputs.ref }}
+      # No-ops per-step when the tag is already live. NOT an `if:` here — see
+      # this file's header: that shape reds the run instead of skipping it.
+      skip: ${{ needs.decide.outputs.skip }}
     secrets: inherit

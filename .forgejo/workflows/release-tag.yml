@@ -1,0 +1,127 @@
+name: Release tag
+
+# #2409 (phase 2 of #2364) — stamp `v<version>` on the commit that introduced
+# that version, so the deploy has something stable to pin to.
+#
+# WHY A TAG AND NOT A COMMIT
+#   A tag moves no files. It therefore (a) does not re-trigger CI — nothing in
+#   .forgejo/workflows listens on tag pushes, verified — and (b) does not change
+#   the tree that the #2336 push-to-main tree gate compares, so it cannot
+#   perturb the skip decision that #2368 just made load-bearing.
+#
+# WHY ITS OWN FILE, NOT A JOB IN ci.yml
+#   Two reasons, both practical. ci.yml has no `workflow_dispatch`, and a single
+#   job of it cannot be dispatched — so a job living there could not be proven
+#   before merge, which #842 requires for every workflow change. And ci.yml
+#   declares `permissions: contents: read` at the workflow level; tag creation
+#   needs write, and widening ci.yml's blanket permission to suit one job is the
+#   wrong trade.
+#
+# IDEMPOTENT. The common case is "the tag already exists" — every push to main
+# between releases carries the same version. That is a success, not a no-op to
+# be surprised by.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "'true' reports what it would tag and creates nothing"
+        required: false
+        default: "true"
+
+# Tag creation needs write. Scoped to this workflow alone — see the note above.
+permissions:
+  contents: write
+
+jobs:
+  release-tag:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          # app-version.mjs reads docs/CHANGELOG.md out of the working tree, so
+          # this must be the tree AT github.sha — which is what checkout gives
+          # us by default on a push.
+          fetch-depth: 1
+
+      - name: Resolve the version this commit carries
+        id: ver
+        run: |
+          VERSION="$(node scripts/app-version.mjs)"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Version at ${{ github.sha }} is $VERSION -> tag v$VERSION"
+
+      - name: Create the tag if it does not exist
+        env:
+          # Same two-token pattern e2e-full.yml's notify-failure uses: the
+          # full-scope PAT first, github.token as the fallback (scoped by the
+          # permissions block above).
+          FALLBACK_TOKEN: ${{ secrets.FORGEJO_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
+          API_URL: ${{ github.api_url }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+          TAG: ${{ steps.ver.outputs.tag }}
+          # A dispatch defaults to dry-run: dispatching from a BRANCH to prove
+          # this workflow would otherwise tag the branch head with the release
+          # version, which is exactly the mis-tagging the bootstrap note warns
+          # about. A push to main never dry-runs.
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && (github.event.inputs.dry_run != 'false') }}
+        run: |
+          set -uo pipefail
+
+          # curl, NOT python-urllib: forge.example.com sits behind Cloudflare,
+          # which fingerprint-blocks urllib with a 403 (#1620).
+          api_get() {
+            for tok in "$FALLBACK_TOKEN" "$GH_TOKEN"; do
+              [ -z "$tok" ] && continue
+              code=$(curl -sS -o /tmp/tag_resp.json -w '%{http_code}' \
+                -H "Authorization: token $tok" \
+                "$API_URL/repos/$REPO/tags/$TAG")
+              case "$code" in
+                200) return 0 ;;   # exists
+                404) return 1 ;;   # absent
+              esac
+            done
+            return 2               # could not tell
+          }
+
+          # Capture the status explicitly rather than reading `$?` inside an
+          # elif — that works, but it is exactly the kind of subtlety that
+          # rots when someone inserts a line between the two.
+          api_get
+          exists=$?
+          if [ "$exists" -eq 0 ]; then
+            echo "Tag $TAG already exists — nothing to do. (This is the normal case"
+            echo "for every push between releases.)"
+            exit 0
+          fi
+          if [ "$exists" -eq 2 ]; then
+            echo "::error::Could not determine whether $TAG exists (no token could read the tags API)."
+            exit 1
+          fi
+
+          if [ "$DRY_RUN" = "true" ]; then
+            echo "DRY RUN — would create tag $TAG at $SHA. Nothing was created."
+            exit 0
+          fi
+
+          for tok in "$FALLBACK_TOKEN" "$GH_TOKEN"; do
+            [ -z "$tok" ] && continue
+            code=$(curl -sS -o /tmp/tag_create.json -w '%{http_code}' -X POST \
+              -H "Authorization: token $tok" -H "Content-Type: application/json" \
+              --data "$(printf '{"tag_name":"%s","target":"%s"}' "$TAG" "$SHA")" \
+              "$API_URL/repos/$REPO/tags")
+            if [ "${code#2}" != "$code" ]; then
+              echo "Created tag $TAG at $SHA"
+              exit 0
+            fi
+            echo "  create via this token: HTTP $code $(head -c 200 /tmp/tag_create.json)"
+          done
+
+          echo "::error::Could not create tag $TAG at $SHA with any available token."
+          exit 1

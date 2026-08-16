@@ -29,23 +29,83 @@ name: Deploy
 
 on:
   workflow_call: # called by nightly-deploy.yml
+    inputs:
+      # #2409 — the RESOLVED release tag, decided once by nightly-deploy's
+      # `decide` job and handed to the gates and to this job alike. Resolving it
+      # here as well would reintroduce the race the single resolution closes: a
+      # release merging mid-run would ship a tag the gates never tested.
+      ref:
+        description: "release tag to deploy (e.g. v0.198.0)"
+        type: string
+        required: true
+      # 'true' when the newest tag is already live. The job still RUNS and
+      # succeeds — every step below is guarded off. It must not skip: a skipped
+      # callee job makes the caller's expanded placeholder report FAILURE
+      # (#2368, measured), which would turn "nothing new to ship" into a red
+      # nightly.
+      skip:
+        description: "'true' when the newest tag is already deployed"
+        type: string
+        required: false
+        default: "false"
   workflow_dispatch:
     inputs:
       branch:
-        description: "Branch to deploy (default: main)"
+        description: "Emergency override — deploy this ref instead of the newest tag"
         required: false
-        default: "main"
+        default: ""
 
 jobs:
   deploy:
     runs-on: pi
     timeout-minutes: 45 # Pi build headroom (measured 1m41s warm; cold npm ci adds ~1 min)
     steps:
+      # Deliberately UNGUARDED (#2409): on a skipped run this is the only step
+      # that executes, so it proves the job no-op'd rather than being skipped —
+      # a skipped job would red the caller's placeholder (#2368).
+      - name: Announce the deploy decision
+        run: |
+          if [ "${{ inputs.skip }}" = "true" ]; then
+            echo "NO-OP: '${{ inputs.ref }}' is already the deployed release; every step below is guarded off."
+          else
+            echo "DEPLOYING: ${{ inputs.ref }}${{ github.event.inputs.branch && format(' (overridden to {0})', github.event.inputs.branch) || '' }}"
+          fi
+
+      # #2409 — resolve what to deploy BEFORE checking anything out.
+      #
+      # There is deliberately no `|| 'main'` fallback any more. Silently
+      # deploying main while the masthead, the README badge and /health all
+      # report a tag's version is precisely the drift this pinning closes, so an
+      # unresolvable ref must stop the deploy rather than ship something
+      # unpinned. The dispatch `branch` input remains as an explicit, auditable
+      # emergency override.
+      - name: Resolve the ref to deploy
+        id: target
+        if: ${{ inputs.skip != 'true' }}
+        env:
+          CALL_REF: ${{ inputs.ref }}
+          OVERRIDE: ${{ github.event.inputs.branch }}
+        run: |
+          set -uo pipefail
+          if [ -n "${OVERRIDE:-}" ]; then
+            echo "ref=$OVERRIDE" >> "$GITHUB_OUTPUT"
+            echo "::warning::Deploying the manual override '$OVERRIDE' instead of the newest release tag."
+          elif [ -n "${CALL_REF:-}" ]; then
+            echo "ref=$CALL_REF" >> "$GITHUB_OUTPUT"
+            echo "Deploying the release tag resolved by the caller: $CALL_REF"
+          else
+            echo "::error::No ref to deploy: the caller passed none and no override was given."
+            echo "Refusing to fall back to main — see this step's comment and #2409."
+            exit 1
+          fi
+
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        if: ${{ inputs.skip != 'true' }}
         with:
-          ref: ${{ github.event.inputs.branch || 'main' }}
+          ref: ${{ steps.target.outputs.ref }}
 
       - name: Build client
+        if: ${{ inputs.skip != 'true' }}
         # Host executor: system Node 22 — no setup-node, no apt-get. The full
         # checkout matters: vite.config.ts imports ../scripts/app-version.mjs,
         # which reads docs/CHANGELOG.md (capability-test finding, #1337).
@@ -77,6 +137,7 @@ jobs:
           cd ../client && npm ci --no-audit --no-fund && npm run build
 
       - name: Sync client dist + marketing site + server source into place
+        if: ${{ inputs.skip != 'true' }}
         run: |
           rsync -az --delete client/dist/ /var/www/darkwatch/
           # pitch/ is EXCLUDED: it's the private licensing pitch (names the
@@ -95,6 +156,7 @@ jobs:
             server/ ~/deploy/darkwatch/server/
 
       - name: Back up current configs (rolling .bak + #512 config slice)
+        if: ${{ inputs.skip != 'true' }}
         # One rolling .bak per replaced file (diagnose/roll back a wedged
         # deploy against last-known-good), PLUS a copy into
         # ~/backups/darkwatch/config/ so the daily Mac pull (#385) carries the
@@ -124,6 +186,7 @@ jobs:
           fi
 
       - name: Write runtime env file
+        if: ${{ inputs.skip != 'true' }}
         env:
           DB_ROOT_PASSWORD: ${{ secrets.DB_ROOT_PASSWORD }}
           DB_NAME: ${{ secrets.DB_NAME }}
@@ -183,11 +246,13 @@ jobs:
           mv /tmp/darkwatch.deploy.env ~/services/darkwatch/.env.deploy
 
       - name: Push prod docker-compose into place (#852)
+        if: ${{ inputs.skip != 'true' }}
         # Version-controlled compose file — env-var/port/volume changes are
         # reviewed in the same PR as deploy.yml + secret changes.
         run: cp deploy/docker-compose.prod.yml ~/services/darkwatch/docker-compose.yml
 
       - name: Pre-migration DB dump — no backup, no deploy (#385)
+        if: ${{ inputs.skip != 'true' }}
         # Zero-gap restore point immediately before the riskiest step (the
         # gated migration run below, #2234). Deliberately NOT
         # continue-on-error: a deploy that can't take a backup doesn't
@@ -198,11 +263,13 @@ jobs:
           install -m 755 scripts/backup-db.sh ~/bin/darkwatch-backup-db.sh
 
       - name: Build server image
+        if: ${{ inputs.skip != 'true' }}
         run: |
           cd ~/deploy/darkwatch/server
           docker build -t darkwatch-server:latest .
 
       - name: Migration gate — validate, then apply (#2234)
+        if: ${{ inputs.skip != 'true' }}
         # Migrations used to run inside the app container's entrypoint under
         # `restart: always`: a migration failing mid-file (MariaDB implicitly
         # commits DDL, so partial application is real) crash-looped the
@@ -230,6 +297,7 @@ jobs:
           docker compose --env-file .env.deploy run --rm --no-deps server node dist/migrate.js
 
       - name: (Re)start container
+        if: ${{ inputs.skip != 'true' }}
         # Only reached with the schema already current (gate above). The Pi's
         # public-facing reverse proxy is Caddy (host systemd unit,
         # /etc/caddy/Caddyfile), serving static client assets from
@@ -242,6 +310,7 @@ jobs:
           docker compose --env-file .env.deploy up -d --remove-orphans
 
       - name: Install Caddyfile + reload (#1037)
+        if: ${{ inputs.skip != 'true' }}
         # Ordered LAST — after the container is already deployed — so a
         # Caddy/sudo hiccup can never block the app rollout. `caddy validate`
         # before install; `systemctl reload caddy` is graceful and
@@ -255,6 +324,7 @@ jobs:
           echo "Caddy reloaded with repo Caddyfile."
 
       - name: Verify the deployed server actually booted (#2141)
+        if: ${{ inputs.skip != 'true' }}
         # `docker compose up -d` returns as soon as the container is CREATED,
         # not when the app inside it works — so a server that dies on boot and
         # restarts forever reports a perfectly green deploy. That is exactly

@@ -73,7 +73,13 @@ set -uo pipefail
 # To update: review `git diff` of .forgejo/workflows/ci.yml, confirm this
 # script still mirrors the `lint-typecheck` + `test` jobs (update the checks
 # below if they changed), then set this to the value preflight prints.
-# Reconciled 2026-08-15 (#2368): BOTH hashes bumped. ci.yml's `test` job now
+# Reconciled 2026-08-15 (#2409): EXPECTED_TEST_HASH only. test.yml gained a
+# `ref` workflow_call/workflow_dispatch input, threaded to its two checkouts, so
+# the nightly gate tests the release tag the deploy ships rather than main's tip.
+# NO check below moved and ci.yml is untouched by this branch: the diff is the
+# input declaration plus two `ref:` lines — zero `run:` commands changed,
+# verified by diffing for them explicitly. Hash bump only.
+# (Previously reconciled 2026-08-15 (#2368): BOTH hashes bumped. ci.yml's `test` job now
 # passes `skip: needs.tree-gate.outputs.skip` instead of the pinned "false"
 # carve-out, and test.yml's `test` job dropped its job-level `if:` in favour of
 # a per-step guard on all 17 steps (a skipped callee JOB makes the caller's
@@ -81,7 +87,7 @@ set -uo pipefail
 # 9785 vs 9786). NO check below moved: not one `run:` command in either job
 # changed, only `if:` conditions plus one echo of the skip decision. The three
 # steps that already had an `if:` had the guard AND-ed onto the existing
-# condition, never replacing it. Hash bump only.
+# condition, never replacing it. Hash bump only.)
 # (Previously reconciled 2026-08-10 (#2333): BOTH hashes below changed value because the
 # guard now hashes the file with pinned image digests normalised out (see
 # scripts/ci/workflow-hash-core.mjs). No workflow content changed under this
@@ -170,7 +176,7 @@ EXPECTED_CI_HASH="d5ef3006125790e767c6e7235f6e917cda0881e9fd3a10ddf81b5eeee442ea
 # second hash the suite preflight mirrors would have silently dropped off the
 # drift watch the moment it moved — the exact failure this guard exists to
 # prevent. Reconcile BOTH when either changes.
-EXPECTED_TEST_HASH="c54ec99a7abeffaef216eddb53408ed8f8562c28e4d9a108ab8cddc8b257abf1"
+EXPECTED_TEST_HASH="cbd345805d341f813c90f2dffa214a1feb4e75a65e81b35b0c18db481c96d233"
 
 # --- setup ------------------------------------------------------------------
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || {
