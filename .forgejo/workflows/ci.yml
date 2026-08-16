@@ -500,16 +500,24 @@ jobs:
     needs: [tree-gate]
     uses: ./.forgejo/workflows/test.yml
     with:
-      # #2368 — pinned to "false": `test` is CARVED OUT of the tree gate's
-      # skip. On the first enforced skip (run 9347, the #2336 merge) the
-      # callee's test.test skipped exactly as designed — and this `uses:`
-      # WRAPPER job then marked itself FAILED (0s, no log): Forgejo 15
-      # aggregates a skipped callee job as failure, which reds the run and
-      # false-fires notify-main-red. Until that's fixed (re-test after the
-      # v16 upgrade, #1725) the suite runs on every push; only lint-typecheck
-      # and smoke skip. Do NOT wire tree-gate's output back in here without
-      # closing #2368's acceptance first.
-      skip: "false"
+      # #2368 — tree-gate's decision is wired back in. The carve-out here was
+      # never about the gate being wrong: run 9347 skipped `test.test` exactly
+      # as designed, and the `uses:` WRAPPER then marked itself FAILED (0s, no
+      # log) because Forgejo aggregates a SKIPPED callee job as failure.
+      #
+      # That aggregation is unchanged — it was re-measured on this instance
+      # rather than assumed. Probe runs 9784/9785/9786 (Forgejo 15.0.0):
+      #   skip-job   -> callee job SKIPPED  -> placeholder FAILURE, downstream skipped
+      #   skip-steps -> callee job SUCCESS  -> placeholder SUCCESS, downstream ran
+      # The v16 release notes say nothing about workflow_call status
+      # aggregation, and the expansion PR (#10448) was superseded by #10525
+      # which is already in our 15.0.0 — so waiting for the upgrade (#1725)
+      # would not have fixed this.
+      #
+      # test.yml therefore no longer skips its JOB; it runs and no-ops every
+      # step. The wrapper stays honest and the ~10 min is reclaimed on an
+      # identical-tree merge.
+      skip: ${{ needs.tree-gate.outputs.skip }}
     secrets: inherit
 
   smoke:

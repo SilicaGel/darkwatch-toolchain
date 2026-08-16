@@ -73,12 +73,21 @@ set -uo pipefail
 # To update: review `git diff` of .forgejo/workflows/ci.yml, confirm this
 # script still mirrors the `lint-typecheck` + `test` jobs (update the checks
 # below if they changed), then set this to the value preflight prints.
-# Reconciled 2026-08-10 (#2333): BOTH hashes below changed value because the
+# Reconciled 2026-08-15 (#2368): BOTH hashes bumped. ci.yml's `test` job now
+# passes `skip: needs.tree-gate.outputs.skip` instead of the pinned "false"
+# carve-out, and test.yml's `test` job dropped its job-level `if:` in favour of
+# a per-step guard on all 17 steps (a skipped callee JOB makes the caller's
+# expanded placeholder report FAILURE — measured on this instance, probe runs
+# 9785 vs 9786). NO check below moved: not one `run:` command in either job
+# changed, only `if:` conditions plus one echo of the skip decision. The three
+# steps that already had an `if:` had the guard AND-ed onto the existing
+# condition, never replacing it. Hash bump only.
+# (Previously reconciled 2026-08-10 (#2333): BOTH hashes below changed value because the
 # guard now hashes the file with pinned image digests normalised out (see
 # scripts/ci/workflow-hash-core.mjs). No workflow content changed under this
 # branch, and no check below moved — a mechanical re-pin of the same bytes
 # under the new hash. From here on, a Renovate `image:` digest bump leaves the
-# guards green on its own.
+# guards green on its own.)
 # (Previously reconciled 2026-08-10 (#2303): notify-main-red's rolling-issue
 # lookup now anchors the marker at the START of the body and paginates. Same
 # defect as e2e-full.yml's notify-failure, which was live-armed (#2321 and #2303
@@ -154,14 +163,14 @@ set -uo pipefail
 # scripts/ci/workflow-hash.mjs`, not a raw shasum (#2333).)
 # (Previously reconciled 2026-07-19, #1736 Task 4: WT no-raw-color guard.)
 # (Previously reconciled 2026-07-14, #1360/#1701: smoke spec list.)
-EXPECTED_CI_HASH="cf2427abacb644d64d5c3942b00278016aca0098cfb89f0053afbd23421588f3"
+EXPECTED_CI_HASH="d5ef3006125790e767c6e7235f6e917cda0881e9fd3a10ddf81b5eeee442ea0e"
 
 # #2336 — the `test` job MOVED from ci.yml to its own reusable workflow so the
 # nightly can call it too. The guard below hashed only ci.yml, so without this
 # second hash the suite preflight mirrors would have silently dropped off the
 # drift watch the moment it moved — the exact failure this guard exists to
 # prevent. Reconcile BOTH when either changes.
-EXPECTED_TEST_HASH="45e3207b5684ad26d06cba26b280f87788f36aeae73ca219afead39a1c07d3cc"
+EXPECTED_TEST_HASH="c54ec99a7abeffaef216eddb53408ed8f8562c28e4d9a108ab8cddc8b257abf1"
 
 # --- setup ------------------------------------------------------------------
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || {
