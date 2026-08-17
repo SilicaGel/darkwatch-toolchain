@@ -128,7 +128,7 @@ jobs:
 
           SPECS=""
           # Classic: any client CSS, the spec itself, or the shared freeze harness.
-          if echo "$CHANGED" | grep -qE '^client/src/.*\.css$|^client/src/styles/|^tests/e2e/visual-regression\.spec\.ts$|^tests/helpers/freeze\.ts$'; then
+          if echo "$CHANGED" | grep -qE '^client/src/.*\.css$|^client/src/styles/|^client/index\.html$|^tests/e2e/visual-regression\.spec\.ts$|^tests/helpers/freeze\.ts$'; then
             SPECS="$CLASSIC"
             echo "→ Classic visual spec (client CSS / harness change)"
           fi
@@ -150,7 +150,13 @@ jobs:
           #   • spec-areas hardcoded `rulesets/shadowdark/` while this used
           #     `[^/]+`; a second ruleset's WT components routed here but not
           #     into the affected e2e tier.
-          if echo "$CHANGED" | grep -qE '^client/src/.*\.css$|^client/src/styles/|^tests/helpers/freeze\.ts$|^client/src/pages/wartable/|^client/src/components/wt/|^client/src/rulesets/[^/]+/components/wt/|^client/src/components/map/|^client/src/hooks/useLayoutMode|^client/src/hooks/useWtScale|^client/src/lib/layoutMode|^tests/e2e/1736-wt-visual\.spec\.ts$'; then
+          #   • `client/index.html` was in NEITHER list (#2414). It is global
+          #     chrome that both layouts render inside — its `overflow-x` on
+          #     <body> made <body> a scroll container and broke every sticky
+          #     descendant in Classic. It is in BOTH branches now, not just
+          #     this one, because a global overflow change moves Classic
+          #     pixels at least as much as WT ones.
+          if echo "$CHANGED" | grep -qE '^client/src/.*\.css$|^client/src/styles/|^client/index\.html$|^tests/helpers/freeze\.ts$|^client/src/pages/wartable/|^client/src/components/wt/|^client/src/rulesets/[^/]+/components/wt/|^client/src/components/map/|^client/src/hooks/useLayoutMode|^client/src/hooks/useWtScale|^client/src/lib/layoutMode|^tests/e2e/1736-wt-visual\.spec\.ts$'; then
             SPECS="$SPECS $WT"
             echo "→ War Table visual spec (WT source / CSS / harness change)"
           fi
