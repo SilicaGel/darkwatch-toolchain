@@ -372,6 +372,15 @@ run_check "e2e tier coverage" node scripts/check-e2e-tiers.mjs
 # tests/helpers/campaign.ts instead. No deps needed — pure node + repo files.
 run_check "e2e external-image ban" node scripts/check-e2e-external-images.mjs
 
+# #2166 — a spec that drives a real settings control persists state to the
+# shared seed ACCOUNT, and the next spec logging in as that account inherits it
+# (#2163 lost four tests to exactly this, a year after the pollution started).
+# Requires an afterEach restore, and steers settings specs off DungeonMaster /
+# Adventurer. Also runs from `npm run test:scripts` below (its test file asserts
+# against the live tests/e2e), so it is enforced in CI too — this line just
+# names it directly when preflight is what you're reading.
+run_check "e2e shared-account state" node scripts/check-e2e-account-state.mjs
+
 # #761 — ratchet: fail if `Record<string, unknown>` count climbs above baseline.
 run_check "Record<string,unknown> budget" node scripts/check-record-type-budget.mjs
 
