@@ -29,6 +29,13 @@ name: Visual Regression (per-PR gate)
 # Baselines are platform-specific; regenerate them with
 # scripts/regen-visual-baselines.sh (Linux CI image), never a bare --update on macOS
 # (`--spec e2e/1736-wt-visual.spec.ts` for the WT set).
+#
+# #2211 — the Classic theme axis is four themes, always, and the committed
+# baselines are exactly the set this workflow runs. There is no opt-in wider
+# matrix any more (VISUAL_ALL_THEMES is gone). That equality is the point: the
+# nine themes it used to hide behind a label rotted unwatched for five weeks and
+# then billed an unrelated PR 23 red snapshots (#2210). Do not reintroduce a
+# baseline this workflow does not exercise on every run.
 
 on:
   pull_request:
@@ -163,14 +170,16 @@ jobs:
     needs: detect
     if: needs.detect.outputs.should-run == 'true'
     runs-on: ubuntu-latest
-    # #1936 — raised 30 → 40. Measured on the Linux CI image: the Classic spec's
-    # FULL 13-theme sweep (312 shots, what the `run-visual` label and dispatch
-    # ask for) is 13.2 min of Playwright, and the WT spec adds 1.6 min — on top
-    # of this job's ~10 min of bringup (three npm ci, two builds, migrate, seed,
-    # MinIO download). That heavy path was already close to 30 before the WT
-    # spec joined it, and the runner is a shared VM, so the old ceiling risked
-    # spurious timeout-reds on exactly the PRs that asked for the most coverage.
-    # The default 4-theme path is ~6 min of Playwright and never came near it.
+    # #1936 raised this 30 → 40 to fit the Classic spec's full 13-theme sweep
+    # (312 shots, 13.2 min of Playwright) plus the WT spec's 1.6 min, on top of
+    # this job's ~10 min of bringup (three npm ci, two builds, migrate, seed,
+    # MinIO download).
+    #
+    # #2211 deleted that sweep — there is one path now, the four-theme one, which
+    # measured ~6 min of Playwright and never came near even the old 30. The
+    # ceiling is deliberately left at 40 rather than tightened back: the runner is
+    # a shared VM and the bringup, not the specs, is what varies, so the headroom
+    # costs nothing and a tight bound would only buy spurious timeout-reds.
     timeout-minutes: 40
     # #969 — prebuilt CI image (Node 22 + Chromium + Playwright deps baked).
     container:
@@ -351,11 +360,13 @@ jobs:
           E2E_SERVER_URL: "http://localhost:3001"
           TEST_HOOK_SECRET: e2e-test-hook-secret
           PLAYWRIGHT_BROWSERS_PATH: /ms-playwright
-          # Default = the 4-theme representative subset (see DEFAULT_THEMES in the
-          # spec). The `run-visual` label or a manual dispatch opts into the full
-          # 13-theme sweep — use that pre-release or when a change is theme-scoped.
-          # Read by visual-regression.spec.ts only; the WT spec is theme-agnostic.
-          VISUAL_ALL_THEMES: ${{ (contains(github.event.pull_request.labels.*.name, 'run-visual') || github.event_name == 'workflow_dispatch') && '1' || '' }}
+          # #2211 — VISUAL_ALL_THEMES is gone. The spec ran a 4-theme default with
+          # an opt-in 13-theme sweep behind that variable, which this step set from
+          # the `run-visual` label / dispatch. The nine opt-in themes and their
+          # baselines are deleted, so every run is now the same four themes and the
+          # variable had nothing left to switch. `run-visual` and workflow_dispatch
+          # still force BOTH specs to RUN (see `detect`) — that is unchanged and is
+          # what the label is still for; they just no longer widen the theme axis.
           # #1936 (same trap as #1581 in e2e-full.yml) — 1736-wt-visual.spec.ts's
           # loot shot writes campaign_loot through tests/helpers/db.ts, which falls
           # back to 127.0.0.1:3397 (the local-dev address) when DB_* is unset. That
