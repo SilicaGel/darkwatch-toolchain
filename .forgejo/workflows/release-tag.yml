@@ -79,9 +79,16 @@ jobs:
           api_get() {
             for tok in "$FALLBACK_TOKEN" "$GH_TOKEN"; do
               [ -z "$tok" ] && continue
+              # `|| code=""` for the same `-e` reason as below (#2458): a
+              # command substitution takes curl's exit status, so a network
+              # failure here — the `context deadline exceeded` shape seen on
+              # this instance (#1968) — would kill the step outright. That
+              # would make the `return 2` below UNREACHABLE, i.e. the branch
+              # written to report "could not tell" could never report it.
+              # Empty matches neither case arm, so it falls through to it.
               code=$(curl -sS -o /tmp/tag_resp.json -w '%{http_code}' \
                 -H "Authorization: token $tok" \
-                "$API_URL/repos/$REPO/tags/$TAG")
+                "$API_URL/repos/$REPO/tags/$TAG") || code=""
               case "$code" in
                 200) return 0 ;;   # exists
                 404) return 1 ;;   # absent
@@ -90,11 +97,34 @@ jobs:
             return 2               # could not tell
           }
 
-          # Capture the status explicitly rather than reading `$?` inside an
-          # elif — that works, but it is exactly the kind of subtlety that
-          # rots when someone inserts a line between the two.
-          api_get
-          exists=$?
+          # `|| exists=$?` IS THE FIX, NOT A STYLE CHOICE (#2458). Do not
+          # "tidy" it back into a bare `api_get` on its own line.
+          #
+          # The runner invokes every `run:` step with
+          # `bash --noprofile --norc -eo pipefail`. **`-e` is on**, and the
+          # `set -uo pipefail` above does not turn it off — it only adds to it.
+          # Under `-e`, a BARE call that returns non-zero terminates the script
+          # instantly, before the next line runs. `api_get` returns 1 to mean
+          # "tag absent", which is precisely the case this job exists to
+          # handle, so the bare form killed the step every time there was
+          # actually a tag to create — silently, with no output at all, because
+          # `-e` fires before any `echo` can report why.
+          #
+          # It hid for two releases because v0.198.0 was bootstrapped by hand,
+          # so every run took the `return 0` (tag exists) branch, where `-e`
+          # never fires. Run 9976 was the first push that genuinely had to
+          # create a tag, and it failed both attempts on different runners with
+          # an 87-line log whose failing step contributed zero lines. Control:
+          # run 9816, same workflow and same push event, printed normally
+          # because the tag already existed.
+          #
+          # Putting the call on the left of `||` makes it a TESTED command,
+          # which `-e` explicitly exempts. `if api_get; then ... elif` is
+          # exempt for the same reason and would also be correct; what is not
+          # correct is the bare call, which reads the most innocent of the
+          # three.
+          exists=0
+          api_get || exists=$?
           if [ "$exists" -eq 0 ]; then
             echo "Tag $TAG already exists — nothing to do. (This is the normal case"
             echo "for every push between releases.)"
@@ -112,10 +142,13 @@ jobs:
 
           for tok in "$FALLBACK_TOKEN" "$GH_TOKEN"; do
             [ -z "$tok" ] && continue
+            # `|| code=""` — same `-e` hazard as api_get (#2458). Empty fails
+            # the 2xx test below, so a network failure reports and tries the
+            # next token instead of killing the step without a word.
             code=$(curl -sS -o /tmp/tag_create.json -w '%{http_code}' -X POST \
               -H "Authorization: token $tok" -H "Content-Type: application/json" \
               --data "$(printf '{"tag_name":"%s","target":"%s"}' "$TAG" "$SHA")" \
-              "$API_URL/repos/$REPO/tags")
+              "$API_URL/repos/$REPO/tags") || code=""
             if [ "${code#2}" != "$code" ]; then
               echo "Created tag $TAG at $SHA"
               exit 0
