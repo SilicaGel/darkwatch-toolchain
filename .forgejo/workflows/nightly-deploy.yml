@@ -159,6 +159,11 @@ jobs:
     with:
       skip: "false" # the nightly always runs it — that is the whole point
       ref: ${{ needs.decide.outputs.ref }}
+      # #2357/#2438 — this is the one caller where a red genuinely blocks a
+      # deploy, so it is the only one allowed to say so in the marker. Note the
+      # ref above is a release TAG, not `refs/heads/main`, which is exactly why
+      # the alert level is declared rather than inferred from the ref.
+      red_alert: "deploy"
     secrets: inherit
 
   # #2440 — THIS JOB EXISTS TO WORK AROUND A FORGEJO BUG. Do not "simplify" it

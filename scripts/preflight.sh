@@ -169,14 +169,14 @@ set -uo pipefail
 # scripts/ci/workflow-hash.mjs`, not a raw shasum (#2333).)
 # (Previously reconciled 2026-07-19, #1736 Task 4: WT no-raw-color guard.)
 # (Previously reconciled 2026-07-14, #1360/#1701: smoke spec list.)
-EXPECTED_CI_HASH="8ced0cf6c2df78d21ce6dd2ca34acbc2d7cdd0407e4330127a28cec6e9641acd"
+EXPECTED_CI_HASH="f34cc4942fc33db7d36790d0a4d17ffbc7def687df32b7a709a0efc3e4f8b5ae"
 
 # #2336 — the `test` job MOVED from ci.yml to its own reusable workflow so the
 # nightly can call it too. The guard below hashed only ci.yml, so without this
 # second hash the suite preflight mirrors would have silently dropped off the
 # drift watch the moment it moved — the exact failure this guard exists to
 # prevent. Reconcile BOTH when either changes.
-EXPECTED_TEST_HASH="cbd345805d341f813c90f2dffa214a1feb4e75a65e81b35b0c18db481c96d233"
+EXPECTED_TEST_HASH="4321b870e3b7a3bd725692b9398ce31f74e5542f4b03437e1a0a7d4440d20d45"
 
 # --- setup ------------------------------------------------------------------
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || {

@@ -45,8 +45,41 @@ on:
         type: string
         required: false
         default: ""
+      # #2357/#2438 — WHO IS ALLOWED TO RAISE THE ALARM, decided by the CALLER.
+      #
+      # The notifier used to answer "is this not a PR?" by testing for the PR
+      # payload. Two things were wrong with that. It did not work: the guard
+      # fired on PR #2447's red anyway (#2448), which is the recurrence #2357
+      # predicted after #2356's truthiness rewrite — the payload is simply not
+      # visible in the callee's `notify-failure` context. And it was the wrong
+      # question: a `workflow_dispatch` on a feature branch has no PR payload
+      # either, so proving a CI change per #842 — which this repo REQUIRES —
+      # tripped the alarm every time (#2436/#2438).
+      #
+      # The property the marker actually claims is "this run represents main".
+      # Only the caller knows that, and in the caller `github.*` is native
+      # rather than whatever workflow_call does to it. So the caller says so:
+      #   none   — a PR, or a branch: stay silent, the run shows its own red
+      #   main   — a push to main, or a dispatch against main: file/comment
+      #   deploy — the nightly deploy gate: file/comment AND say so
+      # Only `deploy` may claim the deploy was blocked; only main/deploy may
+      # print a commits-on-main list (the nightly tests a tag cut from main).
+      red_alert:
+        description: "none | main | deploy — who may raise the rolling marker"
+        type: string
+        required: false
+        default: "none"
   workflow_dispatch:
     inputs:
+      # Deliberately EMPTY here, not "none": empty means "no caller told me", and
+      # the job below falls back to this run's own `github.ref`. That fallback is
+      # only ever reached on a direct dispatch, where there is no workflow_call
+      # and `github.*` is this run's own context — never the callee muddle that
+      # broke the old guard. Set it explicitly to force a leg during a prove run.
+      red_alert:
+        description: "none | main | deploy; empty = decide from this run's ref"
+        required: false
+        default: ""
       # #2409 — mirrored from workflow_call so a dispatch can PROVE the ref
       # actually reaches the checkout. Without it `inputs.ref` is undefined on a
       # dispatch and checkout silently falls back to the branch — which is
@@ -327,25 +360,68 @@ jobs:
   # output that isn't there.
   notify-failure:
     needs: test
+    # #2368 — `always()` and NO other job-level condition, ever. A skipped
+    # CALLEE job makes the caller's expanded placeholder report FAILURE (probes
+    # 9784-9786 on this instance), so gating this job would red the `test`
+    # wrapper on every green PR. The alert decision lives on the STEPS below,
+    # which skip harmlessly.
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
       contents: read
       issues: write
+    env:
+      # #2357/#2438 — the effective alert level, resolved once.
+      #
+      # `inputs.red_alert` is what the caller declared (see the input's comment).
+      # It is empty ONLY on a direct workflow_dispatch, and only then do we look
+      # at `github.ref` — a dispatch has no caller, so that context is this run's
+      # own and trustworthy. A workflow_call NEVER reaches the fallback, which is
+      # what keeps the callee-context problem out of the decision entirely.
+      #
+      # Fails correct if a default were ever dropped: a PR's ref is
+      # `refs/pull/N/head`, which is not main, so the fallback yields `none`.
+      RED_ALERT: ${{ inputs.red_alert != '' && inputs.red_alert || (github.ref == 'refs/heads/main' && 'main' || 'none') }}
     steps:
+      # Unconditional ON PURPOSE (#2357). Every guard this job has ever carried
+      # was wrong about what the callee can see, and each time the evidence had
+      # to be reconstructed from a false alarm after the fact. This prints what
+      # the guard actually saw, on every run, so the next argument about it is
+      # settled by a log line instead of a theory.
+      - name: Log the alert decision and the context it came from
+        run: |
+          echo "effective RED_ALERT = '${RED_ALERT}'"
+          echo "  inputs.red_alert   = '${{ inputs.red_alert }}'"
+          echo "  github.ref         = '${{ github.ref }}'"
+          echo "  github.event_name  = '${{ github.event_name }}'"
+          echo "  pull_request.number= '${{ github.event.pull_request.number }}'"
+          echo "  needs.test.result  = '${{ needs.test.result }}'"
+
       # #2011 — gate on `needs.*.result`, NOT `needs.test.result`. Under
       # workflow_call Forgejo namespaces the callee's jobs, so a literal key
       # lookup is null even when that job just failed — it silently skipped
       # every step on eight consecutive nightly reds. The wildcard survives the
       # renaming. This job has exactly one `needs`, so it can't widen.
       #
-      # PR runs are excluded — a PR already shows its own red — by testing for
-      # the PR payload, NOT `github.event_name != 'pull_request'` (#2351: under
-      # workflow_call the callee's event_name doesn't match the caller's
-      # normalized value, which would have made this fire on every PR red).
+      # THE ALERT DECISION IS NOT MADE HERE, AND THAT IS DELIBERATE (#2357).
+      #
+      # It was, in the first cut of this fix, as `env.RED_ALERT != 'none'`. On a
+      # real forced-red PR (run 9926, PR #2452) that guard let the step through:
+      # the job echoed `effective RED_ALERT = 'none'` and the notifier filed
+      # #2453 anyway. `env.` does not resolve inside a step-level `if:` on this
+      # Forgejo, so the comparison was `'' != 'none'` — true — and the guard sat
+      # wide open. It would have shipped looking correct.
+      #
+      # That is the third consecutive guard on this job to be wrong about what
+      # an expression can see here (`== null` #2356, the payload test #2448,
+      # `env.` in an `if:` now). So the level test moved OUT of the expression
+      # language and INTO the script below, where `env` is read as an ordinary
+      # environment variable and its behaviour is not in question. What is left
+      # in these `if:`s is only `needs.*.result`, which #2011 already proved
+      # works in a callee.
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
-        if: ${{ (needs.test.result == 'failure' || contains(needs.*.result, 'failure')) && !github.event.pull_request.number }}
+        if: ${{ needs.test.result == 'failure' || contains(needs.*.result, 'failure') }}
         with:
           # #2409 — report on the ref that was actually tested.
           ref: ${{ inputs.ref }}
@@ -357,8 +433,8 @@ jobs:
             scripts/ci
 
       - name: Comment the rolling "test suite is red" issue
-        # Same payload-keyed PR exclusion as the checkout above (#2351).
-        if: ${{ (needs.test.result == 'failure' || contains(needs.*.result, 'failure')) && !github.event.pull_request.number }}
+        # Failure only — the alert level is enforced in the script (see above).
+        if: ${{ needs.test.result == 'failure' || contains(needs.*.result, 'failure') }}
         env:
           GH_TOKEN: ${{ github.token }}
           API_URL: ${{ github.api_url }}
@@ -366,10 +442,29 @@ jobs:
           RUN_ID: ${{ github.run_id }}
           SERVER_URL: ${{ github.server_url }}
           EVENT: ${{ github.event_name }}
+          RED_ALERT: ${{ env.RED_ALERT }}
+          # What was actually checked out and walked for the commit list: the
+          # caller's ref when it passed one (the nightly's release tag), else
+          # this run's own ref.
+          TESTED_REF: ${{ inputs.ref != '' && inputs.ref || github.ref }}
         run: |
           set -euo pipefail
           python3 - <<'PY'
           import os, json, subprocess
+
+          # #2357/#2438 — THE GATE. Deliberately here and not in the step's
+          # `if:`: three separate expression-level guards on this job have now
+          # been wrong about what they can see in a workflow_call callee, the
+          # last of them (`env.RED_ALERT != 'none'`) failing OPEN on run 9926.
+          # An ordinary env read has no such ambiguity.
+          alert = os.environ.get("RED_ALERT", "none")
+          if alert not in ("main", "deploy"):
+              print(
+                  f"RED_ALERT='{alert}' -> this run does not represent main; "
+                  "not raising the rolling marker. A PR shows its own red, and a "
+                  "branch dispatch is CI validation (#2357/#2438)."
+              )
+              raise SystemExit(0)
 
           api, repo = os.environ["API_URL"], os.environ["REPO"]
           run_url = f'{os.environ["SERVER_URL"]}/{repo}/actions/runs/{os.environ["RUN_ID"]}'
@@ -395,18 +490,42 @@ jobs:
           def git(*a):
               return subprocess.run(["git", *a], capture_output=True, text=True).stdout.strip()
 
-          suspects = git("log", "--oneline", "-n", "15") or "(git history unavailable)"
+          # #2438 — say only what this run can actually support. The old body
+          # asserted a blocked deploy and a commits-on-main list unconditionally,
+          # and both were false on #2436 (a branch dispatch) and again on #2448
+          # (a PR): nothing was blocked, and the "main" commits existed only on
+          # the branch. `deploy` is the nightly gate — the one caller for which
+          # a blocked deploy is true.
+          consequence = (
+              "so the deploy was blocked"
+              if alert == "deploy"
+              else "on **main**"
+          )
           body = (
               f"{MARKER}\n"
               f"The unit + integration suite failed on a **{os.environ['EVENT']}** run, "
-              f"so the deploy was blocked.\n\n"
+              f"{consequence}.\n\n"
               f"**Run:** {run_url}\n\n"
               f"This suite is not a deterministic function of the tree — int tests run "
               f"against a real DB — so a red here can be a genuine regression OR a race "
               f"that the per-PR run happened not to hit. Read the log before assuming "
               f"either.\n\n"
-              f"**Recent commits on main:**\n```\n{suspects}\n```\n"
           )
+          # #2438's (honest-body) says the marker must NEVER present commits as
+          # main's when they aren't. Keying that on the alert level alone is not
+          # enough: it holds for both production callers (a main push, and the
+          # nightly's release tag, whose history IS main's) but breaks the moment
+          # someone hand-dispatches `deploy` from a branch to prove this very
+          # workflow — which the first prove run did, listing a branch commit
+          # under "Recent commits on main".
+          #
+          # So the heading NAMES the ref it actually walked. That is honest on
+          # every path by construction, including ones nobody has thought of yet,
+          # and it still answers the question the reader has.
+          if alert in ("main", "deploy"):
+              tested = os.environ.get("TESTED_REF") or "this run's default ref"
+              suspects = git("log", "--oneline", "-n", "15") or "(git history unavailable)"
+              body += f"**Recent commits on `{tested}`:**\n```\n{suspects}\n```\n"
 
           # #2303 — the third copy of this lookup, fixed with the other two.
           #

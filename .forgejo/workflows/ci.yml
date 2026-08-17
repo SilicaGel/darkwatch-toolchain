@@ -518,6 +518,13 @@ jobs:
       # step. The wrapper stays honest and the ~10 min is reclaimed on an
       # identical-tree merge.
       skip: ${{ needs.tree-gate.outputs.skip }}
+      # #2357/#2438 — decided HERE, in the caller, because only the caller's
+      # `github.ref` is native: in the callee it is whatever workflow_call
+      # normalises it to, which is what made the old PR-payload guard fire on
+      # PR #2447's red (#2448). A PR ref is `refs/pull/N/head`, so PRs get
+      # `none` and stay silent — the PR already shows its own red. This is the
+      # same expression `notify-main-red` below already trusts.
+      red_alert: ${{ github.ref == 'refs/heads/main' && 'main' || 'none' }}
     secrets: inherit
 
   smoke:
