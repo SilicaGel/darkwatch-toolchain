@@ -591,6 +591,9 @@ jobs:
         e2e/2380-wt-classic-nav-hidden.spec.ts
         e2e/2330-load-error-retry.spec.ts
         e2e/2187-combat-leak-guard.spec.ts
+        e2e/2426-auth-redirects.spec.ts
+        e2e/2056-morale-cue.spec.ts
+        e2e/2082-pending-blocks-arming.spec.ts
     # #969 — run inside the prebuilt CI image (Node 22 + Chromium + Playwright
     # system deps baked). No apt install-deps, no browser download, no
     # actions/setup-node. Pinned to the @playwright/test version; rebuilt by

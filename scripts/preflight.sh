@@ -169,7 +169,7 @@ set -uo pipefail
 # scripts/ci/workflow-hash.mjs`, not a raw shasum (#2333).)
 # (Previously reconciled 2026-07-19, #1736 Task 4: WT no-raw-color guard.)
 # (Previously reconciled 2026-07-14, #1360/#1701: smoke spec list.)
-EXPECTED_CI_HASH="f34cc4942fc33db7d36790d0a4d17ffbc7def687df32b7a709a0efc3e4f8b5ae"
+EXPECTED_CI_HASH="800f4576317763800c5f40484b368320ab29f7494be1e486aa57dfe885bcf934"
 
 # #2336 — the `test` job MOVED from ci.yml to its own reusable workflow so the
 # nightly can call it too. The guard below hashed only ci.yml, so without this
