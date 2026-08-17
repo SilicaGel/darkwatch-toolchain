@@ -47,8 +47,39 @@ on:
 jobs:
   renovate:
     runs-on: ubuntu-latest
+    # #2465 — PIN THE IMAGE, because `ubuntu-latest` does not mean the same thing
+    # on every runner. The label is carried by m4-runner AND Global-Falcon-01/02,
+    # and they resolve it differently: the m4 gives `node:lts` (Debian bookworm,
+    # git 2.39.5 — measured by the probe below), Falcon's give `node:20-bullseye`,
+    # and Debian bullseye ships git 2.30, which is BELOW Renovate's minimum.
+    # (The floor sits between the two: 2.30 is rejected, 2.39.5 is accepted.)
+    # The job runs inside that container, and it is the
+    # CONTAINER's git that Renovate checks, so the weekly run died with
+    # `ERROR: Git version needs upgrading` whenever it happened to land on a Falcon
+    # box (tasks 15959, 14275, 14280) and passed whenever it landed on the m4
+    # (17484). Nothing in the repo changed between the green and red weeks — it
+    # was a coin flip on runner assignment.
+    #
+    # Pinning here fixes every runner at once and keeps the job eligible for the
+    # whole pool. The alternative — narrowing `runs-on` to a runner whose
+    # ubuntu-latest happens to be new enough — would tie a weekly job to a single
+    # host, and #2310's rule is explicit that a toggleable runner must never be
+    # the sole owner of a label (turning it off WEDGES the job rather than
+    # failing it).
+    container: node:lts
     timeout-minutes: 20 # #1263 — Renovate clones repos + files PRs; ~5-15 min typical
     steps:
+      # Records what the pin actually produced. Renovate's git-version failure
+      # names no version and no image, so a bare red told you nothing about which
+      # box you were on — this makes the next occurrence self-diagnosing (same
+      # motive as the debug-log artifact below, #1632).
+      - name: Environment probe
+        run: |
+          echo "image:  $(grep PRETTY_NAME /etc/os-release | cut -d'"' -f2)"
+          echo "git:    $(git --version)"
+          echo "node:   $(node -v)"
+          echo "arch:   $(uname -m)"
+
       - name: Use Node 22
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
