@@ -17,9 +17,18 @@ name: E2E Full Suite
 # with `test.fixme` (see #1141) so a clean suite stays green; if a flaky spec
 # blocks the deploy, prefer adding retries/quarantine over dropping the gate.
 #
-# Memory: the suite is sharded into 3 with a Vite restart between shards. A
-# single long-lived Vite preview accumulates heap across test contexts and gets
-# OOM-killed mid-suite in the capped CI container, so we restart it between shards.
+# Memory: the suite is split into 3 shards. Each shard is its own JOB with its
+# own container, MariaDB service and Vite preview (#2300) — previously all three
+# ran sequentially inside one job with an explicit `pkill`/restart of Vite
+# between them, because a single long-lived Vite preview accumulates heap across
+# test contexts and gets OOM-killed mid-suite in the capped CI container. The
+# per-job Vite gives exactly the lifetime those restarts were manufacturing (one
+# shard's worth, and a slightly SHORTER one now that the shards are balanced —
+# ~11.4m/~130 tests vs the 16.3m/128 that shard 1 used to survive), so the
+# restart steps are gone rather than merely unnecessary.
+#
+# Sharding is by MEASURED DURATION, not Playwright's count-based `--shard` —
+# see scripts/ci/e2e-partition.mjs and tests/spec-timings.json.
 
 on:
   workflow_call:
@@ -87,11 +96,26 @@ jobs:
     # (Same reason visual-regression.yml gates its `visual` job in-place.)
     if: ${{ github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'run-e2e-full') }}
     runs-on: ubuntu-latest
-    timeout-minutes: 75 # #1263 — entire suite (3 shards, 2 Vite restarts); ~40-60 min typical
+    # #2300 — was 75 for all three shards plus two Vite restarts in ONE job.
+    # Sized against MEASURED parallel behaviour (run 10148), not the solo
+    # projection: Forgejo hands all three shards to whichever runner has the
+    # capacity, so they normally land on ONE host and contend for its CPU. That
+    # run took 20.4m wall (4.5m setup + 15.8m tests) against an 12.6m
+    # uncontended projection. 35 keeps the ~1.7x headroom the old 75/44m job
+    # carried, rather than the 1.5x that 30 would leave.
+    timeout-minutes: 35
+    strategy:
+      # Every shard must report independently: the deploy gate wants to know
+      # ALL the specs that broke, not just the ones before the first failure.
+      # (Sequential shards already behaved this way only by accident — a red
+      # shard 1 aborted the job and hid shards 2 and 3 entirely.)
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
     env:
-      # Skip visual-regression screenshots here: this suite runs every spec
-      # serially against ONE shared DB, so end-of-suite screenshots inherit
-      # earlier specs' leftover state (#1041) and drift off the pristine
+      # Skip visual-regression screenshots here: each shard runs its specs
+      # serially against ONE shared DB, so late screenshots inherit earlier
+      # specs' leftover state (#1041) and drift off the pristine
       # baselines (nightly runs 4740/4796 — deploy gate red two nights running).
       # Pixel comparison runs pre-merge in visual-regression.yml (fresh DB,
       # attributable diff); this gate tests function.
@@ -323,7 +347,7 @@ jobs:
           PLAYWRIGHT_BROWSERS_PATH: /ms-playwright
         run: cd tests && npm ci --no-audit --no-fund
 
-      - name: Run full suite — shard 1/3
+      - name: Run full suite — shard ${{ matrix.shard }} of 3 (duration-balanced)
         env:
           E2E_SERVER_URL: "http://localhost:3001"
           TEST_HOOK_SECRET: e2e-test-hook-secret
@@ -339,82 +363,31 @@ jobs:
           # #1622 — per-shard JSON report; the notify-failure job parses these for
           # failing spec titles. Written into the uploaded logs dir (Playwright
           # creates the parent). One file per shard so they don't clobber.
-          PLAYWRIGHT_JSON_OUTPUT_NAME: /tmp/e2e-full-logs/results-shard-1.json
-        run: cd tests && ./node_modules/.bin/playwright test --shard=1/3 --reporter=line,json
-
-      - name: Restart Vite preview (between shards 1→2)
-        env:
-          API_PROXY_URL: "http://localhost:3001"
-          NODE_OPTIONS: "--max-old-space-size=512"
+          PLAYWRIGHT_JSON_OUTPUT_NAME: /tmp/e2e-full-logs/results-shard-${{ matrix.shard }}.json
+        # #2300 — NOT `--shard=N/3`. Playwright shards by TEST COUNT, which on
+        # this suite produced 16.1m / 10.3m / 7.5m from near-identical counts,
+        # because per-test cost correlates with filename (the newer `1xxx`/`2xxx`
+        # WT specs sort first and are slow). Raising the shard count does not fix
+        # that. e2e-partition.mjs partitions by MEASURED duration instead and
+        # lands all three within a second of each other. It exits non-zero unless
+        # its shards are an exact, non-overlapping cover of tests/e2e — this
+        # replaces `--shard`'s structural completeness, so it must never degrade
+        # into an allow-list (#1141).
         run: |
-          pkill -9 -f "vite preview" 2>/dev/null || true
-          fuser -k 5173/tcp 2>/dev/null || true
-          PIDS=$(lsof -t -i :5173 2>/dev/null || true)
-          [ -n "$PIDS" ] && kill -9 $PIDS 2>/dev/null || true
-          for i in $(seq 1 15); do
-            if ! curl -s -o /dev/null -m 1 http://localhost:5173; then break; fi
-            echo "Waiting for port 5173 to free... ($i/15)"
-            sleep 1
-          done
-          sleep 2
-          cd client && ./node_modules/.bin/vite preview >/tmp/vite.log 2>&1 &
-          echo $! > /tmp/vite.pid
-          for i in $(seq 1 30); do
-            curl -s -o /dev/null http://localhost:5173 && break || true
-            echo "Waiting for new Vite... ($i/30)"
-            sleep 2
-            [ "$i" -eq 30 ] && echo "Vite never came back up" && exit 1
-          done
-
-      - name: Run full suite — shard 2/3
-        env:
-          E2E_SERVER_URL: "http://localhost:3001"
-          TEST_HOOK_SECRET: e2e-test-hook-secret
-          PLAYWRIGHT_BROWSERS_PATH: /ms-playwright
-          DB_HOST: mariadb
-          DB_PORT: "3306"
-          DB_USER: ${{ secrets.CI_DB_USER }}
-          DB_PASSWORD: ${{ secrets.CI_DB_PASSWORD }}
-          DB_NAME: ${{ secrets.CI_DB_NAME }}
-          PLAYWRIGHT_JSON_OUTPUT_NAME: /tmp/e2e-full-logs/results-shard-2.json
-        run: cd tests && ./node_modules/.bin/playwright test --shard=2/3 --reporter=line,json
-
-      - name: Restart Vite preview (between shards 2→3)
-        env:
-          API_PROXY_URL: "http://localhost:3001"
-          NODE_OPTIONS: "--max-old-space-size=512"
-        run: |
-          pkill -9 -f "vite preview" 2>/dev/null || true
-          fuser -k 5173/tcp 2>/dev/null || true
-          PIDS=$(lsof -t -i :5173 2>/dev/null || true)
-          [ -n "$PIDS" ] && kill -9 $PIDS 2>/dev/null || true
-          for i in $(seq 1 15); do
-            if ! curl -s -o /dev/null -m 1 http://localhost:5173; then break; fi
-            echo "Waiting for port 5173 to free... ($i/15)"
-            sleep 1
-          done
-          sleep 2
-          cd client && ./node_modules/.bin/vite preview >/tmp/vite.log 2>&1 &
-          echo $! > /tmp/vite.pid
-          for i in $(seq 1 30); do
-            curl -s -o /dev/null http://localhost:5173 && break || true
-            echo "Waiting for new Vite... ($i/30)"
-            sleep 2
-            [ "$i" -eq 30 ] && echo "Vite never came back up" && exit 1
-          done
-
-      - name: Run full suite — shard 3/3
-        env:
-          E2E_SERVER_URL: "http://localhost:3001"
-          TEST_HOOK_SECRET: e2e-test-hook-secret
-          PLAYWRIGHT_BROWSERS_PATH: /ms-playwright
-          DB_HOST: mariadb
-          DB_PORT: "3306"
-          DB_USER: ${{ secrets.CI_DB_USER }}
-          DB_PASSWORD: ${{ secrets.CI_DB_PASSWORD }}
-          DB_NAME: ${{ secrets.CI_DB_NAME }}
-          PLAYWRIGHT_JSON_OUTPUT_NAME: /tmp/e2e-full-logs/results-shard-3.json
-        run: cd tests && ./node_modules/.bin/playwright test --shard=3/3 --reporter=line,json
+          set -euo pipefail
+          cd tests
+          # Assign first: under `set -e` a failing command substitution aborts an
+          # ASSIGNMENT, but not a substitution used inline as an argument — there
+          # it would silently expand to nothing and run the ENTIRE suite in all
+          # three jobs. The explicit empty check is the second belt.
+          ARGS=$(node ../scripts/ci/e2e-partition.mjs --shard=${{ matrix.shard }} --total=3)
+          if [ -z "$ARGS" ]; then
+            echo "e2e-partition produced no spec filters for shard ${{ matrix.shard }}" >&2
+            exit 1
+          fi
+          # Unquoted on purpose: bash word-splits the ~50 filter args. (zsh would
+          # not — see the script header.)
+          ./node_modules/.bin/playwright test $ARGS --reporter=line,json
 
       - name: Collect logs for artifact
         if: always()
@@ -436,7 +409,10 @@ jobs:
         # v4 unsupported on Forgejo's actions backend; pin v3 (see ci.yml's smoke job).
         uses: actions/upload-artifact@ff15f0306b3f739f7b6fd43fb5d26cd321bd4de5 # v3.2.1
         with:
-          name: e2e-full-logs-${{ github.run_id }}
+          # #2300 — per-shard name. The three shard jobs each upload their own
+          # server.log / vite.log / results-shard-N.json; a shared artifact name
+          # would have them clobbering each other's identically-named files.
+          name: e2e-full-logs-${{ github.run_id }}-shard-${{ matrix.shard }}
           path: /tmp/e2e-full-logs/
           retention-days: 14
 
@@ -553,7 +529,13 @@ jobs:
         uses: actions/download-artifact@9bc31d5ccc31df68ecc42ccf4149144866c47d8a # v3.0.2
         continue-on-error: true # a crash before upload must not muzzle the notify
         with:
-          name: e2e-full-logs-${{ github.run_id }}
+          # #2300 — `name` is deliberately OMITTED. There are now three shard
+          # artifacts and v3 has no `pattern`/`merge-multiple` (v4 is unsupported
+          # on Forgejo's backend), so downloading all of them is the only option.
+          # That "creates an extra directory for each artifact" — proven on probe
+          # run 10147 — i.e. results land at
+          # /tmp/e2e-full-logs/e2e-full-logs-<run>-shard-N/results-shard-N.json.
+          # flaky-report.mjs searches one level deep for exactly this reason.
           path: /tmp/e2e-full-logs
 
       # #2303 — the flaky dashboard. Runs on EVERY non-PR run, green or red,
@@ -669,7 +651,15 @@ jobs:
               for child in suite.get("suites", []):
                   walk(child, out)
           failing, parsed_any = [], False
-          for path in sorted(glob.glob("/tmp/e2e-full-logs/results-shard-*.json")):
+          # #2300 — RECURSIVE. The three shards are parallel jobs now, so each
+          # uploads its own artifact and `download-artifact` (v3, no `name` —
+          # see that step) nests every one in its own subdirectory:
+          #   /tmp/e2e-full-logs/e2e-full-logs-<run>-shard-N/results-shard-N.json
+          # A flat glob silently found nothing and this marker filed itself with
+          # "no report artifact to parse" — losing the failing-spec list, which
+          # is the entire reason #1622 exists. `**` + recursive=True still matches
+          # the flat layout, so this works either way.
+          for path in sorted(glob.glob("/tmp/e2e-full-logs/**/results-shard-*.json", recursive=True)):
               try:
                   with open(path) as fh:
                       report = json.load(fh)
@@ -724,7 +714,7 @@ jobs:
               f"**Commit:** `{sha[:12]}`\n\n"
               f"{specs_hdr}\n{specs_block}\n\n"
               f"**Suspect commits** — {range_desc}:\n```\n{suspects}\n```\n\n"
-              f"_Auto-filed by e2e-full.yml `notify-failure` (#1622). Full report artifact: `e2e-full-logs-{run_id}`. "
+              f"_Auto-filed by e2e-full.yml `notify-failure` (#1622). Full report artifacts: `e2e-full-logs-{run_id}-shard-1|2|3`. "
               f"Fix forward, then re-run e2e-full — this issue auto-updates on the next red._"
           )
           # Find the existing rolling issue (best-effort — if the list read fails,

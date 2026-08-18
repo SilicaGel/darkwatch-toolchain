@@ -88,26 +88,58 @@ function call(method, path, payload) {
   return [null, null];
 }
 
-/** Parsed shard reports, or null if the artifact is missing/unreadable. */
+/**
+ * Every results-shard-*.json under LOG_DIR, looking one level deep as well as
+ * flat.
+ *
+ * #2300 — the shards became parallel jobs, so each uploads its OWN artifact
+ * (`e2e-full-logs-<run>-shard-N`; they cannot share a name or their server.log
+ * / vite.log would collide). `download-artifact` v3 has no `pattern` or
+ * `merge-multiple` — v4 is unsupported on Forgejo's backend — so the only way
+ * to collect them all is to omit `name`, and that "creates an extra directory
+ * for each artifact" (proven on probe run 10147):
+ *
+ *   /tmp/e2e-full-logs/e2e-full-logs-10147-shard-1/results-shard-1.json
+ *
+ * A flat readdir finds nothing there and the flaky dashboard would silently go
+ * empty — the exact silent-degradation class #2303 exists to prevent. Both
+ * layouts are accepted so this keeps working either way.
+ */
 function readReports() {
-  let names;
+  const found = [];
+  let entries;
   try {
-    names = readdirSync(LOG_DIR).filter((f) => /^results-shard-.*\.json$/.test(f));
+    entries = readdirSync(LOG_DIR, { withFileTypes: true });
   } catch {
     console.log(`no ${LOG_DIR} directory — the artifact download did not land`);
     return null;
   }
-  if (names.length === 0) {
-    console.log(`no results-shard-*.json in ${LOG_DIR}`);
+  const matches = (f) => /^results-shard-.*\.json$/.test(f);
+  for (const entry of entries) {
+    if (entry.isFile() && matches(entry.name)) {
+      found.push(join(LOG_DIR, entry.name));
+    } else if (entry.isDirectory()) {
+      const dir = join(LOG_DIR, entry.name);
+      try {
+        for (const nested of readdirSync(dir)) {
+          if (matches(nested)) found.push(join(dir, nested));
+        }
+      } catch {
+        // An unreadable subdirectory is not a reason to lose the other shards.
+      }
+    }
+  }
+  if (found.length === 0) {
+    console.log(`no results-shard-*.json in ${LOG_DIR} (searched one level deep)`);
     return null;
   }
   const reports = [];
-  for (const name of names.sort()) {
+  for (const path of found.sort()) {
     try {
-      reports.push(JSON.parse(readFileSync(join(LOG_DIR, name), "utf8")));
-      console.log(`  read ${name}`);
+      reports.push(JSON.parse(readFileSync(path, "utf8")));
+      console.log(`  read ${path}`);
     } catch (e) {
-      console.log(`  could not parse ${name}: ${e?.message ?? e}`);
+      console.log(`  could not parse ${path}: ${e?.message ?? e}`);
     }
   }
   return reports.length > 0 ? reports : null;
