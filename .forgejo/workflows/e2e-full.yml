@@ -70,15 +70,39 @@ on:
   pull_request:
     types: [opened, synchronize, reopened, labeled]
 
-# Serialize every HEAVY e2e-full run — nightly workflow_call, the midday cron,
-# manual dispatch, and a LABELED run-e2e-full PR — onto one `e2e-full` queue so
-# two suites never stack on the shared VM (#1622; no cancel — an in-flight deploy
-# gate must finish). An UNLABELED PR only evaluates the skip-gate, so it gets a
-# unique per-ref group — it must never queue behind a 50-min nightly just to skip
-# (#1623).
+# Concurrency splits on ONE axis: is this a PR, or is it the deploy gate?
+#
+# NON-PR (nightly workflow_call, the midday cron, manual dispatch) keeps the
+# single serialized `e2e-full` lane with NO cancel. These are the deploy gate;
+# two must never stack on the shared VM (#1622), and an in-flight gate must be
+# allowed to finish rather than be killed by the next one.
+#
+# PR runs get a PER-REF group and ARE cancelled by a newer push (#2300 phase 2).
+# Two changes from the old behaviour, both deliberate:
+#   - A LABELED `run-e2e-full` PR used to share the single heavy lane, so a
+#     second PR waited out the first — up to ~20 min of dead time before its
+#     suite even started. Per-ref removes that. Measured first: PR-triggered
+#     runs are 15 in 30 days (0.5/day), and a run occupies 3 of the fleet's 8
+#     slots for ~16-20 min, so concurrent PR suites are rare and affordable. The
+#     #1623 starvation guard is preserved where it actually matters (the gate).
+#   - `cancel-in-progress` is now TRUE for PRs. Re-pushing to a labeled PR used
+#     to leave the superseded suite running to completion against code nobody
+#     would merge — 6 of those 15 runs were `pull_request_sync` re-pushes, i.e.
+#     ~2h of runner time per month spent on dead commits.
+# An UNLABELED PR still lands in a per-ref group and so still never queues
+# behind a nightly just to evaluate its skip-gate, which is what #1623 bought.
+#
+# `cancel-in-progress` as an EXPRESSION is not something this stack was known to
+# honour — Forgejo silently ignoring it would read exactly like "nothing needed
+# cancelling". Proven on a throwaway probe before relying on it: two dispatches
+# 20s apart, the first ended `cancelled` at 21s and the second ran its full 122s.
+#
+# Cancelling a PR run cannot block a merge: the required contexts are
+# `CI / lint-typecheck`, `CI / test`, `CI / smoke` and `coverage-bot` — e2e-full
+# is opt-in and is not among them.
 concurrency:
-  group: ${{ github.event_name == 'pull_request' && !contains(github.event.pull_request.labels.*.name, 'run-e2e-full') && format('e2e-full-skip-{0}', github.ref) || 'e2e-full' }}
-  cancel-in-progress: false
+  group: ${{ github.event_name != 'pull_request' && 'e2e-full' || format('e2e-full-pr-{0}', github.ref) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   e2e-full:
