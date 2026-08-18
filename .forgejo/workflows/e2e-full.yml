@@ -376,18 +376,41 @@ jobs:
         run: |
           set -euo pipefail
           cd tests
-          # Assign first: under `set -e` a failing command substitution aborts an
-          # ASSIGNMENT, but not a substitution used inline as an argument — there
-          # it would silently expand to nothing and run the ENTIRE suite in all
-          # three jobs. The explicit empty check is the second belt.
-          ARGS=$(node ../scripts/ci/e2e-partition.mjs --shard=${{ matrix.shard }} --total=3)
-          if [ -z "$ARGS" ]; then
-            echo "e2e-partition produced no spec filters for shard ${{ matrix.shard }}" >&2
-            exit 1
+          PARTITION=../scripts/ci/e2e-partition.mjs
+          # #2409 VERSION SKEW — this is not defensive padding, it is a real and
+          # RECURRING state. The nightly deploy gate pins the tested ref to the
+          # newest RELEASE TAG, but a workflow always runs from the branch's copy
+          # of the YAML. So this step's script comes from `main` while the tree
+          # around it is the TAG — and any file this workflow gained since that
+          # tag is simply absent. Run 10184 (2026-08-18) is the proof: the shards
+          # died with `Cannot find module .../e2e-partition.mjs` and blocked the
+          # deploy, because v0.200.0 predates #2300. That window reopens after
+          # EVERY workflow change that adds a repo-file dependency and stays open
+          # until the next release, so it cannot be handled by remembering to cut
+          # one.
+          #
+          # Degrade to Playwright's own count-based sharding instead of failing.
+          # It is slower and unbalanced (~16m/10m/8m — the very thing #2300
+          # fixed), but it is exactly what this job did before #2300, so an older
+          # tag gets tested the way it always was. A blocked deploy is a far worse
+          # outcome than a slow one.
+          if [ -f "$PARTITION" ]; then
+            # Assign first: under `set -e` a failing command substitution aborts
+            # an ASSIGNMENT, but not a substitution used inline as an argument —
+            # there it would silently expand to nothing and run the ENTIRE suite
+            # in all three jobs. The explicit empty check is the second belt.
+            ARGS=$(node "$PARTITION" --shard=${{ matrix.shard }} --total=3)
+            if [ -z "$ARGS" ]; then
+              echo "e2e-partition produced no spec filters for shard ${{ matrix.shard }}" >&2
+              exit 1
+            fi
+            # Unquoted on purpose: bash word-splits the ~50 filter args. (zsh
+            # would not — see the script header.)
+            ./node_modules/.bin/playwright test $ARGS --reporter=line,json
+          else
+            echo "::warning::e2e-partition.mjs is absent at this ref — falling back to count-based --shard=${{ matrix.shard }}/3. Expected when the nightly tests a release tag older than #2300; the shards will be unbalanced and slower."
+            ./node_modules/.bin/playwright test --shard=${{ matrix.shard }}/3 --reporter=line,json
           fi
-          # Unquoted on purpose: bash word-splits the ~50 filter args. (zsh would
-          # not — see the script header.)
-          ./node_modules/.bin/playwright test $ARGS --reporter=line,json
 
       - name: Collect logs for artifact
         if: always()
