@@ -560,10 +560,22 @@ jobs:
       # above the key, never between the entries.
       #
       # 2187-combat-leak-guard.spec.ts is in the per-PR set rather than
-      # nightly-only.txt because it is four pure-logic tests with no browser and
-      # no database (~5ms). It pins the combat leak guard's verdict rules, and
-      # that guard runs on EVERY invocation of this suite — if its logic drifts,
-      # either every run goes red or the guard goes silently blind.
+      # nightly-only.txt because it is pure-logic tests with no browser (~5ms).
+      # It pins the combat leak guard's verdict rules, and that guard runs on
+      # EVERY invocation of this suite — if its logic drifts, either every run
+      # goes red or the guard goes silently blind.
+      #
+      # 2490-combat-ledger.spec.ts is here for the same reason, and pins the
+      # ATTRIBUTION half: which spec opened a combat, and which mid-run combats
+      # opened and closed unseen by the start/end samples. Same failure mode if
+      # it drifts — the ledger keeps recording and quietly blames the wrong
+      # spec, which is worse than no attribution at all.
+      #
+      # NOTE since #2490 these two are no longer "no database": the ledger's
+      # automatic fixture samples campaigns.combat_state after EVERY test in the
+      # suite, these included. It is ~0.3ms and non-fatal (a failed sample
+      # disables the ledger and warns), so they still need no DB to PASS — but
+      # do not read the old "no database" claim as still true of any spec.
       SMOKE_SPECS: >-
         e2e/a11y.spec.ts
         e2e/dashboard.spec.ts
@@ -591,6 +603,7 @@ jobs:
         e2e/2380-wt-classic-nav-hidden.spec.ts
         e2e/2330-load-error-retry.spec.ts
         e2e/2187-combat-leak-guard.spec.ts
+        e2e/2490-combat-ledger.spec.ts
         e2e/2426-auth-redirects.spec.ts
         e2e/2056-morale-cue.spec.ts
         e2e/2082-pending-blocks-arming.spec.ts

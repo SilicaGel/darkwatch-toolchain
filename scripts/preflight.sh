@@ -167,9 +167,11 @@ set -uo pipefail
 # `test` job step changed, so no check below moved — hash bump only. Same shape
 # as the 2026-07-14 reconciliation. NOTE: compute the hash with `node
 # scripts/ci/workflow-hash.mjs`, not a raw shasum (#2333).)
+# (Reconciled 2026-08-19, #2490: smoke spec list only — 2490-combat-ledger.spec.ts
+#  added beside 2187's. The lint-typecheck job is untouched.)
 # (Previously reconciled 2026-07-19, #1736 Task 4: WT no-raw-color guard.)
 # (Previously reconciled 2026-07-14, #1360/#1701: smoke spec list.)
-EXPECTED_CI_HASH="800f4576317763800c5f40484b368320ab29f7494be1e486aa57dfe885bcf934"
+EXPECTED_CI_HASH="527f8ca5309f204d940e7ef92ff558d5e24a7b0785929a3527602e888c7832f0"
 
 # #2336 — the `test` job MOVED from ci.yml to its own reusable workflow so the
 # nightly can call it too. The guard below hashed only ci.yml, so without this
@@ -380,6 +382,11 @@ run_check "e2e external-image ban" node scripts/check-e2e-external-images.mjs
 # against the live tests/e2e), so it is enforced in CI too — this line just
 # names it directly when preflight is what you're reading.
 run_check "e2e shared-account state" node scripts/check-e2e-account-state.mjs
+
+# #2490 — every e2e spec must take `test` from tests/helpers/test.ts. A spec on
+# the un-extended object silently drops out of combat-leak attribution: no
+# error, no warning, just a hole in the ledger.
+run_check "e2e shared test object" node scripts/check-e2e-shared-test.mjs
 
 # #761 — ratchet: fail if `Record<string, unknown>` count climbs above baseline.
 run_check "Record<string,unknown> budget" node scripts/check-record-type-budget.mjs
