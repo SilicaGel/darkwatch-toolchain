@@ -44,6 +44,56 @@ on:
     - cron: "0 6 * * *"
   workflow_dispatch:
 
+# #2483 — THE HEAVY-SUITE LANE IS DECLARED HERE, NOT IN e2e-full.yml.
+#
+# e2e-full.yml declares `concurrency: { group: 'e2e-full' }` (#1622) to stop two
+# whole Playwright suites stacking on the shared VM. That block governs runs of
+# e2e-full.yml itself — the midday cron, a manual dispatch, a labeled PR. It has
+# NEVER governed this workflow's `e2e-full` leg, and could not have:
+#
+#   Concurrency in Forgejo is a property of the RUN, stored on
+#   `action_run.concurrency_group`. There is NO `concurrency` column on
+#   `action_run_job` — job-level concurrency does not exist on this version at
+#   all. A `workflow_call` callee does not get a run of its own; its jobs are
+#   rows in `action_run_job` hanging off the CALLER's single `action_run`. So
+#   there is nowhere for the callee's group to be recorded, and Forgejo never
+#   evaluates the block. It is not renamed under `workflow_call` (the other
+#   hypothesis on #2483) — it is never read.
+#
+# Measured on this instance, gitea.db, before the fix:
+#   run 10211  e2e-full.yml     group='e2e-full'                        type=1
+#   run 10220  nightly-deploy   group='main_nightly-deploy.yml_schedule__auto'
+# Different groups, so they overlapped (05:49 and 06:01 on 2026-08-18) — and the
+# same shape overlapped on 2026-07-28 (runs 7792/7795), three weeks before
+# phase 1 or 2 existed. Long-standing, not a #2481 regression.
+#
+# Since #2300 phase 1 an e2e-full run holds 3 of the fleet's 8 slots, so two
+# stacked suites is 6 of 8 — precisely the starvation #1622 was added to stop.
+#
+# Declaring the SAME literal group here puts this run in that one lane. Proven
+# cross-workflow on a throwaway probe (runs 10325/10326, branch zz-2483-probe):
+# two DIFFERENT workflows sharing a literal group serialize — the second sat at
+# `waiting` with all 8 runner slots idle, so it was the lane holding it, not
+# capacity. That had to be probed: Forgejo's index is (repo_id,
+# concurrency_group) with no workflow_id, which implies repo scope, but every
+# serialization observed in the wild until then was e2e-full.yml behind itself.
+#
+# CONSEQUENCE, accepted deliberately: the lane is held for the WHOLE nightly
+# (~45m including the deploy), not just its e2e-full leg — run-level is the only
+# granularity that exists. A manual e2e-full dispatch during the nightly now
+# QUEUES rather than running alongside it. That is the point.
+#
+# `cancel-in-progress: false` is load-bearing: an in-flight deploy gate must
+# never be killed by a newer run. Note this also TIGHTENS the previous
+# behaviour — an undeclared schedule run was auto-grouped with cancellation
+# ENABLED (type=2 above), so two nightly-deploy runs could cancel each other.
+# Now they queue. Forgejo also queues multiple PENDING runs rather than letting
+# the newest replace the oldest the way GitHub does (probe runs 10326 + 10327
+# both held), so a manual dispatch cannot silently eat a pending nightly.
+concurrency:
+  group: e2e-full
+  cancel-in-progress: false
+
 jobs:
   # #2409 — resolve WHAT to ship, once, before anything else runs.
   #

@@ -100,6 +100,15 @@ on:
 # Cancelling a PR run cannot block a merge: the required contexts are
 # `CI / lint-typecheck`, `CI / test`, `CI / smoke` and `coverage-bot` — e2e-full
 # is opt-in and is not among them.
+#
+# #2483 — THIS BLOCK DOES NOT GOVERN THE NIGHTLY DEPLOY GATE. When this workflow
+# is invoked through `uses:` it gets no run of its own, and concurrency is a
+# per-RUN property in Forgejo (`action_run.concurrency_group`; there is no such
+# column on `action_run_job`, so job-level concurrency does not exist here).
+# The callee's block is therefore never evaluated — the caller's run carries the
+# group. `nightly-deploy.yml` declares `group: e2e-full` itself to join this
+# lane; see the long comment there. If you add another `workflow_call` caller of
+# this workflow, it needs the same declaration or it will escape the lane.
 concurrency:
   group: ${{ github.event_name != 'pull_request' && 'e2e-full' || format('e2e-full-pr-{0}', github.ref) }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
