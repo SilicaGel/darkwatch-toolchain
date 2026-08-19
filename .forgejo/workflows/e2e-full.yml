@@ -105,7 +105,54 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  # #2300 phase 4 — decide whether this PR needs the suite at all.
+  #
+  # ALWAYS RUNS, with no job-level `if:`, deliberately. `e2e-full` below has
+  # `needs: detect`, and a job whose need was SKIPPED is itself skipped — which
+  # on the nightly path would silently skip the deploy gate. That is the #2351
+  # shape, and a skipped job reports as `success` through the Forgejo API.
+  #
+  # The CHECKOUT is what costs (measured: 127s of a 127s job, run 10294 — it is
+  # `fetch-depth: 0` because a merge-base needs history), so it is gated to the
+  # PR path. A non-PR trigger needs no git at all to know the answer, and paying
+  # two minutes on every nightly gate for a decision that is always "run" would
+  # be a straight tax on the deploy.
+  #
+  # Both step gates are complements, so if either `if:` ever mis-evaluates the
+  # output is EMPTY rather than "false" — and e2e-full's gate is `!= 'false'`,
+  # so an unresolved expression RUNS the suite. Fail-safe by construction, which
+  # is the property that matters when the alternative is a silent skip.
+  detect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      should-run: ${{ steps.non-pr.outputs.should-run || steps.decide.outputs.should-run }}
+    steps:
+      - name: Non-PR triggers always run the suite
+        id: non-pr
+        if: ${{ github.event_name != 'pull_request' }}
+        run: |
+          echo "e2e-full opt-out: RUN — event is ${{ github.event_name }}, not a pull request"
+          echo "should-run=true" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        if: ${{ github.event_name == 'pull_request' }}
+        with:
+          # History for the merge-base, but no blobs — this only reads a list of
+          # file names. Same recipe as ci.yml's tree-gate (#2315).
+          fetch-depth: 0
+          filter: blob:none
+
+      - name: Decide whether e2e-full should run
+        id: decide
+        if: ${{ github.event_name == 'pull_request' }}
+        env:
+          PR_LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+        run: node scripts/ci/e2e-optout.mjs
+
   e2e-full:
+    needs: [detect]
     # #1623 — on a PR, run ONLY when the run-e2e-full label is present. Every
     # non-PR trigger (nightly workflow_call, midday cron, manual dispatch) has
     # github.event_name != 'pull_request', so those always run.
@@ -118,7 +165,12 @@ jobs:
     # The gate only works as a NORMAL-job `if:`, inlined here, which is why this
     # workflow owns its own `pull_request` trigger instead of being wrapped.
     # (Same reason visual-regression.yml gates its `visual` job in-place.)
-    if: ${{ github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'run-e2e-full') }}
+    # #2300 phase 4 adds the `!= 'false'` clause. Note the INVERSION: only an
+    # explicit "false" skips. An empty or missing output — detect crashed, the
+    # expression did not resolve — runs the suite. Written `!= 'false'` rather
+    # than `== 'true'` precisely so a broken detect job cannot silently skip the
+    # deploy gate, which would report as `success` through the Forgejo API.
+    if: ${{ needs.detect.outputs.should-run != 'false' && (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'run-e2e-full')) }}
     runs-on: ubuntu-latest
     # #2300 — was 75 for all three shards plus two Vite restarts in ONE job.
     # Sized against MEASURED parallel behaviour (run 10148), not the solo
