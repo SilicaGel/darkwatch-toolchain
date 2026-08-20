@@ -133,7 +133,14 @@ jobs:
   # is the property that matters when the alternative is a silent skip.
   detect:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    # #2528 — 10, not 5. The PR path checks out with `fetch-depth: 0` to get a
+    # merge-base, and that cost is dominated by the Pi's link and host load
+    # (#2315), not by the work. Measured over 30 days: PR-path successes ran
+    # 65s / 74s / 112s / 181s, and FOUR runs died at exactly 300-301s — half of
+    # every run that actually checks out. 5 was never a considered figure
+    # against a 181s worst observed success; 10 puts real headroom over the tail
+    # rather than sitting inside it.
+    timeout-minutes: 10
     outputs:
       should-run: ${{ steps.non-pr.outputs.should-run || steps.decide.outputs.should-run }}
     steps:
@@ -179,7 +186,24 @@ jobs:
     # expression did not resolve — runs the suite. Written `!= 'false'` rather
     # than `== 'true'` precisely so a broken detect job cannot silently skip the
     # deploy gate, which would report as `success` through the Forgejo API.
-    if: ${{ needs.detect.outputs.should-run != 'false' && (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'run-e2e-full')) }}
+    #
+    # #2528 — `!cancelled()` is the fail-open, and it is load-bearing. `detect`'s
+    # header claims the gate is "fail-safe by construction" because a
+    # mis-evaluating `if:` yields an EMPTY output and the gate reads `!= 'false'`.
+    # That held for a bad expression and NOT for a job that DIES: a failed need
+    # skips its dependents, so a timed-out `detect` silently skipped the whole
+    # suite while the three shard checks still reported `success` (Forgejo posts
+    # success for a skipped job — #1954). The documented fail-safe inverted in
+    # exactly the failure mode that actually happened.
+    #
+    # A status function is what keeps a job alive when its need did not succeed,
+    # so an empty `should-run` now reaches the `!= 'false'` test and the suite
+    # RUNS. A broken gate costs CI minutes, never coverage.
+    #
+    # `!cancelled()` and NOT `always()`, for the reason ci.yml:174 already
+    # records against the identical #2308 shape: `always()` would also run this
+    # on an explicitly cancelled run.
+    if: ${{ !cancelled() && needs.detect.outputs.should-run != 'false' && (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'run-e2e-full')) }}
     runs-on: ubuntu-latest
     # #2300 — was 75 for all three shards plus two Vite restarts in ONE job.
     # Sized against MEASURED parallel behaviour (run 10148), not the solo
