@@ -77,10 +77,36 @@ on the response does NOT mean the write failed.**
     | jq -r '.[] | select(.name=="run-visual") | .id'
   ```
 
-- Well-known ids (verify if behavior looks off): `status/review` = **37**,
-  `status/qa` = **38**.
+- Well-known ids (verify if behavior looks off): `status/todo` = **35**,
+  `status/doing` = **36**, `status/review` = **37**, `status/qa` = **38**,
+  `status/blocked` = **39**.
 - `DELETE /issues/{n}/labels/{id}` returns 204 even when the label is already absent —
   safe to run unconditionally.
+
+### Swapping a status label (DELETE + POST, never PUT)
+
+The five `status/*` labels are mutually exclusive, so a change is two calls: strip the
+old, add the new. **Never use `PUT /issues/{n}/labels`** — it *replaces the entire
+label set*, silently dropping the issue's epic/phase/severity labels (`phase/demo`,
+`critical`, `quick-win`, …) that the 3-axis tracker model depends on.
+
+```bash
+# claim issue $N for work: status/todo (or whatever it had) -> status/doing
+for OLD in 35 37 38 39; do
+  curl -sS -o /dev/null -X DELETE -H "Authorization: token $FORGEJO_TOKEN" \
+    "https://forge.example.com/api/v1/repos/aaron/darkwatch/issues/$N/labels/$OLD"
+done
+curl -sS -o /dev/null -w '%{http_code}\n' -X POST \
+  -H "Authorization: token $FORGEJO_TOKEN" -H "Content-Type: application/json" \
+  -d '{"labels":[36]}' \
+  "https://forge.example.com/api/v1/repos/aaron/darkwatch/issues/$N/labels"
+```
+
+Stripping all four non-target ids unconditionally is safe (204 on absent) and avoids a
+read-modify-write. **When work starts on an issue, it gets `status/doing`** — see
+`.claude/instructions/implementing-issues.md`. The far end is automated: the
+`label-merged-issues` workflow flips referenced issues to `status/qa` on merge, so
+don't hand-move them there.
 
 ## Endpoint quick reference
 

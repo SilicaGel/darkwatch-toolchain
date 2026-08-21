@@ -1,8 +1,8 @@
 ---
 name: queue-batches
 description: Use whenever the user invokes `/queue-batches` or `/queue-batches NxM` (e.g. `/queue-batches 3x5`), or says "queue up some batches", "kick off parallel work on some tickets", "run N groups of M issues in parallel".
-version: 1.3.1
-last_changed: 2026-08-14
+version: 1.4.0
+last_changed: 2026-08-21
 ---
 
 # Queue Batches
@@ -75,7 +75,7 @@ Only skip this check when the user explicitly overrides with `force` (or the equ
 ### 1. Fetch + triage
 
 - Fetch open issues: `curl -sS -H "Authorization: token $FORGEJO_TOKEN" "https://forge.example.com/api/v1/repos/aaron/darkwatch/issues?state=open&limit=50&type=issues"` (paginate if 50 returned; always fresh — no cache; transport rules in `.claude/skills/_shared/forgejo-api.md`)
-- Exclude labels: `pipe-dream`, `maybe`, anything labelled `blocked`
+- Exclude labels: `pipe-dream`, `maybe`, `status/blocked`, and anything already in flight or awaiting verification — `status/doing`, `status/review`, `status/qa`
 - For each remaining issue, read the body (not just title) to triage into a zone. Labels are a hint, not gospel. If an issue touches multiple zones, skip it with a note.
 
 ### 2. Score & select
@@ -102,6 +102,11 @@ Before dispatching, for each batch:
 - `git -C /path/to/darkwatch fetch origin main`
 - `git -C /path/to/darkwatch worktree add .worktrees/<batch-name> -b feat/<batch-name> origin/main`
 - **Provision the worktree: `cd .worktrees/<batch-name> && bash scripts/worktree-init.sh`.** A fresh worktree has no `.env` files and none of the four `node_modules` — this symlinks the former and copy-on-write-clones the latter in ~2s. Skipping it forces every agent into a multi-minute `npm ci` ×4, and an `npm install` inside a worktree corrupts the CoW clone. The agent prompt tells agents **not** to install anything, so this step is what makes that true.
+- **Claim the tickets on the board: flip each selected issue to `status/doing`** (strip
+  its current `status/*`, add id **36**). DELETE-then-POST, never `PUT` — recipe in
+  `.claude/skills/_shared/forgejo-api.md` → *Swapping a status label*. The
+  orchestrator does this at dispatch, not the agents: Step 2 triage of a *later* run
+  excludes `status/doing`, so an unclaimed ticket can be handed to a second agent.
 - Ensure `/tmp/queue-status/` exists; create empty `<batch-name>.log`
 - Pre-seed the log with a `ticket=#N status=queued` line for each ticket in the batch (smallest-first order). The statusline's second line reads this to render all tickets as `○` before agents start.
 - Render the prompt from `templates/agent-prompt.md` with placeholders filled
@@ -350,5 +355,8 @@ All overridable via user input during plan approval.
 - **Believing an agent's "I'm done" over its log.** Check the last log line for `ticket=all status=done`; anything else means it parked mid-gate (see the section above). Two of two agents did this on 2026-07-29.
 - **Forgetting to provision the worktree.** Without `scripts/worktree-init.sh` the agent has no `.env` and no `node_modules`, and will try to `npm install` its way out — which corrupts the CoW clone.
 - **Reading a baseline red as pre-existing.** Concurrent batches saturate the box; timeout failures under load are artifacts. Re-run the single test once it's quiet and compare messages.
+- **Dispatching without claiming the tickets.** If the selected issues aren't flipped
+  to `status/doing` at dispatch, the next run's triage (and any "what's next" listing)
+  reads them as free and can hand a live ticket to a second agent.
 - **Skipping the file blocklist when another session is live.** If a design/refactor lane is running in its own worktree, name the files it owns in every agent prompt — path collisions surface as merge conflicts hours later, not at dispatch.
 

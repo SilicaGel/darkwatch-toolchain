@@ -1,5 +1,18 @@
 # queue-batches — skill changelog
 
+## 1.4.0 — 2026-08-21 (claim tickets at dispatch)
+
+- **Step 4 now flips every selected ticket to `status/doing`** before launching its
+  agent, via DELETE-then-POST on the label endpoint (a `PUT` replaces the whole label
+  set and would drop `phase/*`, `critical`, etc.). The orchestrator owns this, not the
+  agents.
+- **Step 2 triage excludes in-flight statuses** (`status/doing`, `status/review`,
+  `status/qa`) alongside `status/blocked` — previously it filtered on a bare `blocked`
+  label that doesn't exist under that name.
+- Added the matching entry to *Common mistakes*: an unclaimed ticket reads as free to
+  the next run's triage and to "what should we work on next", so it can be handed to a
+  second agent.
+
 ## 1.3.1 — 2026-08-14 (#2411 doc corrections)
 
 - **Fixed the step citation** in the "ship sequentially" note: it said

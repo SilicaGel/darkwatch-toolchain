@@ -1,10 +1,26 @@
 # Implementing an Issue — verify the premise first
 
-Four checks before writing code. Each is under five minutes, and each caught a real error on 2026-07-26 — a day when **three of four issues implemented turned out to be wrong about something**, and one would have shipped a regression if built as written.
+Claim the ticket, then four checks before writing code. Each is under five minutes, and each caught a real error on 2026-07-26 — a day when **three of four issues implemented turned out to be wrong about something**, and one would have shipped a regression if built as written.
 
 The pattern behind them: **an issue's observation is usually right; its diagnosis often isn't.** Whoever filed it — an agent audit, a playtest, a person at the table — saw *behaviour*. They could not see *authorship*, so they had no way to tell a deliberate ruling from a bug.
 
 This is not a claim that most issues are wrong. Most aren't. It's a claim that these four checks are cheap enough to run anyway.
+
+## 0. Claim it — flip the label to `status/doing`
+
+Not a check; a courtesy to everyone else reading the board. **The moment we pick an
+issue up** — worktree created, or a batch agent dispatched at it — strip its current
+`status/*` label and add `status/doing` (id **36**). Recipe and the DELETE-then-POST
+rule (a `PUT` would drop the epic/phase labels) are in
+`.claude/skills/_shared/forgejo-api.md` → *Swapping a status label*.
+
+Several rules already *read* this label without anything reliably *writing* it: the
+workable-issues filter excludes `status/doing` from "what should we work on next", and
+`/queue-batches` triage would otherwise happily hand a live ticket to a second agent.
+An issue being implemented while still reading `status/todo` gets offered up as free.
+
+Don't hand-move it onward at the end — the `label-merged-issues` workflow flips
+referenced issues to `status/qa` on merge.
 
 ## 1. Rules-shaped claim? Check RAW
 
