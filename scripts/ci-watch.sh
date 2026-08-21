@@ -71,6 +71,10 @@ fi
 API="https://forge.example.com/api/v1/repos/aaron/darkwatch"
 # Overridable: the Forgejo host moves onto a Tailscale IP when Aaron is off
 # the LAN, and ci-log.sh has needed the same treatment.
+# #2537 — resolve the helper relative to THIS file, not the caller's cwd:
+# ci-watch.sh is launched from a worktree root, from the repo root, and
+# from nohup wrappers.
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 PI_HOST="${PI_HOST:-aaron@pi4}"
 GITEA_DB="${GITEA_DB:-/home/ci/services/forgejo/data/gitea/gitea.db}"
 
@@ -119,6 +123,15 @@ write_status() {
 #   - A re-fire leaves the earlier failed row in place, so take the HIGHEST
 #     task id PER JOB, grouped by the stable `job_id` FK on action_task — or
 #     a superseded failure reads as current.
+#   - #2537: that dedup is PER JOB and therefore only covers a retry WITHIN one
+#     run. Two RUNS of the same workflow on one sha (a label toggle, or any
+#     re-trigger that does not change the commit) have DIFFERENT
+#     `action_run_job` rows, so the older run survives the dedup entirely: its
+#     jobs render as duplicate lines and its failures read as current. Measured
+#     on sha 39cd6ced, where run 10462's `e2e-full (1)` failed and run 10469's
+#     passed — the old query reported the dead failure. So also scope to the
+#     NEWEST `action_run` per (commit_sha, workflow_id). Tasks with no run row
+#     at all are kept (`r.id IS NULL`) rather than dropped.
 #
 # #2110 (2026-08-07) — the ORIGINAL version of this query joined the wrong
 # direction and grouped by the wrong key, and the two defects compounded:
@@ -160,15 +173,21 @@ write_status() {
 # end-to-end; verify against a real run before fully trusting it.
 db_job_states() {
   ssh -o ConnectTimeout=10 -o BatchMode=yes "$PI_HOST" \
-    "sudo sqlite3 -separator ' ' '$GITEA_DB' \"
-       SELECT COALESCE(j.name,'unnamed-task-' || t.id) AS job,
+    "sudo sqlite3 '$GITEA_DB' \"
+       SELECT COALESCE(j.name,'unnamed-task-' || t.id) || char(9) ||
               CASE t.status WHEN 1 THEN 'success' WHEN 2 THEN 'failure'
                             WHEN 3 THEN 'cancelled' WHEN 4 THEN 'skipped'
                             WHEN 5 THEN 'waiting' WHEN 6 THEN 'running'
-                            ELSE 'unknown' END AS state
+                            ELSE 'unknown' END AS job_state
          FROM action_task t
          LEFT JOIN action_run_job j ON j.id = t.job_id
+         LEFT JOIN action_run r ON r.id = j.run_id
         WHERE t.commit_sha LIKE '${sha}%'
+          AND (r.id IS NULL
+               OR r.id = (SELECT MAX(r2.id)
+                            FROM action_run r2
+                           WHERE r2.commit_sha = r.commit_sha
+                             AND r2.workflow_id = r.workflow_id))
           AND t.id = (SELECT MAX(t2.id)
                         FROM action_task t2
                        WHERE t2.commit_sha LIKE '${sha}%'
@@ -219,14 +238,32 @@ while (( SECONDS < deadline )); do
   # ── Terminal per the API. Now find out what actually ran. ────────────────
   verified="none"
   db_failures=""
+  db_cancelled=""
   if (( verify )); then
     db_out=$(db_job_states)
     if [[ -n "$db_out" ]]; then
-      verified="db"
-      db_failures=$(printf '%s\n' "$db_out" | awk '$2=="failure" || $2=="cancelled" {print $1}')
-      while read -r jname jstate; do
-        [[ -n "$jname" ]] && echo "  job $jname = $jstate"
-      done <<< "$db_out"
+      # #2537 — classification lives in scripts/ci/ci-watch-verdict-core.mjs
+      # (pure + tested). It was `awk '$2=="failure" || $2=="cancelled"'` here,
+      # and that was wrong in BOTH directions at once on PR #2536: a matrix
+      # job's name contains a SPACE, so `$2` was `(1)` rather than the state
+      # and a leg failure could never be reported; and a run superseded by
+      # `cancel-in-progress` (routine since #2481) contributed CANCELLED jobs
+      # that read as current failures. Only status 2 is a failure now;
+      # cancellations are reported as information and never drive the verdict.
+      verdict=$(printf '%s\n' "$db_out" | node "$SCRIPT_DIR/ci/ci-watch-verdict.mjs" 2>/dev/null)
+      if [[ -n "$verdict" ]]; then
+        verified="db"
+        /usr/bin/jq -r '.lines[]' <<< "$verdict" 2>/dev/null
+        db_failures=$(/usr/bin/jq -r '.failures[]' <<< "$verdict" 2>/dev/null)
+        db_cancelled=$(/usr/bin/jq -r '.cancelled | length' <<< "$verdict" 2>/dev/null)
+        if [[ -n "${db_cancelled:-}" && "$db_cancelled" != "0" ]]; then
+          echo "  superseded: $db_cancelled cancelled job(s) from an earlier run on this sha — not failures (#2537)"
+        fi
+      else
+        # Could not classify. "We looked and couldn't read it" is the same
+        # claim as "we couldn't look" — say unverified rather than invent one.
+        echo "  NOTE: could not classify job states — reporting unverified."
+      fi
     fi
   fi
 
