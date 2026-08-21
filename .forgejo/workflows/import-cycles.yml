@@ -23,6 +23,23 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          # #2315 — this job throws the 21M of Playwright visual baselines away.
+          # Excluding them measured 31% less transfer and 35% less checkout time
+          # per clone on a 6-way concurrent bench; only visual-regression.yml's
+          # `visual` job reads them (e2e-full sets E2E_SKIP_VISUAL, and they are
+          # not in SMOKE_SPECS).
+          #
+          # `filter` alone is a NO-OP with a full working tree (#2338) — the
+          # sparse list is what stops the lazy re-fetch of tip blobs. And
+          # cone-mode MUST be off: cone mode rejects `!` patterns outright
+          # (`fatal: specify directories rather than patterns`) and leaves the
+          # full tree, so this would silently be a no-op with it on.
+          filter: blob:none
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /*
+            !tests/e2e/visual-regression.spec.ts-snapshots
 
       - name: Use Node 22
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0

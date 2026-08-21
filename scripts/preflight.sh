@@ -171,7 +171,10 @@ set -uo pipefail
 #  added beside 2187's. The lint-typecheck job is untouched.)
 # (Previously reconciled 2026-07-19, #1736 Task 4: WT no-raw-color guard.)
 # (Previously reconciled 2026-07-14, #1360/#1701: smoke spec list.)
-EXPECTED_CI_HASH="527f8ca5309f204d940e7ef92ff558d5e24a7b0785929a3527602e888c7832f0"
+# (Reconciled 2026-08-20, #2315: sparse-checkout + blob filter on lint-typecheck
+#  and smoke so they stop pulling the 21M of visual baselines. lint-typecheck job
+#  steps otherwise untouched.)
+EXPECTED_CI_HASH="78cc34af8d8e5b5d64ca0ba2d5f563f4a388bd870a33fa4f148b40935bcf4c73"
 
 # #2336 — the `test` job MOVED from ci.yml to its own reusable workflow so the
 # nightly can call it too. The guard below hashed only ci.yml, so without this
