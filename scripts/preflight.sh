@@ -174,7 +174,13 @@ set -uo pipefail
 # (Reconciled 2026-08-20, #2315: sparse-checkout + blob filter on lint-typecheck
 #  and smoke so they stop pulling the 21M of visual baselines. lint-typecheck job
 #  steps otherwise untouched.)
-EXPECTED_CI_HASH="78cc34af8d8e5b5d64ca0ba2d5f563f4a388bd870a33fa4f148b40935bcf4c73"
+# (Reconciled 2026-08-21, #2496: `smoke` gains a `Decide whether this diff can
+#  affect runtime` step and a `steps.cheap.outputs.cheap != 'true'` guard on its
+#  16 expensive steps. The JOB stays unconditional on pull_request — see the
+#  REQUIRED_CONTEXTS invariant in scripts/ci/tree-gate-core.mjs for why a
+#  job-level `if:` here would be unsafe. `lint-typecheck` is untouched.
+#  NOTE: compute with `node scripts/ci/workflow-hash.mjs`, not a raw shasum (#2333).)
+EXPECTED_CI_HASH="39acc6cff7f13c65ab23c5da32934da9a5b97aa3457e88f31a626d0e3f724d62"
 
 # #2336 — the `test` job MOVED from ci.yml to its own reusable workflow so the
 # nightly can call it too. The guard below hashed only ci.yml, so without this
@@ -186,7 +192,14 @@ EXPECTED_CI_HASH="78cc34af8d8e5b5d64ca0ba2d5f563f4a388bd870a33fa4f148b40935bcf4c
 #  after #2531 did lint-typecheck/smoke/knip/cycles. Only the checkout step's
 #  `with:` changed; no test/build step moved, so this is a hash bump only.
 #  NOTE: compute with `node scripts/ci/workflow-hash.mjs`, not a raw shasum (#2333).)
-EXPECTED_TEST_HASH="2c962173cee2a5cdb12a88b30515d236396a84c8edfd07edad78085c6c420a05"
+# (Reconciled 2026-08-21, #2496: the `test` job gains the same decision step and
+#  guards on its 13 expensive steps. `Post diff coverage comment` is deliberately
+#  NOT guarded — it emits the REQUIRED `coverage-bot` context, so on the cheap
+#  path it posts an honest "no code files changed" status instead of being
+#  skipped (#2351: that miss blocks every merge). Amended same day: the decision
+#  step now takes PR_NUMBER, because a workflow_call callee's event_name is
+#  literally 'workflow_call' and the first version was silently dead here.)
+EXPECTED_TEST_HASH="c513dc4b83aacddec8bece240a56da4188ad3a406ec5a1fed1744e62f229144f"
 
 # --- setup ------------------------------------------------------------------
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || {

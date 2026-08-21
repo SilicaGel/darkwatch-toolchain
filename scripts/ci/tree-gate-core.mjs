@@ -50,6 +50,26 @@
  * PR, this gate would read "skipped" as "passed" and skip the push run against
  * a job that never ran. The `if:` on each job in ci.yml is scoped to
  * `github.event_name == 'push'` for that reason.
+ *
+ * The failure is COMPOUND, which is why the invariant is worth this much prose:
+ * a misclassified PR would merge on required contexts that never ran, AND then
+ * this gate would skip the main run too, believing those bytes were tested.
+ * Neither side would have executed anything. That is the whole reason the
+ * classifier feeding any such decision has to fail open.
+ *
+ * #2496 — WHAT "GREEN" MEANS HERE CHANGED, AND THE INVARIANT DID NOT.
+ * `test` and `smoke` now take a CHEAP PATH on a diff that cannot affect runtime
+ * (docs / .claude / root *.md — see scripts/ci/docs-only.mjs). They still RUN and
+ * still post their own status from a real execution; only their expensive steps
+ * are skipped. So a green here now means "the job ran and made a deliberate
+ * decision", not "the suite executed". That is a weaker claim than before —
+ * but it is still a claim made BY A JOB THAT RAN, which is exactly what this
+ * invariant protects and what a job-level `if:` would have destroyed.
+ *
+ * `lint-typecheck` is deliberately excluded from that cheap path: `prettier
+ * --check .` covers every `*.md` in the repo, and the feature-inventory and
+ * rights-matrix drift guards read `docs/` directly. A documentation-only PR is
+ * precisely the diff that job exists to validate.
  */
 export const REQUIRED_CONTEXTS = [
   "CI / lint-typecheck (pull_request)",

@@ -188,12 +188,41 @@ jobs:
             client/package-lock.json
             tests/package-lock.json
 
-      - name: Install root devDependencies (c8 — coverage-bot scripts)
+      # #2496 — can this diff affect runtime at all? A documentation-only PR has
+      # nothing for vitest to run, and paid ~10.4m for it.
+      #
+      # ⚠️ This deliberately gates STEPS, never this job. tree-gate-core.mjs's
+      # REQUIRED_CONTEXTS invariant says `CI / test (pull_request)` must stay
+      # unconditional: Forgejo posts `success` for a SKIPPED job, and the
+      # push-to-main tree gate reads that status as proof the PR run was green.
+      # A job-level `if:` here would let a misclassified PR merge on a context
+      # that never ran AND then skip the main run too — no coverage anywhere.
+      #
+      # Fail-open is structural: if this step crashes or sets nothing, the output
+      # is empty, `!= 'true'` holds, and every step below runs.
+      - name: Decide whether this diff can affect runtime (#2496)
+        id: cheap
         if: ${{ inputs.skip != 'true' }}
+        env:
+          # #2496 — PR-ness must come from the PAYLOAD, not from event_name: in a
+          # workflow_call callee `github.event_name` is literally `workflow_call`,
+          # so the first version of this step read "not a pull request" and was
+          # dead here while `smoke` worked on the same commit. Same lesson the
+          # coverage step below records for #2351.
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+          BASE_REF: ${{ github.event.pull_request.base.ref || github.base_ref || 'main' }}
+          GATE_LABEL: test
+        run: |
+          git fetch origin "${BASE_REF:-main}" --quiet || true
+          node scripts/ci/docs-only.mjs
+
+      - name: Install root devDependencies (c8 — coverage-bot scripts)
+        if: ${{ inputs.skip != 'true' && steps.cheap.outputs.cheap != 'true' }}
         run: npm ci --no-audit --no-fund
 
       - name: Install server dependencies
-        if: ${{ inputs.skip != 'true' }}
+        if: ${{ inputs.skip != 'true' && steps.cheap.outputs.cheap != 'true' }}
         run: |
           cd server && npm ci --no-audit --no-fund
           ROLLDOWN_ARCH=$(node -p "process.arch")
@@ -204,17 +233,17 @@ jobs:
           fi
 
       - name: Install client dependencies
-        if: ${{ inputs.skip != 'true' }}
+        if: ${{ inputs.skip != 'true' && steps.cheap.outputs.cheap != 'true' }}
         run: cd client && npm ci --no-audit --no-fund
 
       - name: Test server (unit)
-        if: ${{ inputs.skip != 'true' }}
+        if: ${{ inputs.skip != 'true' && steps.cheap.outputs.cheap != 'true' }}
         # Always emit coverage — PR uses it for the diff-coverage comment;
         # main uses it to write the server-coverage badge.
         run: cd server && npm run test:coverage
 
       - name: Wait for MariaDB
-        if: ${{ inputs.skip != 'true' }}
+        if: ${{ inputs.skip != 'true' && steps.cheap.outputs.cheap != 'true' }}
         run: |
           for i in $(seq 1 30); do
             (echo > /dev/tcp/mariadb/3306) 2>/dev/null && echo "MariaDB is ready" && break
@@ -224,7 +253,7 @@ jobs:
           done
 
       - name: Wait for MinIO (image-library int tests need it)
-        if: ${{ inputs.skip != 'true' }}
+        if: ${{ inputs.skip != 'true' && steps.cheap.outputs.cheap != 'true' }}
         run: |
           for i in $(seq 1 30); do
             (echo > /dev/tcp/minio/9000) 2>/dev/null && echo "MinIO is ready" && break
@@ -234,7 +263,7 @@ jobs:
           done
 
       - name: Apply migrations to CI DB
-        if: ${{ inputs.skip != 'true' }}
+        if: ${{ inputs.skip != 'true' && steps.cheap.outputs.cheap != 'true' }}
         env:
           DB_HOST: mariadb
           DB_PORT: "3306"
@@ -244,13 +273,13 @@ jobs:
         run: cd server && npm run db:migrate
 
       - name: Verify Kysely schema types are up-to-date
-        if: ${{ inputs.skip != 'true' }}
+        if: ${{ inputs.skip != 'true' && steps.cheap.outputs.cheap != 'true' }}
         env:
           DATABASE_URL: mysql://${{ secrets.CI_DB_USER }}:${{ secrets.CI_DB_PASSWORD }}@mariadb:3306/${{ secrets.CI_DB_NAME }}
         run: cd server && npm run db:verify
 
       - name: Seed core + shadowdark content (int tests assume seeded DB)
-        if: ${{ inputs.skip != 'true' }}
+        if: ${{ inputs.skip != 'true' && steps.cheap.outputs.cheap != 'true' }}
         env:
           DB_HOST: mariadb
           DB_PORT: "3306"
@@ -260,7 +289,7 @@ jobs:
         run: cd server && npm run seed:core && npm run seed:shadowdark
 
       - name: Integration tests (repositories against real DB)
-        if: ${{ inputs.skip != 'true' }}
+        if: ${{ inputs.skip != 'true' && steps.cheap.outputs.cheap != 'true' }}
         env:
           DB_HOST: mariadb
           DB_PORT: "3306"
@@ -280,7 +309,7 @@ jobs:
         # reads. Runs on PRs too (writes a local file, logs the combined %) so
         # the merge is exercised in CI; only the main run uploads/uses it.
         # Cosmetic — never fail the build over it.
-        if: ${{ always() && inputs.skip != 'true' }}
+        if: ${{ always() && inputs.skip != 'true' && steps.cheap.outputs.cheap != 'true' }}
         continue-on-error: true
         run: |
           mkdir -p server/coverage-combined
@@ -290,7 +319,7 @@ jobs:
             server/coverage-combined/coverage-summary.json
 
       - name: Test client (unit)
-        if: ${{ inputs.skip != 'true' }}
+        if: ${{ inputs.skip != 'true' && steps.cheap.outputs.cheap != 'true' }}
         # Always emit coverage — PR uses it for the diff-coverage comment;
         # main uses it to write the client-coverage badge.
         # #1355 — pin the worker heap. Node otherwise auto-sizes old-space from
@@ -302,7 +331,7 @@ jobs:
         run: cd client && npm run test:coverage
 
       - name: Test coverage-bot scripts
-        if: ${{ inputs.skip != 'true' }}
+        if: ${{ inputs.skip != 'true' && steps.cheap.outputs.cheap != 'true' }}
         run: npm run test:scripts:coverage
 
       - name: Post diff coverage comment
@@ -331,10 +360,24 @@ jobs:
           COVERAGE_FILES_UNIT: server/coverage/coverage-final.json,client/coverage/coverage-final.json,scripts/coverage/coverage-final.json
           COVERAGE_FILES_INT: server/coverage-int/coverage-final.json
           PR_TITLE: ${{ github.event.pull_request.title }}
+          # #2496 — read in the SHELL, not in this step's `if:`. `env.` in a step
+          # `if:` inside a workflow_call callee has failed OPEN three times
+          # (#2357/#2438); a plain shell test on the value cannot.
+          CHEAP: ${{ steps.cheap.outputs.cheap }}
         run: |
-          git fetch origin ${{ github.event.pull_request.base.ref || github.base_ref }} --depth=50
-          node scripts/coverage-comment/build-comment.mjs \
-            | node scripts/coverage-comment/post-comment.mjs
+          # ⚠️ This step is deliberately NOT gated off on the cheap path.
+          # `coverage-bot` is a REQUIRED branch-protection context emitted from
+          # right here, so a cheap path that skipped it would leave the context
+          # never posted and block the merge forever — #2351 recorded exactly
+          # that ("the miss blocks every merge"). Post it honestly instead.
+          if [ "$CHEAP" = "true" ]; then
+            echo "[coverage] no code files changed — posting the required context without a measurement"
+            COVERAGE_NO_CODE=1 node scripts/coverage-comment/post-comment.mjs < /dev/null
+          else
+            git fetch origin ${{ github.event.pull_request.base.ref || github.base_ref }} --depth=50
+            node scripts/coverage-comment/build-comment.mjs \
+              | node scripts/coverage-comment/post-comment.mjs
+          fi
 
       - name: Upload coverage summaries (consumed by the badges job)
         # #2351 — "a main-push run" expressed as data, not event_name (which is

@@ -27,6 +27,30 @@ export const STATUS_CONTEXT = "coverage-bot";
 const SKIP_LABEL = "no-coverage";
 const SKIP_TITLE_RE = /\[skip coverage\]/i;
 
+// #2496 — the docs-only cheap path. `coverage-bot` is a REQUIRED branch-protection
+// context and it is emitted by a STEP inside test.yml's `test` job, so a cheap
+// path that simply skipped that step would leave the context never posted and
+// block the merge forever. #2351 recorded exactly that failure ("the miss blocks
+// every merge") when this step was silently guarded off.
+//
+// There is nothing to measure when no code file changed, so say so plainly rather
+// than reporting a coverage number nobody computed.
+export const NO_CODE_DESCRIPTION = "No code files changed — coverage not measured";
+
+/**
+ * Is this the docs-only cheap path? Pure so it can be pinned by a test.
+ * Treats the usual falsy spellings as "no" — an unset var and `COVERAGE_NO_CODE=0`
+ * must both mean "measure coverage normally", because the failure direction here
+ * is posting a green status for a run that measured nothing.
+ *
+ * @param {Record<string, string|undefined>} env
+ * @returns {boolean}
+ */
+export function isNoCodeRun(env = {}) {
+  const v = (env.COVERAGE_NO_CODE ?? "").trim().toLowerCase();
+  return v !== "" && v !== "0" && v !== "false";
+}
+
 // Parse the machine-readable metadata line produced by build-comment.mjs.
 // Returns { pct, threshold, covered, total, passed } or null.
 export function parseMeta(body) {
@@ -162,6 +186,28 @@ export function isOptedOut(pr) {
 
 async function main() {
   const env = parseEnv();
+
+  // #2496 — docs-only cheap path: no vitest ran, so there is no coverage data and
+  // no comment to build. Post the required context honestly and clear any stale
+  // bot comment from an earlier push, then stop. Deliberately BEFORE the stdin
+  // read: on this path nothing upstream produced a body.
+  if (isNoCodeRun(process.env)) {
+    const base0 = apiBase(env);
+    const headers0 = authHeaders(env);
+    const pr0 = await fetchPrMeta(base0, headers0, env.PR_NUMBER);
+    console.error(`[post-comment] ${NO_CODE_DESCRIPTION}`);
+    for (const c of await findBotComments(base0, headers0, env.PR_NUMBER)) {
+      await deleteComment(base0, headers0, c.id);
+    }
+    if (pr0?.head?.sha) {
+      await postCommitStatus(base0, headers0, pr0.head.sha, {
+        state: "success",
+        description: NO_CODE_DESCRIPTION,
+      });
+    }
+    return;
+  }
+
   const body = readFileSync(0, "utf8");
   const marker = body.match(MARKER_RE);
   if (!marker) {

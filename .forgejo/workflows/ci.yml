@@ -693,7 +693,32 @@ jobs:
       # #969 — Node 22 is baked into the container image, so no actions/setup-node.
       # We still cache the npm download dir (what setup-node's cache:'npm' did)
       # so `npm ci` doesn't re-fetch every tarball.
+      # #2496 — can this diff affect runtime at all? A documentation-only PR has
+      # no reason to build the app and drive Playwright, and paid ~7.6m for it.
+      #
+      # ⚠️ Gates STEPS, never this job. tree-gate-core.mjs's REQUIRED_CONTEXTS
+      # invariant requires `CI / smoke (pull_request)` to stay unconditional:
+      # Forgejo posts `success` for a SKIPPED job, and the push-to-main tree gate
+      # reads that status as proof the PR run was green. A job-level `if:` here
+      # would let a misclassified PR merge on a context that never ran AND then
+      # skip the main run too — no coverage anywhere.
+      #
+      # Fail-open is structural: a crash sets no output, `!= 'true'` holds, and
+      # every step below runs.
+      - name: Decide whether this diff can affect runtime (#2496)
+        id: cheap
+        env:
+          # #2496 — PR-ness from the PAYLOAD, not event_name. This job is an
+          # ordinary `pull_request` job so event_name would do, but the two
+          # call sites share one script and one contract; see docs-only-core.mjs.
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+          BASE_REF: ${{ github.event.pull_request.base.ref || github.base_ref || 'main' }}
+          GATE_LABEL: smoke
+        run: node scripts/ci/docs-only.mjs
+
       - name: Cache npm downloads
+        if: ${{ steps.cheap.outputs.cheap != 'true' }}
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: ~/.npm
@@ -702,6 +727,7 @@ jobs:
             npm-${{ runner.os }}-
 
       - name: Install server dependencies
+        if: ${{ steps.cheap.outputs.cheap != 'true' }}
         run: |
           cd server && npm ci --no-audit --no-fund
           ROLLDOWN_ARCH=$(node -p "process.arch")
@@ -712,15 +738,19 @@ jobs:
           fi
 
       - name: Build server
+        if: ${{ steps.cheap.outputs.cheap != 'true' }}
         run: cd server && npm run build
 
       - name: Install client dependencies
+        if: ${{ steps.cheap.outputs.cheap != 'true' }}
         run: cd client && npm ci --no-audit --no-fund
 
       - name: Build client
+        if: ${{ steps.cheap.outputs.cheap != 'true' }}
         run: cd client && npm run build
 
       - name: Wait for MariaDB
+        if: ${{ steps.cheap.outputs.cheap != 'true' }}
         run: |
           for i in $(seq 1 30); do
             (echo > /dev/tcp/mariadb/3306) 2>/dev/null && echo "MariaDB is ready" && break
@@ -730,6 +760,7 @@ jobs:
           done
 
       - name: Apply migrations to CI DB
+        if: ${{ steps.cheap.outputs.cheap != 'true' }}
         env:
           DB_HOST: mariadb
           DB_PORT: "3306"
@@ -739,6 +770,7 @@ jobs:
         run: cd server && npm run db:migrate
 
       - name: Wait for MinIO + create the images bucket (#1621 affected tier)
+        if: ${{ steps.cheap.outputs.cheap != 'true' }}
         # The affected tier (#1621) can append maps/image/AoE specs that store
         # uploads in object storage, and the all-tier seed below stages the QA
         # fixture's (#1238) map image through it. Create the bucket + make it
@@ -776,6 +808,7 @@ jobs:
           echo "MinIO ready with bucket $MINIO_BUCKET (public-download)"
 
       - name: Seed all tiers (smoke base + any affected-tier spec's preconditions)
+        if: ${{ steps.cheap.outputs.cheap != 'true' }}
         env:
           DB_HOST: mariadb
           DB_PORT: "3306"
@@ -798,6 +831,7 @@ jobs:
         run: cd server && npm run seed
 
       - name: Smoke — start E2E app server
+        if: ${{ steps.cheap.outputs.cheap != 'true' }}
         env:
           PORT: "3001"
           DB_HOST: mariadb
@@ -840,6 +874,7 @@ jobs:
           done
 
       - name: Smoke — start Vite preview server
+        if: ${{ steps.cheap.outputs.cheap != 'true' }}
         env:
           API_PROXY_URL: "http://localhost:3001"
           NODE_OPTIONS: "--max-old-space-size=512"
@@ -855,6 +890,7 @@ jobs:
           done
 
       - name: Smoke — warm up app server (login + auth + campaigns)
+        if: ${{ steps.cheap.outputs.cheap != 'true' }}
         # The first specs in the suite (level-up, picker-commits) hit cold
         # connection pools, V8 JIT, and socket handlers, exceeding their
         # 12-15s waits. Issuing a few authed requests here primes the app
@@ -884,6 +920,7 @@ jobs:
       # /ms-playwright, so the actions/cache step and the install-deps/install
       # branch are gone. Only the tests/ npm deps remain.
       - name: Smoke — install tests deps (browsers baked in image)
+        if: ${{ steps.cheap.outputs.cheap != 'true' }}
         env:
           PLAYWRIGHT_BROWSERS_PATH: /ms-playwright
         run: cd tests && npm ci
@@ -914,6 +951,7 @@ jobs:
       # than 2-way's 69 / 66. theme-contrast.spec.ts alone is 52 tests in one
       # file and cannot be split at all, which floors how fine this can usefully go.
       - name: Smoke — run critical specs, shard 1/2 (+ affected nightly-only tier, #1621)
+        if: ${{ steps.cheap.outputs.cheap != 'true' }}
         id: smoke_e2e
         env:
           E2E_SERVER_URL: "http://localhost:3001"
@@ -953,6 +991,7 @@ jobs:
       # relaunch: a `vite preview` that is still holding 5173 makes the next
       # shard fail on connect rather than on anything real.
       - name: Smoke — restart Vite preview (between shards 1→2, #2167)
+        if: ${{ steps.cheap.outputs.cheap != 'true' }}
         env:
           API_PROXY_URL: "http://localhost:3001"
           NODE_OPTIONS: "--max-old-space-size=512"
@@ -977,6 +1016,7 @@ jobs:
           done
 
       - name: Smoke — run critical specs, shard 2/2 (+ affected nightly-only tier, #1621)
+        if: ${{ steps.cheap.outputs.cheap != 'true' }}
         env:
           E2E_SERVER_URL: "http://localhost:3001"
           TEST_HOOK_SECRET: e2e-test-hook-secret
