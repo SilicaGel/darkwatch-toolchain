@@ -160,6 +160,21 @@ jobs:
           ref: ${{ inputs.ref }}
           # The diff-coverage comment needs history to diff against the base ref.
           fetch-depth: 0
+          # #2315 — skip the 21M of Playwright visual baselines. This job runs
+          # vitest (server unit + integration, client unit) and the coverage-bot
+          # script tests; nothing here reads the snapshot PNGs. Only
+          # visual-regression.yml's `visual` job does.
+          #
+          # `filter` alone is a NO-OP with a full working tree (#2338) — the sparse
+          # list is what stops the lazy re-fetch of tip blobs. And cone-mode MUST be
+          # off: cone mode rejects `!` patterns outright (`fatal: specify directories
+          # rather than patterns`) and leaves the full tree, so this would silently be
+          # a no-op with it on.
+          filter: blob:none
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /*
+            !tests/e2e/visual-regression.spec.ts-snapshots
 
       - name: Setup Node.js
         if: ${{ inputs.skip != 'true' }}

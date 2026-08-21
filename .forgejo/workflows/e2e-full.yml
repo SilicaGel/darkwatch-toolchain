@@ -249,6 +249,25 @@ jobs:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           ref: ${{ inputs.ref }}
+          # #2315 — skip the 21M of Playwright visual baselines. This job sets
+          # E2E_SKIP_VISUAL=1 (see the job `env:` above), which playwright.config.ts
+          # turns into a `**/visual-regression.spec.ts` exclusion, so the snapshots
+          # are never read here. Only visual-regression.yml's `visual` job reads them.
+          #
+          # `filter` alone is a NO-OP with a full working tree (#2338) — the sparse
+          # list is what stops the lazy re-fetch of tip blobs. And cone-mode MUST be
+          # off: cone mode rejects `!` patterns outright (`fatal: specify directories
+          # rather than patterns`) and leaves the full tree, so this would silently be
+          # a no-op with it on.
+          #
+          # This matters more here than anywhere else: all three shards are handed to
+          # whichever runner has capacity, so they normally land CO-LOCATED on one
+          # host and clone concurrently (#2300 phase 1).
+          filter: blob:none
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /*
+            !tests/e2e/visual-regression.spec.ts-snapshots
 
       - name: Cache npm downloads
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0

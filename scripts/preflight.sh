@@ -181,7 +181,12 @@ EXPECTED_CI_HASH="78cc34af8d8e5b5d64ca0ba2d5f563f4a388bd870a33fa4f148b40935bcf4c
 # second hash the suite preflight mirrors would have silently dropped off the
 # drift watch the moment it moved — the exact failure this guard exists to
 # prevent. Reconcile BOTH when either changes.
-EXPECTED_TEST_HASH="4321b870e3b7a3bd725692b9398ce31f74e5542f4b03437e1a0a7d4440d20d45"
+# (Reconciled 2026-08-21, #2315: sparse-checkout + blob filter on the `test`
+#  job so it stops pulling the 21M of visual baselines — the second tranche,
+#  after #2531 did lint-typecheck/smoke/knip/cycles. Only the checkout step's
+#  `with:` changed; no test/build step moved, so this is a hash bump only.
+#  NOTE: compute with `node scripts/ci/workflow-hash.mjs`, not a raw shasum (#2333).)
+EXPECTED_TEST_HASH="2c962173cee2a5cdb12a88b30515d236396a84c8edfd07edad78085c6c420a05"
 
 # --- setup ------------------------------------------------------------------
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || {
