@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import {
   parsePrNumber,
   latestStatusByContext,
@@ -74,10 +75,10 @@ test("latestStatusByContext takes the newest row per context, not the first seen
 test("latestStatusByContext breaks created_at ties on API order (newest first)", () => {
   const t = "2026-08-09T23:52:40-04:00";
   const latest = latestStatusByContext([
-    { context: "CI / smoke (pull_request)", status: "success", created_at: t },
-    { context: "CI / smoke (pull_request)", status: "failure", created_at: t },
+    { context: "CI / test (pull_request)", status: "success", created_at: t },
+    { context: "CI / test (pull_request)", status: "failure", created_at: t },
   ]);
-  assert.equal(latest.get("CI / smoke (pull_request)").status, "success");
+  assert.equal(latest.get("CI / test (pull_request)").status, "success");
 });
 
 test("latestStatusByContext survives malformed rows", () => {
@@ -161,13 +162,13 @@ test("decide runs — naming the context — when a required status is absent", 
 test("decide runs when a required status's latest state is not success", () => {
   for (const state of ["failure", "pending", "error", "warning"]) {
     const statuses = greenStatuses().map((s) =>
-      s.context === "CI / smoke (pull_request)"
+      s.context === "CI / test (pull_request)"
         ? { ...s, status: state, created_at: "2026-08-09T23:59:00-04:00" }
         : s,
     );
     const r = decide(input({ statuses }));
     assert.equal(r.skip, false, `${state} must not skip`);
-    assert.match(r.reason, /CI \/ smoke \(pull_request\)/);
+    assert.match(r.reason, /CI \/ test \(pull_request\)/);
   }
 });
 
@@ -199,10 +200,29 @@ test("warn-first never turns a run-reason into a would-skip", () => {
 });
 
 // --- the contract the ci.yml `if:` depends on --------------------------------
-test("REQUIRED_CONTEXTS names the three push-to-main gate jobs, PR-scoped", () => {
+// #2533 — this list must name exactly the jobs that STILL POST a status on a PR.
+// A context no job posts can never be found green, so the gate would fail its
+// proof on every merge and run the full main gate forever — fail-open, but the
+// ~92.5% skip silently gone with "CI got slower" as the only symptom. `smoke`
+// was removed here when phase 3 retired that job.
+test("REQUIRED_CONTEXTS names the push-to-main gate jobs that still exist, PR-scoped", () => {
   assert.deepEqual(REQUIRED_CONTEXTS, [
     "CI / lint-typecheck (pull_request)",
     "CI / test (pull_request)",
-    "CI / smoke (pull_request)",
   ]);
+});
+
+// The failure this guards against is a name in this list that nothing posts, so
+// pin it to the jobs ci.yml actually defines rather than to a copy of the list.
+test("every REQUIRED_CONTEXTS entry corresponds to a job defined in ci.yml", () => {
+  const ci = readFileSync(".forgejo/workflows/ci.yml", "utf8");
+  for (const ctx of REQUIRED_CONTEXTS) {
+    const job = ctx.replace(/^CI \/ /, "").replace(/ \(pull_request\)$/, "");
+    assert.match(
+      ci,
+      new RegExp(`^  ${job}:`, "m"),
+      `REQUIRED_CONTEXTS names "${ctx}" but ci.yml defines no \`${job}\` job — ` +
+        `nothing will ever post that status and the gate can never skip.`,
+    );
+  }
 });

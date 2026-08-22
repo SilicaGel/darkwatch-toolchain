@@ -137,7 +137,7 @@ jobs:
           # the WT spec imports freezeForSnapshot too), PLUS the WT sources and
           # the WT spec itself. Keep these globs in step with the `wartable` area
           # in tests/e2e/spec-areas.json — #2298 added a GUARD for that
-          # (scripts/check-e2e-tiers.mjs), because this comment alone did not
+          # (scripts/check-wt-filter-parity.mjs), because this comment alone did not
           # stop the two lists drifting three ways:
           #   • `client/src/components/map/**` was missing from BOTH. MapTab.tsx
           #     renders War Table chrome — the maps drawer is portaled to

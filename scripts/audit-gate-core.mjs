@@ -5,7 +5,7 @@
  * filesystem, no environment, no clock. `scripts/audit-gate.mjs` is the I/O
  * shell that gathers the `npm audit --json` report, the allowlist, the diff and
  * today's date, and hands them in. The split follows the house pattern
- * (tree-gate-core, workflow-hash-core, check-e2e-tiers-core) and exists so a
+ * (tree-gate-core, workflow-hash-core, check-wt-filter-parity-core) and exists so a
  * security gate's matching rules can be unit-tested against fixture payloads —
  * #2388 records that there was NO coverage of this logic at all, which is why
  * the one-hop `via` bug had to be worked around with padding allowlist entries

@@ -1,5 +1,5 @@
 // #2303 — pure logic for the e2e-full flaky-spec dashboard (no fs, no HTTP).
-// Same core/shell split as tree-gate-core.mjs and check-e2e-tiers-core.mjs.
+// Same core/shell split as tree-gate-core.mjs and check-wt-filter-parity-core.mjs.
 //
 // WHY THIS EXISTS
 //   A spec that FAILS then PASSES on retry leaves no trace a human will see.

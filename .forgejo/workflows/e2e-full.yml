@@ -707,6 +707,80 @@ jobs:
   # specs, these commits" instead of archaeology — and so diagnosis never depends
   # on Forgejo log archival (the 2026-07-05 23:18 red's log was never archived,
   # log_in_storage=0). Reuses the notify-main-red rolling-issue pattern (ci.yml).
+  # badge — #2533. The `e2e` shields.io badge in README.md used to be produced by
+  # ci.yml's `badges` job from the `smoke` result on a push to main. Phase 3
+  # retired `smoke`, and this workflow has no `push` trigger, so NOTHING measured
+  # e2e on a merge any more. Rather than let the badge assert something nothing
+  # checked — the tree-gate skip only ever proved `lint-typecheck` + `test` — it
+  # moved here, where the whole suite actually runs.
+  #
+  # It therefore means: "the full suite passed against main as of the last
+  # non-PR run" — the nightly deploy gate (06:00 UTC) and the midday cron
+  # (19:00 UTC). Twice daily, and true.
+  #
+  # PR runs are excluded deliberately: they test the PR's tree, not main's.
+  # `github.event_name` is the right test here even though this workflow is also
+  # a `workflow_call` callee (where it reads `workflow_call`, #2496) — every
+  # value except `pull_request` is a run against main, which is exactly the set
+  # we want. The `detect` job above already relies on the same distinction.
+  #
+  # A matrix collapses to ONE `needs` key, so `needs.e2e-full.result` is the
+  # AGGREGATE across all three shards (#2300 phase 1) — which is precisely the
+  # "did the whole suite pass" signal the badge needs.
+  badge:
+    needs: [e2e-full]
+    if: ${{ !cancelled() && github.event_name != 'pull_request' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          # Only the upload script runs here; it needs no repo content beyond
+          # itself. Same recipe as tree-gate (#2315).
+          filter: blob:none
+          sparse-checkout: |
+            scripts/ci
+
+      - name: Set up SSH for badge upload
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 644 ~/.ssh/known_hosts
+          ssh-keygen -y -f ~/.ssh/id_ed25519 >/dev/null
+
+      - name: Generate + upload the e2e badge
+        env:
+          SUITE_RESULT: ${{ needs.e2e-full.result }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+        run: |
+          mkdir -p /tmp/badges
+          # `success` only. A skipped suite (the phase-4 runtime-irrelevant path)
+          # or a cancelled one has measured NOTHING, and #1954 is the standing
+          # reminder that a skip reports as success elsewhere — so anything that
+          # is not an explicit success leaves the badge alone rather than
+          # painting it green or red on no evidence.
+          if [ "$SUITE_RESULT" != "success" ] && [ "$SUITE_RESULT" != "failure" ]; then
+            echo "suite result '$SUITE_RESULT' measured nothing — leaving the badge untouched."
+            exit 0
+          fi
+          node -e "
+            const fs = require('fs');
+            const ok = process.env.SUITE_RESULT === 'success';
+            fs.writeFileSync('/tmp/badges/e2e.json', JSON.stringify({
+              schemaVersion: 1, label: 'e2e',
+              message: ok ? 'passing' : 'failing',
+              color: ok ? 'brightgreen' : 'red'
+            }));
+          "
+          scripts/ci/upload-badges.sh /tmp/badges
+
   notify-failure:
     needs: e2e-full
     # The job itself must NEVER end "skipped": when this workflow runs as a

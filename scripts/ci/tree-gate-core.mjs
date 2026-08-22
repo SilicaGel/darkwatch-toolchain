@@ -1,5 +1,5 @@
 // #2308 — pure decision logic for the push-to-main tree gate (no git, no HTTP).
-// Same core/shell split as check-e2e-tiers-core.mjs and check-roadmap-staleness-core.mjs.
+// Same core/shell split as check-wt-filter-parity-core.mjs and check-roadmap-staleness-core.mjs.
 //
 // WHY THIS EXISTS
 //   `ci.yml` runs lint-typecheck + test + smoke on every push to main. Measured
@@ -71,11 +71,21 @@
  * rights-matrix drift guards read `docs/` directly. A documentation-only PR is
  * precisely the diff that job exists to validate.
  */
-export const REQUIRED_CONTEXTS = [
-  "CI / lint-typecheck (pull_request)",
-  "CI / test (pull_request)",
-  "CI / smoke (pull_request)",
-];
+export const REQUIRED_CONTEXTS = ["CI / lint-typecheck (pull_request)", "CI / test (pull_request)"];
+
+// #2533 — `CI / smoke (pull_request)` was removed from this list when phase 3
+// retired the `smoke` job. This is NOT cosmetic: a context that no job posts can
+// never be found green, so leaving it here would make `decide()` fail its
+// proof on EVERY merge and run the full main gate forever. Fail-open, so nothing
+// breaks — but the ~92.5%-of-merges skip this gate exists for would be silently
+// gone, and the only symptom is "CI got slower".
+//
+// The three `E2E Full Suite / e2e-full (N) (pull_request)` contexts were
+// deliberately NOT added in its place. This gate's claim is "the PR run tested
+// exactly these bytes", and lint-typecheck + test still evidence that; coupling
+// a main-run skip to a 14-19 minute suite buys little when the PR already ran
+// it. Revisit only if a main-push regression is ever traced to e2e coverage
+// this gate skipped.
 
 /**
  * Pull the PR number out of a squash-merge commit subject.

@@ -44,7 +44,7 @@ const WORKFLOW = fileURLToPath(
  * The `run:` body of the step that creates the tag.
  *
  * Read by text rather than with a YAML parser, matching
- * check-e2e-tiers-core.mjs: no YAML library is a declared dependency of this
+ * check-wt-filter-parity-core.mjs: no YAML library is a declared dependency of this
  * repo, and taking one on purely so a test can read a block scalar would put a
  * new package in the tree for no runtime benefit (knip flags it, correctly).
  * A block scalar is unambiguous to read directly — everything indented deeper

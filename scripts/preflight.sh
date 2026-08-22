@@ -118,7 +118,8 @@ set -uo pipefail
 # SMOKE_SPECS env var so both shards read one copy. That's the `smoke` job, not
 # `lint-typecheck` / `test`, so no check below moved — hash bump only. (The list
 # is still literal `e2e/*.spec.ts` text in ci.yml, which is what
-# check-e2e-tiers.mjs and affected-e2e.mjs regex out of it.))
+# check-wt-filter-parity.mjs regexes out of it. (#2533 retired the
+# affected-tier half along with the smoke job.))
 # (Previously reconciled 2026-07-29 (#1670): `smoke` job's hardcoded spec list gained
 # e2e/1670-layout-flip.spec.ts. That's the `smoke` job, not `lint-typecheck` /
 # `test`, so no check below moved — hash bump only.)
@@ -180,7 +181,17 @@ set -uo pipefail
 #  REQUIRED_CONTEXTS invariant in scripts/ci/tree-gate-core.mjs for why a
 #  job-level `if:` here would be unsafe. `lint-typecheck` is untouched.
 #  NOTE: compute with `node scripts/ci/workflow-hash.mjs`, not a raw shasum (#2333).)
-EXPECTED_CI_HASH="39acc6cff7f13c65ab23c5da32934da9a5b97aa3457e88f31a626d0e3f724d62"
+# (Reconciled 2026-08-22, #2533 phase 3 step 3: the `smoke` job is DELETED
+#  (~507 lines) along with SMOKE_SPECS, tests/e2e/nightly-only.txt and the
+#  affected-tier selector — e2e-full now runs every spec on every PR. The
+#  `badges` job lost its `e2e` output (re-homed to e2e-full.yml, which is
+#  where the suite actually runs) and its inline MinIO upload (extracted to
+#  scripts/ci/upload-badges.sh so two producers share one path).
+#  lint-typecheck now runs check-wt-filter-parity.mjs in place of
+#  check-e2e-tiers.mjs — the WT parity half of that guard SURVIVES, because
+#  e2e-full skips visual-regression.spec.ts and the WT pixel spec still
+#  depends on visual-regression.yml's filter (#2298/#2222/#2295).)
+EXPECTED_CI_HASH="6f603939bca6c95caa562350a79c3894abb2ff72369471f4749fec1d8d9c8e16"
 
 # #2336 — the `test` job MOVED from ci.yml to its own reusable workflow so the
 # nightly can call it too. The guard below hashed only ci.yml, so without this
@@ -388,7 +399,7 @@ run_check "no numeric ID patterns" check_numeric_ids
 # #1270 — e2e tier coverage: every spec must be in the per-PR smoke list OR the
 # nightly-only quarantine. Mirrors ci.yml's "Enforce e2e specs are in a declared
 # test tier" step (lint-typecheck job). No deps needed — pure node + repo files.
-run_check "e2e tier coverage" node scripts/check-e2e-tiers.mjs
+run_check "WT filter parity" node scripts/check-wt-filter-parity.mjs
 
 # #1411 — ban external https:// image_url in e2e specs. External image hosts
 # (e.g. Wikimedia) cause flaky CI — use uploadSampleMapImage() from

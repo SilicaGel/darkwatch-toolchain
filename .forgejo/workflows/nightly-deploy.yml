@@ -34,7 +34,7 @@ name: Nightly Deploy
 #
 # Logic lives in the called workflows — this file is intentionally just an
 # orchestrator. Curate the per-PR spec set in ci.yml's `smoke` job (guarded by
-# scripts/check-e2e-tiers.mjs); the nightly runs everything via e2e-full.
+# scripts/check-wt-filter-parity.mjs); the nightly runs everything via e2e-full.
 
 on:
   schedule:

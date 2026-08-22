@@ -287,7 +287,7 @@ jobs:
         # (below) OR in tests/e2e/nightly-only.txt. A spec in neither runs in no
         # pre-merge tier and only surfaces in the nightly full suite — how
         # theme-contrast broke the deploy. No deps needed (pure node + repo files).
-        run: node scripts/check-e2e-tiers.mjs
+        run: node scripts/check-wt-filter-parity.mjs
 
       - name: Ban external image_url in e2e specs (#1411)
         # #1369 removed 14 Wikimedia image_url usages; this guard prevents regression.
@@ -544,517 +544,10 @@ jobs:
       red_alert: ${{ github.ref == 'refs/heads/main' && 'main' || 'none' }}
     secrets: inherit
 
-  smoke:
-    runs-on: ubuntu-latest
-    needs: [tree-gate]
-    # #2308 — see the full note on `lint-typecheck`. Must never skip on a PR.
-    if: ${{ !cancelled() && needs.tree-gate.outputs.skip != 'true' }}
-    # #1263 — build + smoke specs + DB seed; ~15-20 min typical. #1621 — the
-    # affected tier can append up to 20 nightly-only specs (+MinIO + all-tier
-    # seed) on PRs touching a mapped area, so allow headroom above the base.
-    timeout-minutes: 45
-    env:
-      # The PR smoke set, in ONE place (#2167). It is passed to both shard
-      # steps below; duplicating the list inline would let the two halves drift
-      # apart silently.
-      #
-      # It has to live in this file as literal `e2e/*.spec.ts` text: both
-      # scripts/check-e2e-tiers.mjs and scripts/affected-e2e.mjs regex the smoke
-      # set straight out of ci.yml (`/e2e\/[\w.-]+\.spec\.ts/g` into a Set) so
-      # their idea of "what smoke runs" cannot drift from what actually runs.
-      # Moving this to an external file would silently break both.
-      #
-      # character-creation.spec is excluded (#490) — confirmed in run 743 to be
-      # a real step-3 PATCH waiter race, separate from the Zod cascade that #501
-      # fixed. Re-enable only after the underlying race is investigated and the
-      # waiter is hardened (or the wizard's debounce is stabilised).
-      #
-      # NOTHING BUT SPEC PATHS GOES IN THE BLOCK BELOW. `>-` is a folded scalar,
-      # so a `#` line inside it is CONTENT, not a comment — it folds into the
-      # value and Playwright receives the prose as spec filters. #2187 learned
-      # this the expensive way: an explanatory comment between two entries made
-      # smoke die on `Invalid regular expression: /(~5ms/gi`. Annotate here,
-      # above the key, never between the entries.
-      #
-      # 2187-combat-leak-guard.spec.ts is in the per-PR set rather than
-      # nightly-only.txt because it is pure-logic tests with no browser (~5ms).
-      # It pins the combat leak guard's verdict rules, and that guard runs on
-      # EVERY invocation of this suite — if its logic drifts, either every run
-      # goes red or the guard goes silently blind.
-      #
-      # 2490-combat-ledger.spec.ts is here for the same reason, and pins the
-      # ATTRIBUTION half: which spec opened a combat, and which mid-run combats
-      # opened and closed unseen by the start/end samples. Same failure mode if
-      # it drifts — the ledger keeps recording and quietly blames the wrong
-      # spec, which is worse than no attribution at all.
-      #
-      # NOTE since #2490 these two are no longer "no database": the ledger's
-      # automatic fixture samples campaigns.combat_state after EVERY test in the
-      # suite, these included. It is ~0.3ms and non-fatal (a failed sample
-      # disables the ledger and warns), so they still need no DB to PASS — but
-      # do not read the old "no database" claim as still true of any spec.
-      SMOKE_SPECS: >-
-        e2e/a11y.spec.ts
-        e2e/dashboard.spec.ts
-        e2e/death-timer.spec.ts
-        e2e/crit-banner.spec.ts
-        e2e/campaign-creation.spec.ts
-        e2e/level-up.spec.ts
-        e2e/condition-expiry.spec.ts
-        e2e/dm-player-visibility.spec.ts
-        e2e/character-sheet-ownership-gating.spec.ts
-        e2e/picker-commits.spec.ts
-        e2e/combat-damage.spec.ts
-        e2e/1522-combat-core-cluster.spec.ts
-        e2e/1531-morale-raw-logging.spec.ts
-        e2e/rest-button.spec.ts
-        e2e/spell-exhaustion.spec.ts
-        e2e/theme-contrast.spec.ts
-        e2e/773-help-page.spec.ts
-        e2e/1360-undo-revert.spec.ts
-        e2e/1917-wt-addmap-clickable.spec.ts
-        e2e/1670-layout-flip.spec.ts
-        e2e/2114-wave1-wt-chrome.spec.ts
-        e2e/2115-wave2-wt-chrome.spec.ts
-        e2e/2116-wave3-wt-chrome.spec.ts
-        e2e/2380-wt-classic-nav-hidden.spec.ts
-        e2e/2330-load-error-retry.spec.ts
-        e2e/2187-combat-leak-guard.spec.ts
-        e2e/2490-combat-ledger.spec.ts
-        e2e/2426-auth-redirects.spec.ts
-        e2e/2056-morale-cue.spec.ts
-        e2e/2082-pending-blocks-arming.spec.ts
-    # #969 — run inside the prebuilt CI image (Node 22 + Chromium + Playwright
-    # system deps baked). No apt install-deps, no browser download, no
-    # actions/setup-node. Pinned to the @playwright/test version; rebuilt by
-    # build-ci-image.yml (Renovate keeps the tag in sync — #414).
-    container:
-      image: forge.example.com/aaron/darkwatch-ci-playwright:1.61.1
-    services:
-      mariadb:
-        image: mariadb:11@sha256:d9f7eb2637296652f24b484afd5d246f759f49f5babcadc6a9e344c9acb75fbf
-        env:
-          MYSQL_ROOT_PASSWORD: ${{ secrets.CI_DB_ROOT_PASSWORD }}
-          MYSQL_DATABASE: ${{ secrets.CI_DB_NAME }}
-          MYSQL_USER: ${{ secrets.CI_DB_USER }}
-          MYSQL_PASSWORD: ${{ secrets.CI_DB_PASSWORD }}
-        options: >-
-          --health-cmd="healthcheck.sh --connect --innodb_initialized"
-          --health-interval=2s
-          --health-timeout=5s
-          --health-retries=30
-          --tmpfs /var/lib/mysql:rw,noexec,nosuid,size=512m
-      minio:
-        # #1621 — the affected tier can route maps/image/AoE specs into this job;
-        # they store uploads in object storage, and the all-tier seed below
-        # stages the QA fixture's (#1238) map image through it. Same service
-        # shape as the `test` job's MinIO (Forgejo's act_runner supports `cmd:`).
-        image: minio/minio:RELEASE.2025-04-08T15-41-24Z@sha256:8834ae47a2de3509b83e0e70da9369c24bbbc22de42f2a2eddc530eee88acd1b
-        cmd:
-          - server
-          - /data
-          - --console-address
-          - ":9001"
-        env:
-          MINIO_ROOT_USER: darkwatch_admin
-          MINIO_ROOT_PASSWORD: darkwatch_minio_dev
-        options: >-
-          --health-cmd="curl -fsS http://localhost:9000/minio/health/ready || exit 1"
-          --health-interval=2s
-          --health-timeout=5s
-          --health-retries=30
-    steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
-        with:
-          # #1621 affected tier: scripts/affected-e2e.mjs diffs origin/main...HEAD
-          # to pick which nightly-only specs to also run; the three-dot merge-base
-          # needs full history (same as visual-regression.yml / ship-guard.yml).
-          fetch-depth: 0
-          # #2315 — this job throws the 21M of Playwright visual baselines away.
-          # Excluding them measured 31% less transfer and 35% less checkout time
-          # per clone on a 6-way concurrent bench; only visual-regression.yml's
-          # `visual` job reads them (e2e-full sets E2E_SKIP_VISUAL, and they are
-          # not in SMOKE_SPECS).
-          #
-          # `filter` alone is a NO-OP with a full working tree (#2338) — the
-          # sparse list is what stops the lazy re-fetch of tip blobs. And
-          # cone-mode MUST be off: cone mode rejects `!` patterns outright
-          # (`fatal: specify directories rather than patterns`) and leaves the
-          # full tree, so this would silently be a no-op with it on.
-          filter: blob:none
-          sparse-checkout-cone-mode: false
-          sparse-checkout: |
-            /*
-            !tests/e2e/visual-regression.spec.ts-snapshots
-
-      - name: Fetch base ref (affected e2e tier needs origin/main — #1621)
-        run: git fetch origin main --quiet || true
-
-      # #969 — Node 22 is baked into the container image, so no actions/setup-node.
-      # We still cache the npm download dir (what setup-node's cache:'npm' did)
-      # so `npm ci` doesn't re-fetch every tarball.
-      # #2496 — can this diff affect runtime at all? A documentation-only PR has
-      # no reason to build the app and drive Playwright, and paid ~7.6m for it.
-      #
-      # ⚠️ Gates STEPS, never this job. tree-gate-core.mjs's REQUIRED_CONTEXTS
-      # invariant requires `CI / smoke (pull_request)` to stay unconditional:
-      # Forgejo posts `success` for a SKIPPED job, and the push-to-main tree gate
-      # reads that status as proof the PR run was green. A job-level `if:` here
-      # would let a misclassified PR merge on a context that never ran AND then
-      # skip the main run too — no coverage anywhere.
-      #
-      # Fail-open is structural: a crash sets no output, `!= 'true'` holds, and
-      # every step below runs.
-      - name: Decide whether this diff can affect runtime (#2496)
-        id: cheap
-        env:
-          # #2496 — PR-ness from the PAYLOAD, not event_name. This job is an
-          # ordinary `pull_request` job so event_name would do, but the two
-          # call sites share one script and one contract; see docs-only-core.mjs.
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          GITHUB_EVENT_NAME: ${{ github.event_name }}
-          BASE_REF: ${{ github.event.pull_request.base.ref || github.base_ref || 'main' }}
-          GATE_LABEL: smoke
-        run: node scripts/ci/docs-only.mjs
-
-      - name: Cache npm downloads
-        if: ${{ steps.cheap.outputs.cheap != 'true' }}
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
-        with:
-          path: ~/.npm
-          key: npm-${{ runner.os }}-${{ hashFiles('**/package-lock.json') }}
-          restore-keys: |
-            npm-${{ runner.os }}-
-
-      - name: Install server dependencies
-        if: ${{ steps.cheap.outputs.cheap != 'true' }}
-        run: |
-          cd server && npm ci --no-audit --no-fund
-          ROLLDOWN_ARCH=$(node -p "process.arch")
-          if [ ! -d "node_modules/@rolldown/binding-linux-${ROLLDOWN_ARCH}-gnu" ]; then
-            VER=$(node -e "const l=JSON.parse(require('fs').readFileSync('package-lock.json','utf8')); console.log(l.packages['node_modules/@rolldown/binding-linux-'+process.arch+'-gnu'].version)")
-            echo "Patching missing rolldown linux-${ROLLDOWN_ARCH} binding @ $VER"
-            npm install --no-save --ignore-engines "@rolldown/binding-linux-${ROLLDOWN_ARCH}-gnu@$VER"
-          fi
-
-      - name: Build server
-        if: ${{ steps.cheap.outputs.cheap != 'true' }}
-        run: cd server && npm run build
-
-      - name: Install client dependencies
-        if: ${{ steps.cheap.outputs.cheap != 'true' }}
-        run: cd client && npm ci --no-audit --no-fund
-
-      - name: Build client
-        if: ${{ steps.cheap.outputs.cheap != 'true' }}
-        run: cd client && npm run build
-
-      - name: Wait for MariaDB
-        if: ${{ steps.cheap.outputs.cheap != 'true' }}
-        run: |
-          for i in $(seq 1 30); do
-            (echo > /dev/tcp/mariadb/3306) 2>/dev/null && echo "MariaDB is ready" && break
-            echo "Waiting for MariaDB... ($i/30)"
-            sleep 2
-            [ "$i" -eq 30 ] && echo "MariaDB never became ready" && exit 1
-          done
-
-      - name: Apply migrations to CI DB
-        if: ${{ steps.cheap.outputs.cheap != 'true' }}
-        env:
-          DB_HOST: mariadb
-          DB_PORT: "3306"
-          DB_USER: ${{ secrets.CI_DB_USER }}
-          DB_PASSWORD: ${{ secrets.CI_DB_PASSWORD }}
-          DB_NAME: ${{ secrets.CI_DB_NAME }}
-        run: cd server && npm run db:migrate
-
-      - name: Wait for MinIO + create the images bucket (#1621 affected tier)
-        if: ${{ steps.cheap.outputs.cheap != 'true' }}
-        # The affected tier (#1621) can append maps/image/AoE specs that store
-        # uploads in object storage, and the all-tier seed below stages the QA
-        # fixture's (#1238) map image through it. Create the bucket + make it
-        # anonymously downloadable (mirrors docker-compose's minio-init /
-        # e2e-full.yml). mc is fetched here (not baked in the CI image); pick the
-        # arch to match this container (the smoke image is arm64 — see the
-        # rolldown arm64 patch above).
-        env:
-          MINIO_ROOT_USER: darkwatch_admin
-          MINIO_ROOT_PASSWORD: darkwatch_minio_dev
-          MINIO_BUCKET: darkwatch-images
-        run: |
-          for i in $(seq 1 30); do
-            (echo > /dev/tcp/minio/9000) 2>/dev/null && echo "MinIO reachable" && break
-            echo "Waiting for MinIO... ($i/30)"; sleep 2
-            [ "$i" -eq 30 ] && { echo "MinIO never became ready"; exit 1; }
-          done
-          case "$(uname -m)" in
-            aarch64 | arm64) MC_ARCH=linux-arm64 ;;
-            *) MC_ARCH=linux-amd64 ;;
-          esac
-          # #2010 — retrying helper, not a bare curl (see e2e-full.yml).
-          bash scripts/ci/fetch-binary.sh "https://dl.min.io/client/mc/release/$MC_ARCH/mc" /tmp/mc
-          chmod +x /tmp/mc
-          # `/minio/health/ready` can flip green a beat before client auth is
-          # accepted (a recurring e2e-full flake), so retry the alias until it
-          # authenticates before touching the bucket.
-          for i in $(seq 1 30); do
-            /tmp/mc alias set local http://minio:9000 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD" >/dev/null 2>&1 && break || true
-            echo "Waiting for MinIO client auth... ($i/30)"; sleep 1
-            [ "$i" -eq 30 ] && { echo "MinIO never accepted client auth"; exit 1; }
-          done
-          /tmp/mc mb --ignore-existing local/"$MINIO_BUCKET"
-          /tmp/mc anonymous set download local/"$MINIO_BUCKET"
-          echo "MinIO ready with bucket $MINIO_BUCKET (public-download)"
-
-      - name: Seed all tiers (smoke base + any affected-tier spec's preconditions)
-        if: ${{ steps.cheap.outputs.cheap != 'true' }}
-        env:
-          DB_HOST: mariadb
-          DB_PORT: "3306"
-          DB_USER: ${{ secrets.CI_DB_USER }}
-          DB_PASSWORD: ${{ secrets.CI_DB_PASSWORD }}
-          DB_NAME: ${{ secrets.CI_DB_NAME }}
-          # #1621 — MinIO env (+ MinIO running) so the QA fixture (#1238) stages
-          # its map image and creates the active map; without it the fixture
-          # skips the map and map-* specs have nothing to render.
-          MINIO_ENDPOINT: http://minio:9000
-          MINIO_ROOT_USER: darkwatch_admin
-          MINIO_ROOT_PASSWORD: darkwatch_minio_dev
-          MINIO_BUCKET: darkwatch-images
-          MINIO_PUBLIC_BASE_URL: http://minio:9000/darkwatch-images
-        # `npm run seed` (SEED_MODE=all) seeds core → shadowdark → demo →
-        # qa-fixture. The base smoke specs need the demo campaign
-        # (openCampaign()); affected-tier map specs (e.g.
-        # map-viewport-persistence) need the qa-fixture tier. Matches e2e-full.yml
-        # so any spec the affected tier routes has the same seed it does nightly.
-        run: cd server && npm run seed
-
-      - name: Smoke — start E2E app server
-        if: ${{ steps.cheap.outputs.cheap != 'true' }}
-        env:
-          PORT: "3001"
-          DB_HOST: mariadb
-          DB_PORT: "3306"
-          DB_USER: ${{ secrets.CI_DB_USER }}
-          DB_PASSWORD: ${{ secrets.CI_DB_PASSWORD }}
-          DB_NAME: ${{ secrets.CI_DB_NAME }}
-          NODE_ENV: test
-          ALLOW_TEST_HOOKS: "true"
-          TEST_HOOK_SECRET: e2e-test-hook-secret
-          # #2116 — the seeded `Admin` account's id is fixed (ADMIN_FIXED_ID in
-          # server/src/seeds/core.ts, pinned by seeds.int.test.ts), but without
-          # this the server treats it as an ordinary user and every admin route
-          # renders its "no admin access" notice. That is why 2116-wave3's two
-          # admin tests passed locally (where .env sets it) and failed here.
-          ADMIN_USER_IDS: ad000000-0000-7000-8000-000000000001
-          JWT_SECRET: e2e-test-secret
-          CLIENT_URL: http://localhost:5173
-          # See e2e-full.yml — disable per-user/per-IP socket caps for CI runs
-          # so accumulating ghost sockets between Playwright tests don't
-          # block new connections.
-          SOCKET_PER_USER_CAP: "1000"
-          SOCKET_PER_IP_CAP: "1000"
-          NODE_OPTIONS: "--max-old-space-size=256"
-          # #1621 — affected-tier image/map specs upload to + serve from object
-          # storage; MinIO (service) + bucket are brought up above.
-          MINIO_ENDPOINT: http://minio:9000
-          MINIO_ROOT_USER: darkwatch_admin
-          MINIO_ROOT_PASSWORD: darkwatch_minio_dev
-          MINIO_BUCKET: darkwatch-images
-          MINIO_PUBLIC_BASE_URL: http://minio:9000/darkwatch-images
-        run: |
-          node server/dist/index.js >/tmp/server.log 2>&1 &
-          for i in $(seq 1 30); do
-            status=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:3001/api/auth/me 2>/dev/null || true)
-            echo "$status" | grep -qE '^(200|401)$' && break || true
-            echo "Waiting for app server... ($i/30) [got: $status]"
-            sleep 2
-            [ "$i" -eq 30 ] && echo "App server never became ready" && exit 1
-          done
-
-      - name: Smoke — start Vite preview server
-        if: ${{ steps.cheap.outputs.cheap != 'true' }}
-        env:
-          API_PROXY_URL: "http://localhost:3001"
-          NODE_OPTIONS: "--max-old-space-size=512"
-        run: |
-          # Direct binary path, not `npx vite` — `npx <bin>` silently fetches
-          # from the public registry if the local install is missing (#722).
-          cd client && ./node_modules/.bin/vite preview >/tmp/vite.log 2>&1 &
-          for i in $(seq 1 30); do
-            curl -s -o /dev/null http://localhost:5173 && break || true
-            echo "Waiting for Vite... ($i/30)"
-            sleep 2
-            [ "$i" -eq 30 ] && echo "Vite preview server never became ready" && exit 1
-          done
-
-      - name: Smoke — warm up app server (login + auth + campaigns)
-        if: ${{ steps.cheap.outputs.cheap != 'true' }}
-        # The first specs in the suite (level-up, picker-commits) hit cold
-        # connection pools, V8 JIT, and socket handlers, exceeding their
-        # 12-15s waits. Issuing a few authed requests here primes the app
-        # server's caches so the first specs land on warm code paths.
-        run: |
-          set -e
-          # Capture session cookie from login
-          curl -s -c /tmp/dm-cookies.txt -X POST http://localhost:3001/api/auth/login \
-            -H 'Content-Type: application/json' \
-            -d '{"email":"dm@darkwatch.test","password":"password"}' >/dev/null
-          curl -s -c /tmp/player-cookies.txt -X POST http://localhost:3001/api/auth/login \
-            -H 'Content-Type: application/json' \
-            -d '{"email":"player@darkwatch.test","password":"password"}' >/dev/null
-          # Hit the heavy authed endpoints: dashboard, campaign listing, characters,
-          # rulesets catalog. Two passes so connection pool stabilises.
-          for pass in 1 2; do
-            curl -s -b /tmp/dm-cookies.txt http://localhost:3001/api/auth/me >/dev/null
-            curl -s -b /tmp/dm-cookies.txt http://localhost:3001/api/campaigns >/dev/null
-            curl -s -b /tmp/dm-cookies.txt http://localhost:3001/api/dashboard >/dev/null
-            curl -s -b /tmp/player-cookies.txt http://localhost:3001/api/auth/me >/dev/null
-            curl -s -b /tmp/player-cookies.txt http://localhost:3001/api/dashboard >/dev/null
-          done
-          rm -f /tmp/dm-cookies.txt /tmp/player-cookies.txt
-          echo "warmup complete"
-
-      # #969 — browsers + system deps are baked into the container image at
-      # /ms-playwright, so the actions/cache step and the install-deps/install
-      # branch are gone. Only the tests/ npm deps remain.
-      - name: Smoke — install tests deps (browsers baked in image)
-        if: ${{ steps.cheap.outputs.cheap != 'true' }}
-        env:
-          PLAYWRIGHT_BROWSERS_PATH: /ms-playwright
-        run: cd tests && npm ci
-
-      # (The tests/ typecheck moved to `lint-typecheck` in #2022 — it is a pure
-      # static check and does not need this job's stack. `npm ci` above stays:
-      # smoke still needs the deps to actually run Playwright.)
-
-      # Memory (#2167): smoke is sharded into 2 with a Vite restart between them,
-      # for the same reason e2e-full.yml shards into 3 — a single long-lived Vite
-      # preview accumulates heap across test contexts and gets OOM-killed
-      # mid-suite in the capped container. Do NOT "simplify" this back into one
-      # invocation, and do NOT reach for a bigger --max-old-space-size instead:
-      # the accumulation is unbounded, so a larger cap moves the cliff rather
-      # than removing it.
-      #
-      # Measured when this landed: e2e-full runs ~148 tests per shard and is
-      # green; smoke was running ~168 through ONE Vite process — more per
-      # process than the job that was sharded specifically to avoid this. The
-      # base set is 135 tests / 23 files, plus up to 20 more specs from the
-      # affected tier (#1621), so the run grows without anyone deciding to grow
-      # it. Two shards puts each half around 84, well under e2e-full's
-      # demonstrated-safe 148, with room for smoke to roughly double first.
-      #
-      # Two, not three: Playwright shards by FILE here (workers: 1, not
-      # fullyParallel), and on the base set a 3-way split degenerates to
-      # 45 / 90 / 0 — an empty third shard, a wasted restart, and worse balance
-      # than 2-way's 69 / 66. theme-contrast.spec.ts alone is 52 tests in one
-      # file and cannot be split at all, which floors how fine this can usefully go.
-      - name: Smoke — run critical specs, shard 1/2 (+ affected nightly-only tier, #1621)
-        if: ${{ steps.cheap.outputs.cheap != 'true' }}
-        id: smoke_e2e
-        env:
-          E2E_SERVER_URL: "http://localhost:3001"
-          TEST_HOOK_SECRET: e2e-test-hook-secret
-          PLAYWRIGHT_BROWSERS_PATH: /ms-playwright
-          # #1621 — affected-tier specs (e.g. 1560-aoe-walls, 1077-hidden-monsters)
-          # open a raw DB connection via tests/helpers/db.ts, which falls back to
-          # the local-dev 127.0.0.1:3397 when unset. Point it at this job's
-          # mariadb service (mirrors e2e-full.yml's shard steps, #1581).
-          DB_HOST: mariadb
-          DB_PORT: "3306"
-          DB_USER: ${{ secrets.CI_DB_USER }}
-          DB_PASSWORD: ${{ secrets.CI_DB_PASSWORD }}
-          DB_NAME: ${{ secrets.CI_DB_NAME }}
-        run: |
-          # Affected tier (#1621): nightly-only specs whose area this PR's diff
-          # touches (tests/e2e/spec-areas.json), plus any e2e spec the PR modifies
-          # directly (self-tier). Empty on docs/infra PRs → exactly the base smoke
-          # set (zero cost). Run from the repo root (reads spec-areas.json +
-          # git diff) BEFORE `cd tests`. Diagnostics go to stderr (shown in log);
-          # stdout is the machine list, used unquoted for word-splitting.
-          #
-          # Resolved ONCE and persisted: shard 2/2 must be computed over the
-          # identical file list, or the two halves would be sharding different
-          # sets and could drop or double-run specs.
-          EXTRA_SPECS=$(node scripts/affected-e2e.mjs)
-          echo "$EXTRA_SPECS" > /tmp/smoke-extra-specs.txt
-          echo "Affected-tier extra specs: ${EXTRA_SPECS:-(none)}"
-          cd tests && ./node_modules/.bin/playwright test \
-            $SMOKE_SPECS \
-            $EXTRA_SPECS \
-            --shard=1/2 \
-            --reporter=line
-
-      # Lifted from e2e-full.yml's between-shard step — same mechanism, already
-      # proven in that job. Kill hard, wait for the port to actually free, then
-      # relaunch: a `vite preview` that is still holding 5173 makes the next
-      # shard fail on connect rather than on anything real.
-      - name: Smoke — restart Vite preview (between shards 1→2, #2167)
-        if: ${{ steps.cheap.outputs.cheap != 'true' }}
-        env:
-          API_PROXY_URL: "http://localhost:3001"
-          NODE_OPTIONS: "--max-old-space-size=512"
-        run: |
-          pkill -9 -f "vite preview" 2>/dev/null || true
-          fuser -k 5173/tcp 2>/dev/null || true
-          PIDS=$(lsof -t -i :5173 2>/dev/null || true)
-          [ -n "$PIDS" ] && kill -9 $PIDS 2>/dev/null || true
-          for i in $(seq 1 15); do
-            if ! curl -s -o /dev/null -m 1 http://localhost:5173; then break; fi
-            echo "Waiting for port 5173 to free... ($i/15)"
-            sleep 1
-          done
-          sleep 2
-          cd client && ./node_modules/.bin/vite preview >/tmp/vite.log 2>&1 &
-          echo $! > /tmp/vite.pid
-          for i in $(seq 1 30); do
-            curl -s -o /dev/null http://localhost:5173 && break || true
-            echo "Waiting for new Vite... ($i/30)"
-            sleep 2
-            [ "$i" -eq 30 ] && echo "Vite never came back up" && exit 1
-          done
-
-      - name: Smoke — run critical specs, shard 2/2 (+ affected nightly-only tier, #1621)
-        if: ${{ steps.cheap.outputs.cheap != 'true' }}
-        env:
-          E2E_SERVER_URL: "http://localhost:3001"
-          TEST_HOOK_SECRET: e2e-test-hook-secret
-          PLAYWRIGHT_BROWSERS_PATH: /ms-playwright
-          DB_HOST: mariadb
-          DB_PORT: "3306"
-          DB_USER: ${{ secrets.CI_DB_USER }}
-          DB_PASSWORD: ${{ secrets.CI_DB_PASSWORD }}
-          DB_NAME: ${{ secrets.CI_DB_NAME }}
-        run: |
-          # Reuse shard 1's resolved list verbatim — see the note there.
-          EXTRA_SPECS=$(cat /tmp/smoke-extra-specs.txt 2>/dev/null || true)
-          cd tests && ./node_modules/.bin/playwright test \
-            $SMOKE_SPECS \
-            $EXTRA_SPECS \
-            --shard=2/2 \
-            --reporter=line
-
-      - name: Dump server and vite logs on failure
-        if: failure()
-        run: |
-          echo "=== server log (last 200 lines) ==="
-          tail -n 200 /tmp/server.log || echo "no server log"
-          echo "=== vite log (last 200 lines) ==="
-          tail -n 200 /tmp/vite.log || echo "no vite log"
-
-  # ---------------------------------------------------------------------------
-  # badges — main-only join job. Feeds the shields.io endpoints in README.md
-  # (#522): build, e2e, server-coverage, client-coverage, version. Waits on
-  # the three primary jobs, reads their results + the coverage-summaries
-  # artifact, and pushes five JSONs to MinIO via the deploy host.
-  # `if: always()` so a failed gate flips the badge red instead of leaving a
-  # stale green one.
-  # ---------------------------------------------------------------------------
   badges:
     runs-on: ubuntu-latest
     timeout-minutes: 10 # #1263 — SSH + badge JSON gen + MinIO upload; ~2-5 min typical
-    needs: [tree-gate, lint-typecheck, test, smoke]
+    needs: [tree-gate, lint-typecheck, test]
     if: always() && github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
@@ -1093,11 +586,12 @@ jobs:
         # green CI.
         continue-on-error: true
         env:
-          # Job results from the three primary jobs. build = all non-smoke
-          # gates green; e2e = smoke green.
+          # #2533 — `build` only. The `e2e` badge is produced by e2e-full.yml,
+          # which is where the full suite actually runs: nothing on a push to
+          # main measures e2e any more, and a badge sourced from the tree-gate
+          # skip would assert something only lint-typecheck + test proved.
           LINT_RESULT: ${{ needs.lint-typecheck.result }}
           TEST_RESULT: ${{ needs.test.result }}
-          SMOKE_RESULT: ${{ needs.smoke.result }}
           # #2308 — when tree-gate skipped the three jobs, their `result` is
           # 'skipped'. Without this the build + e2e badges would go RED on a
           # merge that is provably green, which is the opposite of the truth.
@@ -1114,29 +608,22 @@ jobs:
           # assignment left the badge reading undefined → "v0.0.0" (#1046 regression).
           export BADGE_VERSION="$(node scripts/app-version.mjs)"
           echo "badge version: ${BADGE_VERSION}"
-          # Generate 5 shields.io endpoint JSONs. build is green only when
-          # lint-typecheck AND test both succeeded; e2e tracks the smoke job.
+          # Generate 4 shields.io endpoint JSONs. build is green only when
+          # lint-typecheck AND test both succeeded (#2533: e2e moved out).
           node -e "
             const fs = require('fs');
             const out = '/tmp/badges';
             const lint = process.env.LINT_RESULT || 'skipped';
             const test = process.env.TEST_RESULT || 'skipped';
-            const smoke = process.env.SMOKE_RESULT || 'skipped';
             // #2308 — tree-gate only sets skip=true after proving this exact
             // tree passed all three jobs on the PR head, so inheriting 'passing'
             // reports a measured result, not an assumed one.
             const gateSkipped = process.env.GATE_SKIPPED === 'true';
             const buildOk = gateSkipped || (lint === 'success' && test === 'success');
-            const e2eOk = gateSkipped || smoke === 'success';
             fs.writeFileSync(out + '/build.json', JSON.stringify({
               schemaVersion: 1, label: 'build',
               message: buildOk ? 'passing' : 'failing',
               color: buildOk ? 'brightgreen' : 'red'
-            }));
-            fs.writeFileSync(out + '/e2e.json', JSON.stringify({
-              schemaVersion: 1, label: 'e2e',
-              message: e2eOk ? 'passing' : 'failing',
-              color: e2eOk ? 'brightgreen' : 'red'
             }));
             // #1323 — accept multiple candidate summaries; use the first that
             // reads (combined unit∪int preferred, unit-only as fallback).
@@ -1172,52 +659,10 @@ jobs:
             }));
           "
           ls -la /tmp/badges
-          # Hand off to the deploy host: scp the JSONs, then exec mc inside docker
-          # there (--network host so it reaches darkwatch-minio on :9000).
-          # Credentials come from the deploy env file already on the host.
-          ssh -i ~/.ssh/id_ed25519 "${DEPLOY_USER}@${DEPLOY_HOST}" 'mkdir -p ~/tmp/badges && rm -f ~/tmp/badges/*.json'
-          scp -i ~/.ssh/id_ed25519 /tmp/badges/*.json "${DEPLOY_USER}@${DEPLOY_HOST}:~/tmp/badges/"
-          ssh -i ~/.ssh/id_ed25519 "${DEPLOY_USER}@${DEPLOY_HOST}" bash <<'EOSSH'
-          set -euo pipefail
-          # Read values from .env.deploy WITHOUT sourcing it. Sourcing under
-          # `set -u` blew up when one of the secret values contained a literal
-          # `$D…` substring (bash would try to expand `$D…` and find it
-          # unbound). grep+cut treats values as plain strings.
-          ENV_FILE="$HOME/services/darkwatch/.env.deploy"
-          getval() { grep -E "^$1=" "$ENV_FILE" | head -1 | cut -d= -f2-; }
-          MINIO_ENDPOINT="$(getval MINIO_ENDPOINT)"
-          MINIO_ROOT_USER="$(getval MINIO_ROOT_USER)"
-          MINIO_ROOT_PASSWORD="$(getval MINIO_ROOT_PASSWORD)"
-          MINIO_BUCKET="$(getval MINIO_BUCKET)"
-          # URL-encode credentials before embedding them in the MC_HOST URL.
-          # Without this, special chars in the password (`$`, `/`, `@`, `:`,
-          # `%`, etc.) made `mc` compute the wrong S3 signature and every cp
-          # failed with "signature does not match".
-          urlenc() { python3 -c 'import sys, urllib.parse as u; sys.stdout.write(u.quote(sys.argv[1], safe=""))' "$1"; }
-          ENC_USER="$(urlenc "$MINIO_ROOT_USER")"
-          ENC_PASS="$(urlenc "$MINIO_ROOT_PASSWORD")"
-          ENDPOINT_AUTH="${MINIO_ENDPOINT/:\/\//://${ENC_USER}:${ENC_PASS}@}"
-          # #2308 — copy only the badges this run actually produced. On a
-          # tree-gate skip the two coverage JSONs are deliberately absent (see
-          # the generator above), and naming a missing file would fail the whole
-          # `mc cp`, taking the version + build badges down with it. Built from
-          # the host paths, rewritten to the container's bind-mount path.
-          # `if`, not `[ -f … ] && …`: this block runs under `set -e`, where a
-          # for-loop whose last command returns 1 aborts the whole script.
-          BADGES=""
-          for b in build e2e server-coverage client-coverage version; do
-            if [ -f "$HOME/tmp/badges/$b.json" ]; then BADGES="$BADGES /badges/$b.json"; fi
-          done
-          echo "uploading badges:$BADGES"
-          [ -n "$BADGES" ] || { echo "no badge files to upload"; exit 0; }
-          docker run --rm --network host \
-            -v "$HOME/tmp/badges:/badges:ro" \
-            -e "MC_HOST_dw=${ENDPOINT_AUTH}" \
-            minio/mc:RELEASE.2025-08-13T08-35-41Z \
-            cp $BADGES \
-              "dw/${MINIO_BUCKET}/site/"
-          rm -f "$HOME"/tmp/badges/*.json
-          EOSSH
+          # #2533 — the ssh/scp/mc upload moved to a shared script: e2e-full.yml
+          # now produces the `e2e` badge (see below), and two copies of this
+          # would drift.
+          scripts/ci/upload-badges.sh /tmp/badges
 
   # notify-main-red — #1270. On a push to main where a primary gate failed, open
   # (or comment on) a rolling Forgejo issue so a red main is surfaced immediately
@@ -1240,12 +685,12 @@ jobs:
   notify-main-red:
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    needs: [lint-typecheck, test, smoke]
+    needs: [lint-typecheck, test]
     if: >-
       always() && github.event_name == 'push' && github.ref == 'refs/heads/main'
       && (needs.lint-typecheck.result == 'failure'
           || needs.test.result == 'failure'
-          || needs.smoke.result == 'failure')
+          )
     # issues: write so github.token can serve as the fallback poster below.
     permissions:
       contents: read
@@ -1262,7 +707,6 @@ jobs:
           SHA: ${{ github.sha }}
           R_LINT: ${{ needs.lint-typecheck.result }}
           R_TEST: ${{ needs.test.result }}
-          R_SMOKE: ${{ needs.smoke.result }}
         run: |
           python3 - <<'PY'
           import os, json, subprocess
@@ -1270,7 +714,7 @@ jobs:
           run_url = f'{os.environ["SERVER_URL"]}/{repo}/actions/runs/{os.environ["RUN_NUMBER"]}'
           failed = [n for n, r in (("lint-typecheck", os.environ["R_LINT"]),
                                    ("test", os.environ["R_TEST"]),
-                                   ("smoke", os.environ["R_SMOKE"])) if r == "failure"]
+                                   ) if r == "failure"]
           MARKER = "<!-- ci-main-red -->"
           body = (f"{MARKER}\n\n\U0001f534 **main CI is red** — run [#{os.environ['RUN_NUMBER']}]({run_url})\n\n"
                   f"- Commit: `{os.environ['SHA'][:12]}`\n- Failed job(s): {', '.join(failed) or 'unknown'}\n\n"

@@ -1,5 +1,5 @@
 // #2333 — pure hashing for preflight's workflow drift guards (no fs, no process).
-// Same core/shell split as tree-gate-core.mjs and check-e2e-tiers-core.mjs.
+// Same core/shell split as tree-gate-core.mjs and check-wt-filter-parity-core.mjs.
 //
 // WHY THIS EXISTS
 //   scripts/preflight.sh pins a SHA-256 of .forgejo/workflows/ci.yml and of
