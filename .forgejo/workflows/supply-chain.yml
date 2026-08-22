@@ -33,12 +33,61 @@ jobs:
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           path: head
+          # #2315 — this job did TWO FULL clones per PR and needs almost none of
+          # it. What it actually touches, verified against the code rather than
+          # assumed:
+          #   * the ten manifests/lockfiles below — MANIFESTS in run-and-post.mjs
+          #     and LOCKFILES in lockfile-packages.mjs, both explicit lists;
+          #   * scripts/supply-chain-comment/, which the `Scan + gate` step runs
+          #     from here (`working-directory: head`). Every import in that
+          #     directory is a node: builtin or a sibling — nothing reaches out.
+          # It does NOT need node_modules: the Socket CLI comes from a pinned
+          # `npx`, not from a local install (there is no `npm ci` in this job).
+          #
+          # ⚠️ Socket scans the DIRECTORY (`scan create .`), so what is on disk
+          # IS the scan surface — a wrong list here would narrow a SECURITY gate.
+          # Two things make that visible rather than silent: `createScan` errors
+          # when it finds zero manifests, and the on-disk manifest count is
+          # printed into the PR comment. Expect 5 for head and 5 for base.
+          #
+          # `filter` alone is a no-op with a full working tree (#2338), and cone
+          # mode would reject these patterns, so both settings are required.
+          filter: blob:none
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /package.json
+            /package-lock.json
+            /client/package.json
+            /client/package-lock.json
+            /server/package.json
+            /server/package-lock.json
+            /tests/package.json
+            /tests/package-lock.json
+            /site/package.json
+            /site/package-lock.json
+            /scripts/supply-chain-comment
 
       - name: Checkout base (main)
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           ref: ${{ github.event.pull_request.base.sha }}
           path: base
+          # #2315 — the base tree is ONLY ever scanned: `createScan("base",
+          # BASE_DIR)` does an `existsSync` per manifest and a Socket directory
+          # scan. Nothing executes from here, so it needs no scripts/ at all.
+          filter: blob:none
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /package.json
+            /package-lock.json
+            /client/package.json
+            /client/package-lock.json
+            /server/package.json
+            /server/package-lock.json
+            /tests/package.json
+            /tests/package-lock.json
+            /site/package.json
+            /site/package-lock.json
 
       - name: Use Node 22
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
