@@ -58,6 +58,9 @@ on:
     # the default branch's copy of this file, so the cron is observable only after
     # merge (a branch prove uses workflow_dispatch). Hour = Aaron's call (#1620).
     - cron: "0 19 * * *"
+  # #2533 — the `run-e2e-full` label no longer gates anything; this suite runs on
+  # every PR. The paragraph below is kept for the history of why it was opt-in.
+  #
   # #1623 — opt-in `run-e2e-full` PR label. Historically this suite had NO
   # pull_request trigger (running the heavy suite on every PR starved the shared
   # OrbStack VM — MariaDB killed mid-seed, /workspace tmpfs ENOSPC). It still
@@ -169,9 +172,25 @@ jobs:
 
   e2e-full:
     needs: [detect]
-    # #1623 — on a PR, run ONLY when the run-e2e-full label is present. Every
-    # non-PR trigger (nightly workflow_call, midday cron, manual dispatch) has
-    # github.event_name != 'pull_request', so those always run.
+    # #2300 phase 3 (#2533) — the `run-e2e-full` label gate is GONE. This suite
+    # now runs on EVERY pull request, which is the whole point of the umbrella:
+    # it removes the tier split that produced #1780 / #2295 / #2298 instead of
+    # patching it. The label itself is now a no-op and can be retired.
+    #
+    # #1623's original bargain — opt-in, because the heavy suite starved the
+    # shared VM — was retired by measurement, not by fiat. Phase 1 made the
+    # shards parallel and duration-balanced (35.7m -> ~19m), phase 2 gave PRs
+    # their own concurrency lane, and #2315 cut the checkouts. What settled it
+    # was the shape of the cost rather than its size: a War Table or sessions PR
+    # already paid ~17m in `smoke`, because the affected tier appended 21
+    # nightly-only specs — and even then it ran 21 of 49 affected specs, since
+    # the per-area cap truncates it. So on exactly the PRs where a regression is
+    # most likely, this trades ~2 minutes for going from capped, partial
+    # coverage to all 157 specs. (Measured 2026-08-21: smoke 17.0m/19.4m on
+    # area-matching PRs vs 7.3-8.4m otherwise; e2e-full 18.3-19.3m on run 10586.)
+    #
+    # Every non-PR trigger (nightly workflow_call, midday cron, manual dispatch)
+    # was always unconditional here and still is.
     #
     # ⚠ DO NOT "tidy" this into a thin caller workflow with a gated `uses:` job.
     # **Forgejo does not honour `if:` on a reusable-workflow (`uses:`) job.** That
@@ -203,7 +222,15 @@ jobs:
     # `!cancelled()` and NOT `always()`, for the reason ci.yml:174 already
     # records against the identical #2308 shape: `always()` would also run this
     # on an explicitly cancelled run.
-    if: ${{ !cancelled() && needs.detect.outputs.should-run != 'false' && (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'run-e2e-full')) }}
+    #
+    # ⚠️ #2533 step 1a keeps `should-run` at JOB level, which is safe only while
+    # this suite is NOT a required check. A skipped Forgejo job posts `success`
+    # (#1954), so the moment these three leg contexts become required, a
+    # phase-4 skip would hand a docs-only PR three green checks for a suite that
+    # never ran. Step 1b moves this clause to the individual steps — the #2496
+    # pattern — so the job always runs and reports from a real execution.
+    # DO NOT add these contexts to branch protection before 1b lands.
+    if: ${{ !cancelled() && needs.detect.outputs.should-run != 'false' }}
     runs-on: ubuntu-latest
     # #2300 — was 75 for all three shards plus two Vite restarts in ONE job.
     # Sized against MEASURED parallel behaviour (run 10148), not the solo
