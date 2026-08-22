@@ -1,8 +1,8 @@
 ---
 name: queue-batches
 description: Use whenever the user invokes `/queue-batches` or `/queue-batches NxM` (e.g. `/queue-batches 3x5`), or says "queue up some batches", "kick off parallel work on some tickets", "run N groups of M issues in parallel".
-version: 1.4.0
-last_changed: 2026-08-21
+version: 1.4.1
+last_changed: 2026-08-22
 ---
 
 # Queue Batches
@@ -46,7 +46,12 @@ Before anything else, check whether a previous queue run is still in flight or a
 
 ```bash
 # Active or pending-ship batches — any feat/<batch>-<date> branch still exists locally?
-git branch --format='%(refname:short)' | grep -E '^feat/(auth-routes|server-core|client-ux)-[0-9]{8}$'
+# Match ANY batch slug, not an enumerated list: a run may name a batch for the file
+# zone it actually owns (e.g. `ci-testing` for tests/ + scripts/ work). On 2026-08-21
+# a `feat/ci-testing-20260821` batch would have been invisible to a hardcoded
+# (auth-routes|server-core|client-ux) alternation — and an unseen in-flight batch is
+# exactly how a live status/doing ticket gets handed to a second agent.
+git branch --format='%(refname:short)' | grep -E '^feat/[a-z0-9-]+-[0-9]{8}$'
 ```
 
 For each matching branch, inspect the corresponding `/tmp/queue-status/<batch>.log` to classify:
@@ -74,7 +79,23 @@ Only skip this check when the user explicitly overrides with `force` (or the equ
 
 ### 1. Fetch + triage
 
-- Fetch open issues: `curl -sS -H "Authorization: token $FORGEJO_TOKEN" "https://forge.example.com/api/v1/repos/aaron/darkwatch/issues?state=open&limit=50&type=issues"` (paginate if 50 returned; always fresh — no cache; transport rules in `.claude/skills/_shared/forgejo-api.md`)
+- Fetch open issues. **`limit` is hard-capped at 50 and does not say so**, so a single
+  un-paginated call returns 50 of ~310 — and every exclusion filter below then runs
+  against a biased slice. Loop until a page comes back short:
+
+  ```bash
+  TMP=$(mktemp -d /tmp/queue-triage.XXXXXX)
+  for p in $(seq 1 20); do
+    curl -sS -H "Authorization: token $FORGEJO_TOKEN" \
+      "https://forge.example.com/api/v1/repos/aaron/darkwatch/issues?state=open&limit=50&page=$p&type=issues" \
+      > "$TMP/p$p.json"
+    [ "$(jq 'length' "$TMP/p$p.json")" -lt 50 ] && break
+  done
+  jq -s 'add | map(select(.pull_request == null))' "$TMP"/p*.json > "$TMP/all.json"
+  ```
+
+  Always fresh — no cache. Transport rules in `.claude/skills/_shared/forgejo-api.md`.
+  Fetch to files and `jq` against them; never print raw pages into the conversation.
 - Exclude labels: `pipe-dream`, `maybe`, `status/blocked`, and anything already in flight or awaiting verification — `status/doing`, `status/review`, `status/qa`
 - For each remaining issue, read the body (not just title) to triage into a zone. Labels are a hint, not gospel. If an issue touches multiple zones, skip it with a note.
 
