@@ -223,14 +223,24 @@ jobs:
     # records against the identical #2308 shape: `always()` would also run this
     # on an explicitly cancelled run.
     #
-    # ⚠️ #2533 step 1a keeps `should-run` at JOB level, which is safe only while
-    # this suite is NOT a required check. A skipped Forgejo job posts `success`
-    # (#1954), so the moment these three leg contexts become required, a
-    # phase-4 skip would hand a docs-only PR three green checks for a suite that
-    # never ran. Step 1b moves this clause to the individual steps — the #2496
-    # pattern — so the job always runs and reports from a real execution.
-    # DO NOT add these contexts to branch protection before 1b lands.
-    if: ${{ !cancelled() && needs.detect.outputs.should-run != 'false' }}
+    # ⚠️ #2533 step 1b — `should-run` is DELIBERATELY NOT in this condition.
+    # It moved to the individual steps below, and that is the property that
+    # makes these three leg contexts safe to require in branch protection.
+    #
+    # A skipped Forgejo job posts a `success` commit status (#1954). While the
+    # phase-4 decision lived HERE, a docs-only PR skipped the whole job and
+    # presented three green checks for a suite that never ran — harmless while
+    # the suite was opt-in, and a merge-on-nothing hole the moment it is
+    # required. Guarding STEPS instead means the job always RUNS and always
+    # reports from a real execution; "green" means a job made a deliberate
+    # decision. Same reasoning, and the same shape, as #2496 for `test`/`smoke`
+    # — see the REQUIRED_CONTEXTS comment in scripts/ci/tree-gate-core.mjs.
+    #
+    # `!cancelled()` stays, and only that: it is false solely on an explicitly
+    # cancelled run (which cannot merge), never because of what the diff
+    # touched. It is what keeps this job alive when `detect` DIES rather than
+    # merely answering — the #2528 fail-open.
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     # #2300 — was 75 for all three shards plus two Vite restarts in ONE job.
     # Sized against MEASURED parallel behaviour (run 10148), not the solo
@@ -273,7 +283,22 @@ jobs:
           --health-timeout=5s
           --health-retries=30
     steps:
+      # #2533 step 1b — this job now ALWAYS runs, so say plainly when it did
+      # nothing. A green check whose reason is invisible is the #2010/#2011
+      # failure mode; `detect` writes its own summary, and this makes the shard's
+      # check self-explanatory on its own.
+      - name: Runtime-irrelevant diff — this shard has nothing to run
+        if: ${{ needs.detect.outputs.should-run == 'false' }}
+        run: |
+          echo "shard ${{ matrix.shard }}/3: skipped — the diff cannot affect runtime (#2300 phase 4)."
+          echo "This job RAN and is reporting honestly; only its expensive steps were skipped (#2533)." >> "$GITHUB_STEP_SUMMARY"
+
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        # #2533 step 1b — the phase-4 decision, applied per-step so the JOB
+        # still runs and reports honestly. Fail-open is structural: if `detect`
+        # died or the expression did not resolve, this reads empty, `!= 'false'`
+        # holds, and the step RUNS. Only an explicit "false" skips.
+        if: ${{ needs.detect.outputs.should-run != 'false' }}
         with:
           ref: ${{ inputs.ref }}
           # #2315 — skip the 21M of Playwright visual baselines. This job sets
@@ -297,6 +322,11 @@ jobs:
             !tests/e2e/visual-regression.spec.ts-snapshots
 
       - name: Cache npm downloads
+        # #2533 step 1b — the phase-4 decision, applied per-step so the JOB
+        # still runs and reports honestly. Fail-open is structural: if `detect`
+        # died or the expression did not resolve, this reads empty, `!= 'false'`
+        # holds, and the step RUNS. Only an explicit "false" skips.
+        if: ${{ needs.detect.outputs.should-run != 'false' }}
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: ~/.npm
@@ -305,18 +335,43 @@ jobs:
             npm-${{ runner.os }}-
 
       - name: Install server dependencies
+        # #2533 step 1b — the phase-4 decision, applied per-step so the JOB
+        # still runs and reports honestly. Fail-open is structural: if `detect`
+        # died or the expression did not resolve, this reads empty, `!= 'false'`
+        # holds, and the step RUNS. Only an explicit "false" skips.
+        if: ${{ needs.detect.outputs.should-run != 'false' }}
         run: cd server && npm ci --no-audit --no-fund
 
       - name: Build server
+        # #2533 step 1b — the phase-4 decision, applied per-step so the JOB
+        # still runs and reports honestly. Fail-open is structural: if `detect`
+        # died or the expression did not resolve, this reads empty, `!= 'false'`
+        # holds, and the step RUNS. Only an explicit "false" skips.
+        if: ${{ needs.detect.outputs.should-run != 'false' }}
         run: cd server && npm run build
 
       - name: Install client dependencies
+        # #2533 step 1b — the phase-4 decision, applied per-step so the JOB
+        # still runs and reports honestly. Fail-open is structural: if `detect`
+        # died or the expression did not resolve, this reads empty, `!= 'false'`
+        # holds, and the step RUNS. Only an explicit "false" skips.
+        if: ${{ needs.detect.outputs.should-run != 'false' }}
         run: cd client && npm ci --no-audit --no-fund
 
       - name: Build client
+        # #2533 step 1b — the phase-4 decision, applied per-step so the JOB
+        # still runs and reports honestly. Fail-open is structural: if `detect`
+        # died or the expression did not resolve, this reads empty, `!= 'false'`
+        # holds, and the step RUNS. Only an explicit "false" skips.
+        if: ${{ needs.detect.outputs.should-run != 'false' }}
         run: cd client && npm run build
 
       - name: Wait for MariaDB
+        # #2533 step 1b — the phase-4 decision, applied per-step so the JOB
+        # still runs and reports honestly. Fail-open is structural: if `detect`
+        # died or the expression did not resolve, this reads empty, `!= 'false'`
+        # holds, and the step RUNS. Only an explicit "false" skips.
+        if: ${{ needs.detect.outputs.should-run != 'false' }}
         run: |
           for i in $(seq 1 30); do
             (echo > /dev/tcp/mariadb/3306) 2>/dev/null && echo "MariaDB is ready" && break
@@ -326,6 +381,11 @@ jobs:
           done
 
       - name: Apply migrations to CI DB
+        # #2533 step 1b — the phase-4 decision, applied per-step so the JOB
+        # still runs and reports honestly. Fail-open is structural: if `detect`
+        # died or the expression did not resolve, this reads empty, `!= 'false'`
+        # holds, and the step RUNS. Only an explicit "false" skips.
+        if: ${{ needs.detect.outputs.should-run != 'false' }}
         env:
           DB_HOST: mariadb
           DB_PORT: "3306"
@@ -335,6 +395,11 @@ jobs:
         run: cd server && npm run db:migrate
 
       - name: Start MinIO + create the images bucket
+        # #2533 step 1b — the phase-4 decision, applied per-step so the JOB
+        # still runs and reports honestly. Fail-open is structural: if `detect`
+        # died or the expression did not resolve, this reads empty, `!= 'false'`
+        # holds, and the step RUNS. Only an explicit "false" skips.
+        if: ${{ needs.detect.outputs.should-run != 'false' }}
         # #1141 — image specs (image-picker) store uploads in object storage.
         # MinIO can't run as a Forgejo `service` (the image needs the `server
         # /data` command arg, which services can't set), so run it in-step:
@@ -389,6 +454,11 @@ jobs:
           echo "MinIO ready with bucket $MINIO_BUCKET (public-download)"
 
       - name: Seed all tiers (full suite assumes a fully seeded DB)
+        # #2533 step 1b — the phase-4 decision, applied per-step so the JOB
+        # still runs and reports honestly. Fail-open is structural: if `detect`
+        # died or the expression did not resolve, this reads empty, `!= 'false'`
+        # holds, and the step RUNS. Only an explicit "false" skips.
+        if: ${{ needs.detect.outputs.should-run != 'false' }}
         # SEED_MODE=all (= `npm run seed`) rather than the granular
         # core+shadowdark+demo list. The full suite runs EVERY spec, including
         # ones that depend on tiers the granular list forgot — e.g.
@@ -416,6 +486,11 @@ jobs:
         run: cd server && npm run seed
 
       - name: Start E2E app server
+        # #2533 step 1b — the phase-4 decision, applied per-step so the JOB
+        # still runs and reports honestly. Fail-open is structural: if `detect`
+        # died or the expression did not resolve, this reads empty, `!= 'false'`
+        # holds, and the step RUNS. Only an explicit "false" skips.
+        if: ${{ needs.detect.outputs.should-run != 'false' }}
         env:
           PORT: "3001"
           DB_HOST: mariadb
@@ -461,6 +536,11 @@ jobs:
           done
 
       - name: Start Vite preview server
+        # #2533 step 1b — the phase-4 decision, applied per-step so the JOB
+        # still runs and reports honestly. Fail-open is structural: if `detect`
+        # died or the expression did not resolve, this reads empty, `!= 'false'`
+        # holds, and the step RUNS. Only an explicit "false" skips.
+        if: ${{ needs.detect.outputs.should-run != 'false' }}
         env:
           API_PROXY_URL: "http://localhost:3001"
           NODE_OPTIONS: "--max-old-space-size=512"
@@ -475,6 +555,11 @@ jobs:
           done
 
       - name: Warm up app server (login + auth + campaigns)
+        # #2533 step 1b — the phase-4 decision, applied per-step so the JOB
+        # still runs and reports honestly. Fail-open is structural: if `detect`
+        # died or the expression did not resolve, this reads empty, `!= 'false'`
+        # holds, and the step RUNS. Only an explicit "false" skips.
+        if: ${{ needs.detect.outputs.should-run != 'false' }}
         # The first specs hit cold connection pools, V8 JIT and socket handlers,
         # exceeding their waits (cold-start flake — e.g. 566-npc-combat's first
         # test). Priming with a few authed requests lands the first specs on
@@ -498,11 +583,21 @@ jobs:
           echo "warmup complete"
 
       - name: Install tests dependencies (browsers baked in image)
+        # #2533 step 1b — the phase-4 decision, applied per-step so the JOB
+        # still runs and reports honestly. Fail-open is structural: if `detect`
+        # died or the expression did not resolve, this reads empty, `!= 'false'`
+        # holds, and the step RUNS. Only an explicit "false" skips.
+        if: ${{ needs.detect.outputs.should-run != 'false' }}
         env:
           PLAYWRIGHT_BROWSERS_PATH: /ms-playwright
         run: cd tests && npm ci --no-audit --no-fund
 
       - name: Run full suite — shard ${{ matrix.shard }} of 3 (duration-balanced)
+        # #2533 step 1b — the phase-4 decision, applied per-step so the JOB
+        # still runs and reports honestly. Fail-open is structural: if `detect`
+        # died or the expression did not resolve, this reads empty, `!= 'false'`
+        # holds, and the step RUNS. Only an explicit "false" skips.
+        if: ${{ needs.detect.outputs.should-run != 'false' }}
         env:
           E2E_SERVER_URL: "http://localhost:3001"
           TEST_HOOK_SECRET: e2e-test-hook-secret
@@ -568,7 +663,7 @@ jobs:
           fi
 
       - name: Collect logs for artifact
-        if: always()
+        if: ${{ always() && needs.detect.outputs.should-run != 'false' }}
         run: |
           mkdir -p /tmp/e2e-full-logs
           cp /tmp/server.log /tmp/e2e-full-logs/server.log 2>/dev/null || echo "(no server log)" > /tmp/e2e-full-logs/server.log
@@ -583,7 +678,9 @@ jobs:
           find /tmp/e2e-full-logs -type f | head -40
 
       - name: Upload E2E full-suite logs artifact
-        if: always()
+        # #2533 step 1b — nothing was collected on the cheap path, so an
+        # `always()` upload would run against an empty directory.
+        if: ${{ always() && needs.detect.outputs.should-run != 'false' }}
         # v4 unsupported on Forgejo's actions backend; pin v3 (see ci.yml's smoke job).
         uses: actions/upload-artifact@ff15f0306b3f739f7b6fd43fb5d26cd321bd4de5 # v3.2.1
         with:
@@ -595,7 +692,9 @@ jobs:
           retention-days: 14
 
       - name: Dump server and vite logs on failure (inline)
-        if: failure()
+        # #2533 step 1b — on the cheap path there are no logs to dump, and a
+        # `failure()` step that errors would red the job it is debugging.
+        if: ${{ failure() && needs.detect.outputs.should-run != 'false' }}
         run: |
           echo "=== server log (last 200 lines) ==="
           tail -n 200 /tmp/server.log || echo "no server log"
