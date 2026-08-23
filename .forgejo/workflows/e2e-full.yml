@@ -249,33 +249,46 @@ jobs:
     # run took 20.4m wall (4.5m setup + 15.8m tests) against an 12.6m
     # uncontended projection.
     #
-    # #2533 — RAISED 35 -> 50, measured against 227 matrix-leg runs since the
-    # phase-1 split (2026-08-17 onward). The 35 was described above as "~1.7x
-    # headroom" over a 20.4m reference; against the distribution these legs
-    # actually produce it is ~1.22x. The longest PASSING legs:
+    # #2533 — RAISED 35 -> 50. Re-measured 2026-08-23 across 154 substantive
+    # matrix legs / 48 runs, reading `action_task_step` so that SCHEDULING time
+    # and WORK time are separated.
     #
-    #   28.6m  28.3m  28.0m   (2026-08-18, one run, all three legs)
-    #   25.8m  25.2m           (2026-08-22)
+    # ⚠️ The first version of this comment (and #2533's changelog fragment) said
+    # "co-location costs roughly 2x" and cited legs of 28.6m and 25.8m as the
+    # longest PASSING runs. Both claims were wrong, and wrong the same way: those
+    # legs each sat ~10.4m in PRE-STEP time before their first step ran. Their
+    # actual work was 17.5-18.2m and 14.7-15.2m — ordinary. Comparing job
+    # durations attributes a scheduling stall to CPU contention. Don't.
     #
-    # A 28-minute PASS is a normal outcome here, and the ceiling sat 6m above it.
+    # What the 154 legs actually show, median step time on passing legs:
     #
-    # The driver is runner topology, and one run proves it on its own — same
-    # commit, same specs, run 22435: legs 1 and 2 both landed on Global-Falcon-02
-    # and took 25.2m and 25.8m; leg 3 landed alone on m4-runner and took 13.2m.
-    # Co-location costs roughly 2x, and Forgejo hands all three legs to whoever
-    # has capacity, so it is luck, not something this workflow controls. Fixing
-    # that is #2535 and it waits on hardware.
+    #   legs of one run sharing a host   1 leg    2 legs   3 legs
+    #     Global-Falcon-0x                 14.48m   15.63m   17.98m
+    #     m4-runner                      12.78m   13.82m   —
+    #
+    # Co-location costs ~24%, not 2x. The larger variable is WHICH machine:
+    # m4-runner medians 13.50m against Falcon's ~17.0m, so an m4 carrying two legs
+    # still beats a Falcon box carrying one. 31% of runs put all three legs on one
+    # host and only 2% get three distinct hosts, but at +24% that is a tuning
+    # problem, not the thing this budget is sized around. See #2535.
+    #
+    # THE BUDGET IS SIZED FOR THE TAIL, and the tail is two things stacking:
+    #
+    #   1. A retry-heavy FAILING leg. Worst observed step time is 32.03m — real
+    #      failures re-running under `retries`, not contention.
+    #   2. A PRE-STEP STALL. Median pre-step across all 154 legs is 0.13m. Eight
+    #      legs exceed 2m and ALL EIGHT are on Global-Falcon-02: 5.13 5.20 9.82
+    #      10.37 10.37 10.37 10.48 10.48 — roughly 1x and 2x of a ~5.2m unit,
+    #      i.e. a fixed-backoff retry, most likely a failing container-image pull
+    #      from the Pi. That is a host defect (#2567); it is NOT something
+    #      more runners fix.
+    #
+    # 32.03 + 10.48 ≈ 42.5m, against a 35m ceiling. That is the case this raise
+    # covers. 50 leaves headroom over it without being open-ended.
     #
     # What changed the urgency is FREQUENCY: #2300 phase 3 made this suite run on
-    # every PR rather than twice a day, so a ~1.2x margin that used to be sampled
-    # twice daily is now sampled on every push.
-    #
-    # Honest note on the one leg that has hit 35m (job 22389, 2026-08-22): it is
-    # NOT clean capacity evidence. It was killed at test 113/123, and some of its
-    # length was retry cost from genuinely failing picker-commits specs, not
-    # contention alone. It is still the shape this raise is about — a ceiling
-    # kill reports as a red suite AND discards the remaining specs, so it costs a
-    # diagnosis and returns less information than an ordinary failure.
+    # every PR rather than twice a day, so a tail that used to be sampled twice
+    # daily is now sampled on every push.
     #
     # This does not mask a hang. A stuck leg still dies, 15 minutes later, and
     # Playwright's own per-test timeout bounds any single spec long before the
