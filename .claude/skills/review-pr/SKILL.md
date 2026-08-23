@@ -1,8 +1,8 @@
 ---
 name: review-pr
-description: Use when asked to review, check, or look at a Darkwatch pull request — "review PR #2551", "can you look at <PR url>", "check this PR", "how does this one look?", "review the current branch's PR". Not the line-level sweep (`/code-review`), not `status/qa` verification (`/qa-check`), not opening a PR (`/ship`).
-version: 1.0.0
-last_changed: 2026-08-22
+description: 'Use when asked to review, check, or look at a Darkwatch pull request — "review PR #2551", "can you look at <PR url>", "check this PR", "how does this one look?", "review the current branch''s PR". Not the line-level sweep (`/code-review`), not `status/qa` verification (`/qa-check`), not opening a PR (`/ship`).'
+version: 1.1.0
+last_changed: 2026-08-23
 ---
 
 # Review PR
@@ -84,6 +84,20 @@ current-branch lookup in step 1 works. Once a PR merges the branch is auto-delet
 `head.ref` reads `refs/pull/<n>/head` instead — so never build a `git` command from
 `head.ref`. The pull-ref fetch above works in both states (verified against merged
 #2554, whose branch is long gone), so use it unconditionally.
+
+**Read PR files with `git show`, never `git checkout`.** To see a whole file at the PR's
+state — which you will want, because a diff hunk rarely settles whether a claim holds —
+use `git show origin/pr/$N:<path>`. Reaching for `git checkout origin/pr/$N -- .` writes
+the PR's content into your working tree and stages it; on 2026-08-22 that happened during
+this skill's own first run. It is recoverable (`git reset --hard HEAD`, which preserves
+untracked files) but it silently mixes another branch's code into whatever you were doing,
+and if you had uncommitted work it is gone. `git show` and `git grep <pat> origin/pr/$N`
+both read the ref without touching the tree.
+
+```bash
+git show origin/pr/$N:client/src/foo.tsx | sed -n '100,140p'
+git grep -n "symbol" origin/pr/$N -- 'client/src/**/*.tsx'   # quote the pathspec — zsh expands a bare glob first
+```
 
 Read source diffs first; skip tests on the first pass, then return to judge whether the
 tests actually cover the risky path.
@@ -189,6 +203,27 @@ paths", "the only two remaining"), confirming it where the claim points is not e
 Enumerate every occurrence of the *old* pattern and confirm each is handled. Finding it
 in two places and assuming the rest is how a half-applied change ships green.
 
+**A category claim worded syntactically hides every other form of the same pattern.**
+When a `met` or a body line quantifies over a *syntax* ("no remaining bare
+`.catch(() => {})`", "no `any` left", "every `fetch(` is wrapped"), grep the **semantic**
+category, not the literal string. The one-line form and the multi-line form of the same
+construct are different regexes and the claim usually only swept the first:
+
+```bash
+git grep -nE "\.catch\(\(\) => \{\}\)" origin/pr/$N -- 'client/src'   # one-line
+git grep -nE "\.catch\(\(\) => \{$" origin/pr/$N -- 'client/src'        # body on next line
+```
+
+Expect noise: on #2554 the first returned 18 hits of which **one** was live code — the
+other 17 were comments *quoting* the pattern to explain a past fix. Filter to real call
+sites before counting, or you will report a clean sweep as a disaster and vice versa.
+
+Then read each multi-line hit: a body that restores prior state with a comment saying why
+is fine; one that writes an empty/`null` state is the same defect in longer clothing. On
+#2554 the `(zero-swallows)` claim was literally true and left two live instances of the
+bug the PR had just fixed next door (#2563). A claim can be true as written and false as
+meant — say which you checked.
+
 **Verify the happy path produces correct output — not just that bad input is rejected.**
 A change can be perfectly safe (it rejects everything wrong) and still never produce a
 working result. Ask "will a real run succeed?", not only "is a bad result caught?".
@@ -289,6 +324,9 @@ reporting either way.
     if the code regressed? A test that passes either way is worthless. A missing or
     toothless test is a finding; producing a red local run is not your job.
 - **Verdict** — approve / approve-with-nits / needs-a-fix, in one line.
+- **Next** — the step 9 handoff line. It belongs in the delivered output, not in your
+  head: on this skill's first real run the verdict read as the end of the review and
+  step 9 was silently skipped. If the answer is "no `/code-review` needed", say that.
 
 Never post any of this to the PR. Chat only.
 
@@ -325,6 +363,8 @@ Offer to run it; don't run it unasked.
 | Trusting a new guard because it runs green | Audit its logic; green means it caught nothing on this input. |
 | Taking a mocked-DB test as proof of DB behaviour | Look for an int test. |
 | Using `head.ref` as a local branch | `git fetch origin +refs/pull/$N/head:refs/remotes/origin/pr/$N`. |
+| `git checkout origin/pr/$N -- .` to read PR files | That writes the PR into your tree. `git show origin/pr/$N:<path>` / `git grep … origin/pr/$N`. |
+| Grepping a category claim's literal string | Grep the semantic category — the multi-line form of the same construct is a different regex (#2563). |
 | Posting the review on the PR | Chat only — the user decides. |
 | Duplicating `/code-review` line-by-line | Review claims + ticket fit; hand off for the correctness sweep. |
 | Inflating a nit or burying a real bug | Rank by real severity, most-severe first. |

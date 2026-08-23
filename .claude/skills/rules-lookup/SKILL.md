@@ -1,6 +1,6 @@
 ---
 name: rules-lookup
-description: Use when any task needs the official Shadowdark rule for something — creature stats, item costs/slots, spell details, class/ancestry features, or mechanics like light sources, crawl rounds, rest, death, morale, XP, treasure/gold. Answers come from the local rulebook corpus with page citations. Examples: "what does a torch cost", "how does SD handle gold/coin weight", "RAW crawl round length".
+description: 'Use when any task needs the official Shadowdark rule for something — creature stats, item costs/slots, spell details, class/ancestry features, or mechanics like light sources, crawl rounds, rest, death, morale, XP, treasure/gold. Answers come from the local rulebook corpus with page citations. Examples: "what does a torch cost", "how does SD handle gold/coin weight", "RAW crawl round length".'
 version: 1.0.0
 last_changed: 2026-07-26
 ---
