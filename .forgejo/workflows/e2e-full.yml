@@ -247,9 +247,42 @@ jobs:
     # projection: Forgejo hands all three shards to whichever runner has the
     # capacity, so they normally land on ONE host and contend for its CPU. That
     # run took 20.4m wall (4.5m setup + 15.8m tests) against an 12.6m
-    # uncontended projection. 35 keeps the ~1.7x headroom the old 75/44m job
-    # carried, rather than the 1.5x that 30 would leave.
-    timeout-minutes: 35
+    # uncontended projection.
+    #
+    # #2533 — RAISED 35 -> 50, measured against 227 matrix-leg runs since the
+    # phase-1 split (2026-08-17 onward). The 35 was described above as "~1.7x
+    # headroom" over a 20.4m reference; against the distribution these legs
+    # actually produce it is ~1.22x. The longest PASSING legs:
+    #
+    #   28.6m  28.3m  28.0m   (2026-08-18, one run, all three legs)
+    #   25.8m  25.2m           (2026-08-22)
+    #
+    # A 28-minute PASS is a normal outcome here, and the ceiling sat 6m above it.
+    #
+    # The driver is runner topology, and one run proves it on its own — same
+    # commit, same specs, run 22435: legs 1 and 2 both landed on Global-Falcon-02
+    # and took 25.2m and 25.8m; leg 3 landed alone on m4-runner and took 13.2m.
+    # Co-location costs roughly 2x, and Forgejo hands all three legs to whoever
+    # has capacity, so it is luck, not something this workflow controls. Fixing
+    # that is #2535 and it waits on hardware.
+    #
+    # What changed the urgency is FREQUENCY: #2300 phase 3 made this suite run on
+    # every PR rather than twice a day, so a ~1.2x margin that used to be sampled
+    # twice daily is now sampled on every push.
+    #
+    # Honest note on the one leg that has hit 35m (job 22389, 2026-08-22): it is
+    # NOT clean capacity evidence. It was killed at test 113/123, and some of its
+    # length was retry cost from genuinely failing picker-commits specs, not
+    # contention alone. It is still the shape this raise is about — a ceiling
+    # kill reports as a red suite AND discards the remaining specs, so it costs a
+    # diagnosis and returns less information than an ordinary failure.
+    #
+    # This does not mask a hang. A stuck leg still dies, 15 minutes later, and
+    # Playwright's own per-test timeout bounds any single spec long before the
+    # job budget is reached. The cost of the raise is that a legitimately failing
+    # leg can now burn longer before reporting; `fail-fast: false` means the
+    # other two report on their own schedule regardless.
+    timeout-minutes: 50
     strategy:
       # Every shard must report independently: the deploy gate wants to know
       # ALL the specs that broke, not just the ones before the first failure.
