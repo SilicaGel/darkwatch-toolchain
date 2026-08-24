@@ -66,7 +66,7 @@ jobs:
     # host, and #2310's rule is explicit that a toggleable runner must never be
     # the sole owner of a label (turning it off WEDGES the job rather than
     # failing it).
-    container: node:lts
+    container: node:lts@sha256:934240a162082fd8b8a2f90cd5114446443f1eba1c5378f6687167ca405e6584
     timeout-minutes: 20 # #1263 — Renovate clones repos + files PRs; ~5-15 min typical
     steps:
       # Records what the pin actually produced. Renovate's git-version failure
