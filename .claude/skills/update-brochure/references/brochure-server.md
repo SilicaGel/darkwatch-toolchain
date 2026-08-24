@@ -1,6 +1,6 @@
 # Brochure screenshot server — port-isolated setup
 
-The brochure screenshot capture (`site/screenshots.js`) hits a running app. If a dev server is already running on default ports (5173/3000) — possibly from a *different worktree* — the screenshots will reflect **that** worktree's state, not the one you're trying to capture. This has happened before.
+The brochure screenshot capture (`site/screenshots.js`) hits a running app. If a dev server is already running on the default ports (10900/10901) — possibly from a *different worktree* — the screenshots will reflect **that** worktree's state, not the one you're trying to capture. This has happened before.
 
 **Fix:** the brochure skill spins up its own dedicated server + client on isolated ports, from the current worktree, for each capture run. Before and after the run, it kills anything on those ports to avoid stale processes.
 
@@ -15,9 +15,9 @@ These are reserved for brochure runs only. Avoid using them for manual dev work.
 
 ## Why `npm run preview`, not `npm run dev`
 
-Vite's **dev** server proxy target is hardcoded to `http://localhost:3000` in `vite.config.ts` (see the `server.proxy` block). It does **not** honor `API_PROXY_URL`. Using dev mode would route all `/api/*` calls to wherever's listening on 3000, which defeats the point of isolation.
+**The reason is build fidelity, not the proxy.** This section used to say that `preview` honours `API_PROXY_URL` and `dev` does not, and that dev would therefore route `/api/*` to whatever held :3000. That was never true: `client/vite.config.ts` gives `server.proxy` and `preview.proxy` the *same* `apiTarget`, which is `process.env.API_PROXY_URL ?? <the local block's server port>` — so **both** honour it, and both default to `scripts/dev-ports.mjs`'s `server` port. Corrected while moving the ports (#2538); the stale claim is called out rather than quietly deleted because this file is read as instructions.
 
-Vite's **preview** server proxy **does** honor `API_PROXY_URL` (see the `preview.proxy` block). So for the brochure we build a production bundle and serve it via preview. Slower to start (~30-60 s build) but faithful, production-like, and correctly isolated. This is the same flow the nightly E2E workflow uses.
+So for the brochure we build a production bundle and serve it via `preview`: slower to start (~30-60 s build) but faithful and production-like, which is what the screenshots need. Isolation comes from the explicit ports and `CLIENT_URL` set in the steps below, not from the choice of dev-vs-preview. This is the same flow the nightly E2E workflow uses.
 
 ## Pre-flight: kill stale brochure processes
 
@@ -103,7 +103,7 @@ If screenshots look stale or wrong after a clean start:
 2. Check `/tmp/brochure-client.log` — did the build include your latest changes? (`ls -la client/dist/assets/*.js | head -1` — the hash should be recent)
 3. Try hard-rebuild: `rm -rf client/dist && (cd client && npm run build)`
 4. Confirm the seed data is present: `curl -s http://localhost:3099/api/auth/me -b "darkwatch_token=..."` after logging in — should return the seeded `dm@darkwatch.test` user
-5. **If login returns 403:** the server's CSRF allowlist rejected the origin. Check that `CLIENT_URL=http://localhost:5199` was set in step 2. The log will show `[csrf] blocked — origin not in allowlist`. Without it, the allowlist defaults to `http://localhost:5173` (the standard dev port) and every brochure login is blocked.
+5. **If login returns 403:** the server's CSRF allowlist rejected the origin. Check that `CLIENT_URL=http://localhost:5199` was set in step 2. The log will show `[csrf] blocked — origin not in allowlist`. Without it, the allowlist defaults to `http://localhost:10900` (the standard dev port) and every brochure login is blocked.
 
 ## Why not just use the existing dev server?
 

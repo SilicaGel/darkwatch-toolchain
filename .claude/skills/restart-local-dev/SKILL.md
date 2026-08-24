@@ -13,9 +13,15 @@ Kills all Darkwatch dev processes and restarts them clean.
 
 | Name | Command | URL |
 |------|---------|-----|
-| Client (Vite) + Server (Express) | `npm run dev` in project root | :5173 + :3000 |
-| WWW | `npx serve www -p 4200` | :4200 |
-| Brochure (static site) | `npx serve . -p 5199` in `site/` | :5199 |
+| Client (Vite) + Server (Express) | `npm run dev` in project root | :10900 + :10901 |
+| WWW | `npx serve www -p 10920` | :10920 |
+| Brochure (static site) | `npx serve . -p 10921` in `site/` | :10921 |
+
+Ports come from the 10900 block (#2538) and are derived by `scripts/dev-ports.mjs` —
+`node scripts/dev-ports.mjs` prints the whole set, `node scripts/dev-ports.mjs client`
+prints one. Prefer the command over retyping a number. Vite now runs with
+`strictPort`, so a busy port is a startup error naming the port rather than a silent
+move to the next one.
 
 ## Steps
 
@@ -30,8 +36,8 @@ Kills all Darkwatch dev processes and restarts them clean.
    - `tsx watch src/index.ts` (main workspace only, not worktrees)
    - `vite` (main workspace)
    - `vite preview` (main workspace)
-   - `serve www` on port 4200
-   - `serve` on port 5199 (brochure)
+   - `serve www` on port 10920
+   - `serve` on port 10921 (brochure)
 
 3. Clear Vite cache: `rm -rf client/node_modules/.vite`
 

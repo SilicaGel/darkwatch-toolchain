@@ -2,11 +2,11 @@
 // session cookie is available when Lighthouse loads the audited URL.
 //
 // Reads from env:
-//   LHCI_CLIENT_URL   base URL of the client (default: http://localhost:5173)
+//   LHCI_CLIENT_URL   base URL of the client (default: http://localhost:10900)
 //   LHCI_LOGIN_USER   username to log in with (default: DungeonMaster)
 //   LHCI_LOGIN_PASS   password (default: password)
 
-const BASE_URL = process.env.LHCI_CLIENT_URL || "http://localhost:5173";
+const BASE_URL = process.env.LHCI_CLIENT_URL || "http://localhost:10900";
 const USERNAME = process.env.LHCI_LOGIN_USER || "DungeonMaster";
 const PASSWORD = process.env.LHCI_LOGIN_PASS || "password";
 

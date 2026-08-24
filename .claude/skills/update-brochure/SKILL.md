@@ -158,7 +158,7 @@ Load `references/processes.md` and follow the relevant section.
 
 ### F. Capturing? Bring up the brochure stack first
 
-Any process that runs screenshots MUST use the isolated brochure stack — don't hit 5173/3000 directly, a stale process from another worktree may be serving them. See `references/brochure-server.md` for the start / wait-for-ready / tear-down procedure.
+Any process that runs screenshots MUST use the isolated brochure stack — don't hit the dev ports (10900/10901) directly, a stale process from another worktree may be serving them. See `references/brochure-server.md` for the start / wait-for-ready / tear-down procedure.
 
 ---
 

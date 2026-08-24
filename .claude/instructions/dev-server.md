@@ -3,7 +3,11 @@
 ## Clean restart
 
 ```bash
-kill $(lsof -ti :5173) 2>/dev/null
+kill $(lsof -ti ":$(node scripts/dev-ports.mjs client)") 2>/dev/null   # :10900
+# The leading colon is load-bearing — `lsof -ti 10900` is not a port filter,
+# it errors out and 2>/dev/null hides it, so kill silently no-ops. With
+# strictPort on, that leaves the stale Vite holding the port and the next
+# `npm run dev` refuses to start.
 rm -rf client/node_modules/.vite
 cd client && npm run dev
 ```

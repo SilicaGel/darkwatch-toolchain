@@ -86,6 +86,14 @@ echo REGEN_OK
 EOF
 
 echo "==> running CI image to regenerate baselines"
+# #2538 — host-side MinIO moved to 10910; the container's own 3001/5173 are
+# isolated inside this run and deliberately unchanged.
+#
+# Do NOT put a comment between the backslash-continued lines below: the
+# backslash-newline is joined BEFORE tokenising, so a `#` there comments out the
+# rest of the physical line and the command is silently truncated at that point
+# (shellcheck SC2215). `bash -n` still passes, and shellcheck is not in
+# preflight — the first symptom is this script dying under `set -e`.
 docker run --rm -v "$SRC":/work -w /work \
   --add-host=host.docker.internal:host-gateway \
   -e PLAYWRIGHT_BROWSERS_PATH=/ms-playwright -e NODE_ENV=test -e PORT=3001 \
@@ -95,10 +103,10 @@ docker run --rm -v "$SRC":/work -w /work \
   -e DATABASE_URL="mysql://$DB_USER:$DB_PASSWORD@host.docker.internal:3397/$DBNAME" \
   -e JWT_SECRET=e2e-test-secret -e ALLOW_TEST_HOOKS=true -e TEST_HOOK_SECRET=e2e-test-hook-secret \
   -e CLIENT_URL=http://localhost:5173 -e SOCKET_PER_USER_CAP=1000 -e SOCKET_PER_IP_CAP=1000 \
-  -e MINIO_ENDPOINT=http://host.docker.internal:9000 \
+  -e MINIO_ENDPOINT=http://host.docker.internal:10910 \
   -e MINIO_ROOT_USER=darkwatch_admin -e MINIO_ROOT_PASSWORD="$MINIO_PASSWORD" \
+  -e MINIO_PUBLIC_BASE_URL=http://host.docker.internal:10910/darkwatch-images \
   -e MINIO_BUCKET=darkwatch-images \
-  -e MINIO_PUBLIC_BASE_URL=http://host.docker.internal:9000/darkwatch-images \
   "$IMAGE" bash /work/_regen.sh
 
 echo "==> copying regenerated baselines back into the worktree"

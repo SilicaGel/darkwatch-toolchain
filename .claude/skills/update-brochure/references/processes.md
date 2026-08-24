@@ -4,7 +4,7 @@ Loaded by `update-brochure` once the dispatch decision in SKILL.md has chosen a 
 - `references/framing-guide.md` — screenshot framing rules
 - `references/brochure-server.md` — port-isolated screenshot server setup
 
-Every capture run **must** use the isolated brochure server (see `references/brochure-server.md`). Do not hit ports 5173/3000 directly — a stale process from another worktree may be holding them and serving different state.
+Every capture run **must** use the isolated brochure server (see `references/brochure-server.md`). Do not hit the dev ports (10900/10901) directly — a stale process from another worktree may be holding them and serving different state.
 
 ---
 

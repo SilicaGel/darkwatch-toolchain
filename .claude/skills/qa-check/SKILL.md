@@ -269,7 +269,7 @@ Only attempted if there are playwright-runnable issues.
 
    State in one line what regression the spec would catch. A spec that can only pass — happy-path render, `toBeVisible` with no negative, an assertion on a value the setup guarantees — is verification theater: don't write it, and don't count it as a pass. If you can't make it falsifiable (e.g. needs a `window.__mapSocket` that may not exist), say so and fall back to the existing int/unit coverage rather than shipping a spec that can't really run.
 
-1. **Dev server up AND on the right version?** Probe `http://localhost:5173/` (expect 200). Then capture the displayed `app-version` and compare to `git rev-parse --short HEAD` on the worktree. **If they mismatch the dev server is running pre-merge code** — invoke the `restart-local-dev` skill, then re-probe.
+1. **Dev server up AND on the right version?** Probe `http://localhost:10900/` (expect 200). Then capture the displayed `app-version` and compare to `git rev-parse --short HEAD` on the worktree. **If they mismatch the dev server is running pre-merge code** — invoke the `restart-local-dev` skill, then re-probe.
 2. **Artifact location:** `tests/qa-check/<N>/` (NOT `tests/test-results/qa-check-<N>/` — Playwright clobbers `test-results/` between runs, so any spec or contact sheet you write there disappears on the next run).
 3. **Playwright config:** specs under `tests/qa-check/` aren't discovered by the main `tests/playwright.config.ts` (which has `testDir: "./e2e"`). Use the dedicated `tests/qa-check.config.ts` (committed to the repo):
    ```bash
@@ -355,7 +355,7 @@ Split these two ways before reaching for a contact sheet:
 **Component layout/sizing/spacing/empty-state changes → component-preview harness.** When the issue changed how a single UI component *looks* (not how it *behaves*), drive it through the dev-only harness in `client/src/preview/` rather than flagging vaguely for visual review:
 
 1. Pick the relevant preview key(s) from `client/src/preview/registry.tsx`. If the changed component or state isn't in the catalog, add an entry there (fixture + `render()`), then re-run `npx vitest run src/preview/` so the render-smoke test stays green.
-2. Make sure the worktree's Vite dev server is up and note its port (default `5173`).
+2. Make sure the worktree's Vite dev server is up and note its port (default `10900` — `node scripts/dev-ports.mjs client`).
 3. Hand the user the live URL: `http://localhost:<port>/preview.html?key=<key>` (`/preview.html` with no key lists every entry). **The URL is the confirm channel — pushed screenshots don't reach the user, so don't rely on them.**
 4. Ask the user to confirm or reject before recommending a close. This lands in the **Needs your eyes** section of the report.
 

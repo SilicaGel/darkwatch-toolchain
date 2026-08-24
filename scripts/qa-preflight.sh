@@ -22,7 +22,7 @@
 # WHAT IT CHECKS
 #   1. the working tree is a git checkout, and its HEAD is not behind origin/main
 #   2. no uncommitted changes to TRACKED files (untracked scratch is fine)
-#   3. the client (:5173) and server (:3000) are actually answering
+#   3. the client and server (see scripts/dev-ports.mjs) are actually answering
 #   4. the running server's commit == this checkout's HEAD
 #   5. the running server's checkout root == this checkout
 #
@@ -41,8 +41,13 @@
 
 set -uo pipefail
 
-CLIENT_URL="${QA_CLIENT_URL:-http://localhost:5173}"
-SERVER_URL="${QA_SERVER_URL:-http://localhost:3000}"
+# #2538 — ports come from the one resolver, so this check and the thing it is
+# checking cannot disagree about where dev lives.
+DEV_PORTS_CLI="$(dirname "$0")/dev-ports.mjs"
+CLIENT_PORT="$(node "$DEV_PORTS_CLI" client)"
+SERVER_PORT="$(node "$DEV_PORTS_CLI" server)"
+CLIENT_URL="${QA_CLIENT_URL:-http://localhost:$CLIENT_PORT}"
+SERVER_URL="${QA_SERVER_URL:-http://localhost:$SERVER_PORT}"
 
 FAILURES=0
 WARNINGS=0
@@ -144,7 +149,7 @@ fi
 
 # ── 4/5 · who owns the ports ────────────────────────────────────────────────
 printf '\n\033[1mPort owners\033[0m\n'
-for PORT in 5173 3000; do
+for PORT in "$CLIENT_PORT" "$SERVER_PORT"; do
   OWNER="$(lsof -nP -iTCP:"$PORT" -sTCP:LISTEN 2>/dev/null | awk 'NR==2 {print $2}')"
   if [ -n "$OWNER" ]; then
     OWNER_CWD="$(lsof -a -p "$OWNER" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p' | head -1)"

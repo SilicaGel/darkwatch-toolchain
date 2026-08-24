@@ -42,8 +42,12 @@ REPO_ROOT="$(pwd)"
 # the local e2e lane's database. #2008 proposed a new `darkwatch_qa`; reusing
 # the existing one avoids a fourth database that would mean the same thing.
 QA_DB="${QA_DB_NAME:-darkwatch_e2e}"
-QA_SERVER_PORT="${QA_SERVER_PORT:-3001}"
-QA_CLIENT_PORT="${QA_CLIENT_PORT:-5174}"
+# #2538 — the numbers come from scripts/dev-ports.mjs rather than being spelled
+# here, so this lane and the dev lane cannot drift onto each other's ports. The
+# resolver honours QA_SERVER_PORT / QA_CLIENT_PORT itself, so an explicit
+# override still wins and the documented usage above is unchanged.
+QA_SERVER_PORT="$(node "$REPO_ROOT/scripts/dev-ports.mjs" qaServer)"
+QA_CLIENT_PORT="$(node "$REPO_ROOT/scripts/dev-ports.mjs" qaClient)"
 CONTAINER="darkwatch-maria"
 
 RESET=0
@@ -175,7 +179,7 @@ CLIENT_PID=$!
 
 wait_for_http "http://localhost:$QA_CLIENT_PORT/" "vite" '^200$'
 
-# Prove the proxy actually reaches OUR server rather than a stray one on :3000 —
+# Prove the proxy actually reaches OUR server rather than the dev one —
 # the failure this whole script exists to prevent. A dev server would answer
 # too, so compare against the port we started.
 proxied="$(curl -s -o /dev/null -w '%{http_code}' "http://localhost:$QA_CLIENT_PORT/api/auth/me" || true)"

@@ -98,7 +98,7 @@ Check `package.json` scripts in the root, `client/`, and `server/`, plus `.gitea
 - **Dimension**: perf (bundle)
 
 ### `lighthouse`
-- **Run**: `npx lighthouse http://localhost:5173 --view` against a running dev or prod build
+- **Run**: `npx lighthouse http://localhost:10900 --view` against a running dev or prod build
 - **Look at**: Performance and Best Practices tabs
 - **Dimension**: perf
 
@@ -111,7 +111,7 @@ Check `package.json` scripts in the root, `client/`, and `server/`, plus `.gitea
 
 ### `autocannon` / `k6`
 - Load-testing. Recommend before scaling up the first real user load.
-- **Run**: `npx autocannon -c 50 -d 30 http://localhost:3000/api/...`
+- **Run**: `npx autocannon -c 50 -d 30 http://localhost:10901/api/...`
 
 ---
 

@@ -15,8 +15,13 @@ import { mkdtempSync, writeFileSync, chmodSync, readFileSync, existsSync, rmSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { resolveDevPorts } from "./dev-ports.mjs";
 
 const SCRIPT = fileURLToPath(new URL("./qa-stack.sh", import.meta.url));
+
+// #2538 — the lane's ports are derived, not literal; assert against the same
+// resolver the script reads so this test cannot pin a stale number.
+const QA_PORTS = resolveDevPorts();
 
 /**
  * Run the script with fakes on PATH.
@@ -91,18 +96,24 @@ describe("qa-stack.sh (#2008)", () => {
   test("refuses to start when the server port is already held", () => {
     // Reusing a port is how a run looks isolated while writing to `darkwatch`:
     // Playwright's reuseExistingServer would adopt whatever is already there.
-    const r = runScript(["--", "true"], { holdPort: "3001" });
+    const r = runScript(["--", "true"], { holdPort: String(QA_PORTS.qaServer) });
     assert.notEqual(r.status, 0);
-    assert.match(r.stderr, /port 3001 \(server\) is already in use by pid 4242/);
+    assert.match(
+      r.stderr,
+      new RegExp(`port ${QA_PORTS.qaServer} \\(server\\) is already in use by pid 4242`),
+    );
     assert.match(r.stderr, /QA_SERVER_PORT=<free port>/);
   });
 
   test("names the client port when that is the one held", () => {
     // The server port is free in this run, so reaching this refusal at all
     // proves the loop checks both ports and labels each one correctly.
-    const r = runScript(["--", "true"], { holdPort: "5174" });
+    const r = runScript(["--", "true"], { holdPort: String(QA_PORTS.qaClient) });
     assert.notEqual(r.status, 0);
-    assert.match(r.stderr, /port 5174 \(client\) is already in use by pid 4242/);
+    assert.match(
+      r.stderr,
+      new RegExp(`port ${QA_PORTS.qaClient} \\(client\\) is already in use by pid 4242`),
+    );
     assert.match(r.stderr, /QA_CLIENT_PORT=<free port>/);
   });
 
@@ -124,7 +135,12 @@ describe("qa-stack.sh (#2008)", () => {
     assert.doesNotMatch(r.stderr, /does not exist yet/);
     // It got past every guard and reported ready, without starting a thing.
     assert.equal(r.status, 0);
-    assert.match(r.stdout, /ready: 'darkwatch_e2e' exists, ports 3001\/5174 are free/);
+    assert.match(
+      r.stdout,
+      new RegExp(
+        `ready: 'darkwatch_e2e' exists, ports ${QA_PORTS.qaServer}/${QA_PORTS.qaClient} are free`,
+      ),
+    );
     assert.match(r.calls, /docker exec darkwatch-maria/);
   });
 });

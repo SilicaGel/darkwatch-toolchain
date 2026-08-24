@@ -590,8 +590,17 @@ jobs:
         env:
           API_PROXY_URL: "http://localhost:3001"
           NODE_OPTIONS: "--max-old-space-size=512"
+          # #2538 — the port is PINNED here on purpose. It used to be supplied by
+          # OMISSION: a bare `vite preview` took its port from
+          # client/vite.config.ts, so CI silently inherited local dev's default
+          # and this wait loop only worked because the two happened to agree.
+          # Moving local dev into the 10900 block would have reddened this job
+          # with "Vite preview server never became ready". The number is
+          # deliberately UNCHANGED — CI binds exactly what it bound before; it
+          # just no longer borrows the value from a file dev is free to change.
+          # --strictPort so a busy port fails loudly instead of falling forward.
         run: |
-          cd client && ./node_modules/.bin/vite preview >/tmp/vite.log 2>&1 &
+          cd client && ./node_modules/.bin/vite preview --port 5173 --strictPort >/tmp/vite.log 2>&1 &
           echo $! > /tmp/vite.pid
           for i in $(seq 1 30); do
             curl -s -o /dev/null http://localhost:5173 && break || true
@@ -646,6 +655,11 @@ jobs:
         if: ${{ needs.detect.outputs.should-run != 'false' }}
         env:
           E2E_SERVER_URL: "http://localhost:3001"
+          # #2538 — pinned for the same reason as the Vite port above: this
+          # was previously supplied by OMISSION from tests/playwright.config.ts,
+          # so CI's target silently tracked local dev's default. Same number as
+          # before; it just no longer moves when dev's does.
+          E2E_BASE_URL: "http://localhost:5173"
           TEST_HOOK_SECRET: e2e-test-hook-secret
           PLAYWRIGHT_BROWSERS_PATH: /ms-playwright
           # #1581 — tests/helpers/db.ts (used only by 1077-hidden-monsters.spec.ts
