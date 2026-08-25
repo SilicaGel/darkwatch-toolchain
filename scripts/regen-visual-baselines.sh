@@ -7,7 +7,7 @@
 # Usage (from a worktree, with `darkwatch-maria` + `darkwatch-minio` up):
 #   scripts/regen-visual-baselines.sh                 # regenerate all baselines
 #   scripts/regen-visual-baselines.sh --grep laser    # only tests matching /laser/
-#   scripts/regen-visual-baselines.sh --image forge.example.com/aaron/darkwatch-ci-playwright:1.61.1
+#   scripts/regen-visual-baselines.sh --image forge.example.com/aaron/darkwatch-ci-playwright:1.62.1
 #   scripts/regen-visual-baselines.sh --spec e2e/1736-wt-visual.spec.ts   # a different visual spec
 #     (--spec is the parameterization the 315/1736 WT visual spec headers call
 #     for: snapshots land in tests/<spec>-snapshots, default unchanged)
@@ -21,7 +21,7 @@
 # with, reintroducing exactly the kind of lying baseline #1535 fixed.
 set -euo pipefail
 
-IMAGE="forge.example.com/aaron/darkwatch-ci-playwright:1.61.1"
+IMAGE="forge.example.com/aaron/darkwatch-ci-playwright:1.62.1"
 GREP=""
 SPEC="e2e/visual-regression.spec.ts"
 while [ $# -gt 0 ]; do
