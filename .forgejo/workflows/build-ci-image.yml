@@ -1,30 +1,65 @@
 name: Build CI Playwright image
 
-# Rebuilds the prebuilt Playwright/Node image (#969) that the Playwright
-# pipelines (smoke / smoke-walk / lighthouse / e2e) run inside, and pushes it to
-# the Forgejo package registry. The image bakes Node 22 + Chromium + Playwright
-# system deps, so those jobs skip apt install-deps, the browser download, AND
-# actions/setup-node.
+# Builds the prebuilt Playwright/Node image (#969) that the browser pipelines
+# run inside, and pushes it to the Forgejo package registry. The image bakes
+# Node 22 + Chromium + Playwright system deps, so those jobs skip apt
+# install-deps, the browser download, AND actions/setup-node.
 #
-# WHY SSH-TO-PI (not a plain `docker push` on the runner): forge.example.com
-# is proxied through Cloudflare, which caps request bodies (~100MB) — a 2.4GB
-# image push is rejected with HTTP 413. So we build on the Pi and push to
-# localhost:3000 (Forgejo's direct HTTP port), bypassing Cloudflare entirely.
-# Pulls in the consuming pipelines go via forge.example.com (Cloudflare
-# serves downloads fine — the 413 is upload-only). Same pattern as deploy.yml.
+# #1113 — THIS WORKFLOW IS NO LONGER THE PRIMARY PATH. The five browser
+# workflows each carry their own `ensure-image` job running the same script, so
+# a Playwright bump builds the image as a PREREQUISITE of the jobs that need it
+# rather than as something someone remembers to dispatch first. That closes the
+# `manifest unknown` failure reproduced on #2571.
 #
-# The image is PINNED to the @playwright/test version in tests/package-lock.json
-# (derived below). The consuming workflows reference
-# `darkwatch-ci-playwright:<that version>`, so the two must move together —
-# Renovate (#414) bumps the lockfile AND the image tag in the same PR via a
-# custom manager; this workflow then rebuilds on the lockfile change.
+# What remains here is a manual handle plus a post-merge safety net. Both are
+# now idempotent: the script builds only when the registry has no usable copy,
+# so a push-to-main run on an already-built version is a single registry GET.
+# That idempotence also closes a trap the old unconditional push left open —
+# a post-merge rebuild used to overwrite a hand-stitched multi-arch manifest
+# with whatever single architecture the Pi produced.
 #
-# Required secrets (DEPLOY_* already exist for deploy.yml):
-#   DEPLOY_SSH_KEY / DEPLOY_HOST / DEPLOY_USER / DEPLOY_KNOWN_HOSTS
-#   PACKAGES_TOKEN — a Forgejo token with package read/write (docker login)
+# #1113 — `runs-on: pi`, was `ubuntu-latest`, and the SSH-to-Pi dance is GONE.
+# Two reasons, and the second was a live bug:
+#   1. The push must reach the registry without Cloudflare, whose ~100MB body
+#      cap 413s a multi-hundred-MB layer push. Running ON the Pi means pushing
+#      to localhost:3000 directly. (Pulls via forge.example.com are fine —
+#      the cap is upload-only.)
+#   2. This job was `runs-on: ubuntu-latest` while SSHing to DEPLOY_HOST, which
+#      resolves ONLY on m4-runner — the same defect #2572 fixed for the badge
+#      jobs. Its last 12 runs all landed on m4 and passed, but the newest was
+#      2026-06-29 and Global-Falcon-01/02 joined the `ubuntu-latest` pool on
+#      2026-07-25/26. It had never run since, so the next run had roughly a
+#      2-in-3 chance of dying at `Could not resolve hostname` — including the
+#      manual build someone would have reached for to unblock a bump.
+# Running on the Pi removes the hop, the DEPLOY_* secrets, and both problems.
+#
+# Multi-arch is not optional: `ubuntu-latest` spans m4-runner (arm64) and
+# Global-Falcon-01/02 (amd64), so a single-arch image pulls fine on one runner and
+# dies with "no matching manifest" on the others. pi4 is aarch64, so the amd64
+# leg is emulated via binfmt (measured 17m52s on its own, 2026-08-24).
+#
+# Required secret: PACKAGES_TOKEN — a Forgejo token with package read+write.
 
 on:
+  # #1113 review — `workflow_call:` REMOVED. It was in the original ticket's
+  # design, but the delivered shape is a shared SCRIPT called by a plain
+  # `ensure-image` job in each consumer (the upload-badges.sh idiom), so nothing
+  # calls this as a reusable workflow. Leaving the trigger would be dead surface
+  # inviting someone to wire the nested-workflow_call design this deliberately
+  # avoided — Forgejo's callee semantics (job namespacing, `if:` ignored on a
+  # `uses:` job, a callee that cannot survive a skipped need) are exactly what
+  # made that design a trap. See e2e-full.yml's ensure-image comment.
   workflow_dispatch:
+    inputs:
+      force:
+        # #1113 review — WITHOUT THIS THERE IS NO FORCED-REBUILD PATH. The script
+        # no-ops whenever the tag exists with both arches, so a Dockerfile-only
+        # change (no Playwright bump) would silently build nothing and merge
+        # having never run. That bites first if #2575's cold build surfaces a
+        # Dockerfile problem.
+        description: "Rebuild even if the image already exists for every architecture"
+        type: boolean
+        default: false
   push:
     branches: [main]
     paths:
@@ -34,66 +69,36 @@ on:
 
 jobs:
   build-and-push:
-    runs-on: ubuntu-latest
-    timeout-minutes: 45 # #1263 — docker build of 2.4GB image on Pi (SSH); ~20-30 min typical
+    # #1113 review — CONTENTION, stated rather than discovered later. The `pi`
+    # runner has `capacity: 1` ("never two concurrent Pi jobs" — its own config
+    # comment), and deploy.yml:60 shares that single slot. A cold multi-arch
+    # build occupies it for 30-45 minutes, so a deploy queued behind one waits
+    # that long, and vice versa. Accepted because a cold build happens only on a
+    # Playwright bump — a handful of times a year — while the warm path measured
+    # 8s on the PR run. The serialisation is also what makes concurrent
+    # ensure-image jobs safe without a lock.
+    runs-on: pi
+    # Cold path is a native arm64 build plus an emulated amd64 leg contending on
+    # 4 cores (~30-45 min). The warm path — an already-built version — is one
+    # registry GET. Was 45, sized for a single-arch native build.
+    timeout-minutes: 75
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          filter: blob:none
+          # Root-anchored, cone mode off. The script needs the files it sweeps
+          # for version agreement, the lockfile it derives the version from, the
+          # Dockerfile it builds, and itself.
+          sparse-checkout: |
+            /.forgejo/
+            /scripts/ci/
+            /scripts/regen-visual-baselines.sh
+            /tests/package-lock.json
+          sparse-checkout-cone-mode: false
 
-      - name: Install jq + openssh-client
-        # The runner's base image lacks both; jq reads the Playwright version
-        # from the lockfile, openssh-client ships the Dockerfile to the Pi.
-        run: |
-          apt-get update -qq
-          apt-get install -y -qq jq openssh-client
-
-      - name: Derive Playwright version from the lockfile
-        id: ver
-        run: |
-          VER=$(jq -r '.packages["node_modules/@playwright/test"].version' tests/package-lock.json)
-          if [ -z "$VER" ] || [ "$VER" = "null" ]; then
-            echo "Could not read @playwright/test version from tests/package-lock.json" >&2
-            exit 1
-          fi
-          echo "version=$VER" >> "$GITHUB_OUTPUT"
-          echo "Building darkwatch-ci-playwright:$VER"
-
-      - name: Set up SSH (private key + known_hosts)
+      # Host executor: system Node 22 — no setup-node, no apt-get (see
+      # deploy.yml, which has run on this runner since 2026-07-06).
+      - name: Ensure the CI Playwright image exists for this tree
         env:
-          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
-          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
-        run: |
-          mkdir -p ~/.ssh && chmod 700 ~/.ssh
-          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/id_ed25519
-          chmod 600 ~/.ssh/id_ed25519
-          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
-          chmod 644 ~/.ssh/known_hosts
-          ssh-keygen -y -f ~/.ssh/id_ed25519 >/dev/null
-
-      - name: Ship the Dockerfile to the Pi
-        env:
-          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
-          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
-        run: |
-          ssh -i ~/.ssh/id_ed25519 "${DEPLOY_USER}@${DEPLOY_HOST}" 'rm -rf /tmp/ci-image && mkdir -p /tmp/ci-image'
-          scp -i ~/.ssh/id_ed25519 .forgejo/ci-image/Dockerfile \
-            "${DEPLOY_USER}@${DEPLOY_HOST}:/tmp/ci-image/Dockerfile"
-
-      - name: Build + push on the Pi (localhost:3000 — bypasses Cloudflare)
-        env:
-          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
-          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
           PACKAGES_TOKEN: ${{ secrets.PACKAGES_TOKEN }}
-          VER: ${{ steps.ver.outputs.version }}
-        run: |
-          ssh -i ~/.ssh/id_ed25519 "${DEPLOY_USER}@${DEPLOY_HOST}" \
-            "PACKAGES_TOKEN='${PACKAGES_TOKEN}' VER='${VER}' bash -s" <<'EOSSH'
-          set -euo pipefail
-          IMAGE=localhost:3000/aaron/darkwatch-ci-playwright
-          echo "$PACKAGES_TOKEN" | docker login localhost:3000 -u aaron --password-stdin
-          cd /tmp/ci-image
-          docker build --build-arg PLAYWRIGHT_VERSION="$VER" \
-            -t "$IMAGE:$VER" -t "$IMAGE:latest" -f Dockerfile .
-          docker push "$IMAGE:$VER"
-          docker push "$IMAGE:latest"
-          docker logout localhost:3000
-          EOSSH
+        run: node scripts/ci/ensure-ci-image.mjs ${{ inputs.force && '--force' || '' }}

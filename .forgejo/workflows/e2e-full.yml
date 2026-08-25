@@ -170,8 +170,65 @@ jobs:
           BASE_REF: ${{ github.event.pull_request.base.ref }}
         run: node scripts/ci/e2e-optout.mjs
 
+  # #1113 — LAZY CI-IMAGE PREREQUISITE.
+  #
+  # The suite runs inside darkwatch-ci-playwright:<@playwright/test ver>, but
+  # build-ci-image.yml only fired on push-to-main — so a PR that bumped
+  # Playwright referenced a tag nobody had built and every shard died at
+  # container-pull with `manifest unknown` (reproduced on #2571, 2026-08-24).
+  # This job makes the image a PREREQUISITE instead of something someone
+  # remembers to dispatch first.
+  #
+  # `runs-on: pi`: the build pushes to the Forgejo registry, and Cloudflare's
+  # ~100MB body cap 413s a layer push through the public host — building on the
+  # Pi lets it push to localhost:3000 instead. The pi runner's capacity of 1 is
+  # load-bearing here: it serialises concurrent ensure-image jobs, so the first
+  # builds and the rest queue, find the tag present, and no-op. No duplicate
+  # builds and no lock to write.
+  #
+  # Deliberately UNCONDITIONAL: `e2e-full` runs on every PR, so this must too.
+  # The already-present path is one registry GET (~seconds), not a build.
+  ensure-image:
+    runs-on: pi
+    # Sized for the cold path: a multi-arch build is native arm64 plus an
+    # emulated amd64 leg, measured at 17m52s on its own (2026-08-24). The warm
+    # path — every run that is not a Playwright bump — is seconds.
+    timeout-minutes: 75
+    steps:
+      # #1113 review round 2 — THE TOOL, from the ref this workflow runs on.
+      # NOT `inputs.ref`: every existing release tag predates this script, so a
+      # single tag-pinned checkout dies with MODULE_NOT_FOUND (proven on pi4,
+      # task 22365). The decider must come from the running workflow; the tree
+      # being decided about comes from the checkout below.
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          filter: blob:none
+          sparse-checkout: |
+            /scripts/ci/
+          sparse-checkout-cone-mode: false
+
+      # THE SUBJECT — the tree actually under test. nightly-deploy.yml pins a
+      # release tag here (#2409), and this is the tree whose lockfile and image
+      # tags must agree. An empty `ref` means "this event's default", so the
+      # pull_request / cron paths read their own checkout, unchanged.
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          ref: ${{ inputs.ref }}
+          path: _subject
+          filter: blob:none
+          sparse-checkout: |
+            /.forgejo/
+            /scripts/regen-visual-baselines.sh
+            /tests/package-lock.json
+          sparse-checkout-cone-mode: false
+
+      - name: Ensure the CI Playwright image exists for this tree
+        env:
+          PACKAGES_TOKEN: ${{ secrets.PACKAGES_TOKEN }}
+        run: node scripts/ci/ensure-ci-image.mjs --tree _subject
+
   e2e-full:
-    needs: [detect]
+    needs: [detect, ensure-image]
     # #2300 phase 3 (#2533) — the `run-e2e-full` label gate is GONE. This suite
     # now runs on EVERY pull request, which is the whole point of the umbrella:
     # it removes the tier split that produced #1780 / #2295 / #2298 instead of
@@ -240,6 +297,27 @@ jobs:
     # cancelled run (which cannot merge), never because of what the diff
     # touched. It is what keeps this job alive when `detect` DIES rather than
     # merely answering — the #2528 fail-open.
+    #
+    # #1113 — `ensure-image` is in `needs` for ORDERING ONLY; this `if:` is
+    # deliberately left as a bare `!cancelled()`.
+    #
+    # The tempting version is `!cancelled() && needs.ensure-image.result ==
+    # 'success'`, so a failed prerequisite gives the clear error instead of the
+    # confusing `manifest unknown`. It is a trap. Under workflow_call — the
+    # nightly-deploy path — Forgejo NAMESPACES the callee's jobs (`needs` keys
+    # read `e2e-full.ensure-image`, see #2011 below), so `needs.ensure-image`
+    # resolves to null, `null == 'success'` is false, and this suite would SKIP
+    # on every nightly. A skipped callee job then folds into the caller's
+    # aggregate as failure (#2368/#2351) and blocks the deploy.
+    #
+    # `!contains(needs.*.result, 'failure')` survives the namespacing but is
+    # also wrong here: it would catch `detect` failing and undo #2528's
+    # fail-open, which is the whole reason this `if:` exists.
+    #
+    # So a failed ensure-image lets the shards run and fail at container-pull.
+    # That is noisier, not less diagnosable: ensure-image reports first, names
+    # the offending file and line, and sits directly above the shards in the
+    # same run.
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     # #2300 — was 75 for all three shards plus two Vite restarts in ONE job.

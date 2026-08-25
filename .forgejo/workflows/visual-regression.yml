@@ -172,9 +172,47 @@ jobs:
             echo "no visual-relevant change and no run-visual label → skipping visual job"
           fi
 
-  visual:
+  # #1113 — lazy CI-image prerequisite. Full rationale in e2e-full.yml's copy;
+  # in short, this job builds darkwatch-ci-playwright:<ver> when the registry
+  # has no usable (multi-arch) copy, so a Playwright bump can't hand `visual` a
+  # tag nobody built.
+  #
+  # It carries `detect`'s condition VERBATIM rather than running unconditionally.
+  # `visual` skips on most PRs (the path filter), and an unconditional job here
+  # would take the single-capacity pi slot on every PR to do nothing. Because
+  # the two conditions are identical, they skip and run together — so `visual`
+  # never inherits a skipped need it didn't already expect.
+  ensure-image:
     needs: detect
     if: needs.detect.outputs.should-run == 'true'
+    runs-on: pi
+    timeout-minutes: 75 # cold multi-arch build; the warm path is seconds
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          filter: blob:none
+          sparse-checkout: |
+            /.forgejo/
+            /scripts/ci/
+            /scripts/regen-visual-baselines.sh
+            /tests/package-lock.json
+          sparse-checkout-cone-mode: false
+
+      - name: Ensure the CI Playwright image exists for this tree
+        env:
+          PACKAGES_TOKEN: ${{ secrets.PACKAGES_TOKEN }}
+        run: node scripts/ci/ensure-ci-image.mjs
+
+  visual:
+    needs: [detect, ensure-image]
+    # #1113 blocker fix — `!cancelled()` is required, not decorative. Without a
+    # status function a FAILED `ensure-image` skips this job, and a skipped
+    # Forgejo job posts a `success` commit status (#1954) — so a registry 5xx or
+    # a half-formed bump would turn the visual gate on a CSS PR into a green
+    # check for a job that never ran. With it, the job runs and fails visibly at
+    # container-pull instead. (The workflow_call namespacing trap documented in
+    # e2e-full.yml applies to `needs.<job>.result`, not to a status function.)
+    if: ${{ !cancelled() && needs.detect.outputs.should-run == 'true' }}
     runs-on: ubuntu-latest
     # #1936 raised this 30 → 40 to fit the Classic spec's full 13-theme sweep
     # (312 shots, 13.2 min of Playwright) plus the WT spec's 1.6 min, on top of

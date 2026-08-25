@@ -29,7 +29,47 @@ on:
         default: ""
 
 jobs:
+  # #1113 — lazy CI-image prerequisite. Full rationale in e2e-full.yml's copy.
+  # Unconditional: this workflow only runs on workflow_call / workflow_dispatch,
+  # and whenever it runs at all it needs the image.
+  ensure-image:
+    runs-on: pi
+    timeout-minutes: 75 # cold multi-arch build; the warm path is seconds
+    steps:
+      # #1113 review round 2 — THE TOOL, from the ref this workflow runs on.
+      # NOT `inputs.ref`: every existing release tag predates this script, so a
+      # single tag-pinned checkout dies with MODULE_NOT_FOUND (proven on pi4,
+      # task 22365). The decider must come from the running workflow; the tree
+      # being decided about comes from the checkout below.
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          filter: blob:none
+          sparse-checkout: |
+            /scripts/ci/
+          sparse-checkout-cone-mode: false
+
+      # THE SUBJECT — the tree actually under test. nightly-deploy.yml pins a
+      # release tag here (#2409), and this is the tree whose lockfile and image
+      # tags must agree. An empty `ref` means "this event's default", so the
+      # pull_request / cron paths read their own checkout, unchanged.
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          ref: ${{ inputs.ref }}
+          path: _subject
+          filter: blob:none
+          sparse-checkout: |
+            /.forgejo/
+            /scripts/regen-visual-baselines.sh
+            /tests/package-lock.json
+          sparse-checkout-cone-mode: false
+
+      - name: Ensure the CI Playwright image exists for this tree
+        env:
+          PACKAGES_TOKEN: ${{ secrets.PACKAGES_TOKEN }}
+        run: node scripts/ci/ensure-ci-image.mjs --tree _subject
+
   smoke-walk:
+    needs: ensure-image
     runs-on: ubuntu-latest
     timeout-minutes: 30 # #1263 — build + DB seed + exploratory Playwright crawler; ~15-20 min typical
     # #969 — prebuilt CI image (Node 22 + Chromium + Playwright deps baked).

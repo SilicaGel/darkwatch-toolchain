@@ -37,9 +37,34 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  lighthouse-authenticated:
-    # #2309 — normal-job `if:` (Forgejo ignores it on a `uses:` job, #1623).
+  # #1113 — lazy CI-image prerequisite. Full rationale in e2e-full.yml's copy.
+  # Carries this workflow's label gate verbatim; see lighthouse.yml.
+  ensure-image:
     if: ${{ github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'run-lighthouse') }}
+    runs-on: pi
+    timeout-minutes: 75 # cold multi-arch build; the warm path is seconds
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          filter: blob:none
+          sparse-checkout: |
+            /.forgejo/
+            /scripts/ci/
+            /scripts/regen-visual-baselines.sh
+            /tests/package-lock.json
+          sparse-checkout-cone-mode: false
+
+      - name: Ensure the CI Playwright image exists for this tree
+        env:
+          PACKAGES_TOKEN: ${{ secrets.PACKAGES_TOKEN }}
+        run: node scripts/ci/ensure-ci-image.mjs
+
+  lighthouse-authenticated:
+    needs: ensure-image
+    # #2309 — normal-job `if:` (Forgejo ignores it on a `uses:` job, #1623).
+    # #1113 blocker fix — see visual-regression.yml: without `!cancelled()` a
+    # FAILED ensure-image skips this job and Forgejo posts `success` (#1954).
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'run-lighthouse')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 25 # #1263 — build + DB seed + full server stack + lhci; ~12-18 min typical
     container:
