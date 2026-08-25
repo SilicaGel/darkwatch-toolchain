@@ -48,6 +48,33 @@ It may already be fixed — by a sibling issue, a systemic fix, or a PR that clo
 
 > **#1851** was fixed by #1827, both halves: the repository-boundary normalize *and* the render guard. Three minutes to confirm, versus a full implementation cycle.
 
+## 5. Is this the WHOLE cause, or just the first one you'd hit?
+
+Checks 1–4 all hunt for a diagnosis that is **wrong**. There is a second failure mode
+none of them catch: a diagnosis that is **right but partial**. It passes every check
+above, and a partial fix to a correct diagnosis *reads as done*.
+
+> **#1949** was filed as: a spec is single-use per database because `afterEach` resets HP
+> but leaves the `hp_change` rows, so run 2 dies on strict mode. All correct, and it
+> reproduced exactly. It was also half. From a genuinely clean database the first run
+> *still* failed — at the Undo click, not the locator: a `modal-backdrop` from the
+> session-auto-ended modal intercepts every click in that block. Had only the filed cause
+> been implemented, the ticket's own acceptance ("passes twice against the same database")
+> would still have failed, while the diff looked like a faithful, complete fix.
+
+Two habits that expose it:
+
+- **Reproduce from the true clean precondition**, not from the state the ticket
+  describes. First-error-wins hides its siblings — clearing the sediment is what exposed
+  the second cause above.
+- **Re-read the acceptance criterion after you think you have the fix, and check it
+  literally.** The gap between "the filed cause is addressed" and "the stated acceptance
+  passes" is exactly where partial fixes live.
+
+The reporter observed a *sufficient* cause, not the *complete* set. That is rational —
+they stopped debugging when they found one that explained the symptom — and it leaves the
+rest invisible.
+
 ## When the checks say the issue is wrong
 
 **Don't silently implement something different.** Say so, then deliver:
