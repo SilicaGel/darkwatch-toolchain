@@ -16,9 +16,42 @@
 # whole `mc cp` and would take the other badges down with it.
 set -euo pipefail
 
-SRC_DIR="${1:?usage: upload-badges.sh <dir-of-json-files>}"
-: "${DEPLOY_USER:?DEPLOY_USER is required}"
-: "${DEPLOY_HOST:?DEPLOY_HOST is required}"
+# #2572 — FAIL LOUDLY EVEN WHEN THE CALLER TOLERATES FAILURE.
+#
+# ci.yml's `badges` sets `continue-on-error: true` on its upload step, which is
+# a deliberate and correct call: a stale badge is not worth failing CI over.
+# What it also did was make the failure INVISIBLE. `DEPLOY_HOST` resolves only
+# on m4-runner, `runs-on` round-robined across three runners, and so ~83% of
+# uploads silently did nothing while the job reported green — the coverage
+# badges went 8 days and ~50 merges without moving before anyone noticed.
+#
+# Tolerating a failure and hiding it are different things. This banner is the
+# difference: `badges` still goes green, but the log says why nothing shipped.
+# Same class as the "a skipped job reports success" trap (#1954/#2010/#2011).
+on_failure() {
+  local code=$?
+  echo "::warning title=Badge upload failed::badges were NOT updated (exit ${code}) — see the banner below"
+  echo "==================================================================="
+  echo " BADGE UPLOAD FAILED — exit ${code}"
+  echo " Nothing was written to MinIO. The shields.io endpoints still serve"
+  echo " whatever the last SUCCESSFUL run left there, which may be very old."
+  echo " If the error above is 'Could not resolve hostname', this job landed"
+  echo " on a runner that cannot reach DEPLOY_HOST — see #2572."
+  echo "==================================================================="
+  exit "$code"
+}
+trap on_failure ERR
+
+# #2572 — these are `|| { …; false; }` and NOT `${VAR:?}` on purpose.
+# A `${VAR:?msg}` expansion aborts the shell WITHOUT running the ERR trap, so a
+# missing/renamed secret printed one bare line and no banner — under ci.yml's
+# `continue-on-error: true` that is exactly the invisibility this file exists to
+# close, just with a narrower trigger (secret rotation rather than a bad runner).
+# `false` trips ERR, so every failure path reaches on_failure() below.
+SRC_DIR="${1:-}"
+[ -n "$SRC_DIR" ] || { echo "usage: upload-badges.sh <dir-of-json-files>"; false; }
+[ -n "${DEPLOY_USER:-}" ] || { echo "DEPLOY_USER is required (secret missing or renamed)"; false; }
+[ -n "${DEPLOY_HOST:-}" ] || { echo "DEPLOY_HOST is required (secret missing or renamed)"; false; }
 
 # #2533 — a UNIQUE remote staging dir per invocation. This used to be a fixed
 # `~/tmp/badges` with an `rm -f *.json` before the copy, which was safe while

@@ -545,18 +545,59 @@ jobs:
     secrets: inherit
 
   badges:
-    runs-on: ubuntu-latest
+    # #2572 — PINNED TO `pi`, was `ubuntu-latest`.
+    #
+    # This job ssh's to DEPLOY_HOST, which resolves ONLY on m4-runner.
+    # `ubuntu-latest` round-robins across m4-runner / Global-Falcon-01 /
+    # Global-Falcon-02, so the upload was a coin flip: 130 of 157 runs since
+    # 2026-08-01 landed on a Falcon box and every one of those failed to resolve.
+    # `continue-on-error` on the upload step (correctly) kept CI green, so the
+    # miss was invisible — client/server coverage badges sat unchanged for 8
+    # days and ~50 merges. deploy.yml already solves this with `runs-on: pi`;
+    # this job simply never got the same treatment.
+    #
+    # Capacity checked before pinning rather than assumed. Note the binding
+    # constraint is NOT utilisation — the pi runner is `capacity: 1` ("never two
+    # concurrent Pi jobs — 3.8 GB RAM, prod-resident"), so this is a ONE-SLOT
+    # QUEUE now shared by deploy, deploy-1, badge and badges. What makes that
+    # fine is job LENGTH, not headroom: measured on pi4-host, `deploy` averages
+    # 4.5m and queues 0.02m, and `badge` runs in 0.13m. Nothing here holds the
+    # slot long enough to matter.
+    #
+    # And `timeout-minutes` is safe against queueing, which was worth proving
+    # rather than assuming: the clock starts at PICKUP, not at queue entry —
+    # deploy-1 has sat 500 minutes between `created` and `started` and still
+    # completed inside its 45m budget. So the 10m below is 10m of running.
+    runs-on: pi
     timeout-minutes: 10 # #1263 — SSH + badge JSON gen + MinIO upload; ~2-5 min typical
     needs: [tree-gate, lint-typecheck, test]
     if: always() && github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
-
-      - name: Setup Node.js
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        # #2572 — sparse. This job used to take a full checkout to run one
+        # script and read one file. That matters more now it runs ON the Pi,
+        # which is also serving every other job's checkout at that moment.
+        # `scripts/` for app-version.mjs, `docs/CHANGELOG.md` because that is
+        # the version it parses. Cone mode is OFF because cone mode addresses
+        # DIRECTORIES only and would drag all 12MB of docs/ in for one 1.1MB
+        # file.
         with:
-          node-version: "22"
+          filter: blob:none
+          # Patterns are gitignore-syntax and ROOT-ANCHORED on purpose: bare
+          # `scripts` matches at any depth and drags in server/ and tests/ for
+          # their own scripts dirs. Verified on a real clone — the anchored pair
+          # checks out 159 files of ~3.1k tracked, and `node
+          # scripts/app-version.mjs` reads the right version from them.
+          sparse-checkout: |
+            /scripts/
+            /docs/CHANGELOG.md
+          sparse-checkout-cone-mode: false
 
+      # #2572 — `actions/setup-node` REMOVED with the move to `runs-on: pi`.
+      # The pi runner is a HOST executor with system Node 22 (see deploy.yml's
+      # "Host executor: system Node 22 — no setup-node, no apt-get"), so
+      # setup-node would download and install a second arm64 toolchain to do
+      # nothing the host cannot already do.
       - name: Download coverage summaries
         # Restores server/coverage/coverage-summary.json + client/coverage/...
         # at their original paths. continue-on-error: a failed `test` job may
@@ -608,6 +649,16 @@ jobs:
           # assignment left the badge reading undefined → "v0.0.0" (#1046 regression).
           export BADGE_VERSION="$(node scripts/app-version.mjs)"
           echo "badge version: ${BADGE_VERSION}"
+          # #2572 — refuse to publish a version badge we know is wrong.
+          # app-version.mjs returns "0.0.0" when it cannot parse a version,
+          # which is exactly what a sparse checkout missing docs/CHANGELOG.md
+          # would produce — and #1046 is the precedent for that degrading
+          # silently to a published "v0.0.0". Leaving the last good badge in
+          # place beats overwriting it with a known-bad one.
+          if [ -z "${BADGE_VERSION}" ] || [ "${BADGE_VERSION}" = "0.0.0" ]; then
+            echo "::warning title=Version badge skipped::app-version.mjs returned '${BADGE_VERSION}' — docs/CHANGELOG.md may be missing from the sparse checkout (#2572). Leaving version.json at its last good value."
+            export SKIP_VERSION_BADGE=1
+          fi
           # Generate 4 shields.io endpoint JSONs. build is green only when
           # lint-typecheck AND test both succeeded (#2533: e2e moved out).
           node -e "
@@ -627,6 +678,18 @@ jobs:
             }));
             // #1323 — accept multiple candidate summaries; use the first that
             // reads (combined unit∪int preferred, unit-only as fallback).
+            // #2572 — returns NULL, not an 'n/a' badge, when nothing reads.
+            // The comment below already argues that publishing n/a over a real
+            // number makes the badge WRONG; that reasoning was applied only to
+            // the gate-skipped case, while this branch happily wrote 'n/a'
+            // whenever the summaries were merely UNREADABLE. That gap matters
+            // more now: `download-artifact` carries continue-on-error, and it
+            // has never once executed on pi4-host (that runner has only ever
+            // run deploy/deploy-1/badge), so the first push-to-main after this
+            // PR is its first run on a host executor. If it fails there, an
+            // infra failure and a genuine absence of measurement are
+            // indistinguishable, the job stays green, and the two badges this
+            // PR exists to unstick would publish 'n/a' over real percentages.
             function cov(label, ...paths) {
               for (const p of paths) {
                 try {
@@ -636,7 +699,12 @@ jobs:
                   return { schemaVersion: 1, label, message: pct + '%', color };
                 } catch (e) { /* try next candidate */ }
               }
-              return { schemaVersion: 1, label, message: 'n/a', color: 'lightgrey' };
+              return null;
+            }
+            function writeCov(file, badge, label) {
+              if (badge) { fs.writeFileSync(out + '/' + file, JSON.stringify(badge)); return; }
+              console.log('::warning title=Coverage badge skipped::no readable ' + label +
+                ' summary — leaving ' + file + ' at its last measured value (#2572)');
             }
             // #2308 — a skipped gate produces no coverage artifact, and cov()
             // degrades a missing summary to 'n/a'. Publishing n/a over a real
@@ -646,17 +714,22 @@ jobs:
             if (gateSkipped) {
               console.log('tree-gate skipped the test job — leaving the coverage badges at their last measured values');
             } else {
-              fs.writeFileSync(out + '/server-coverage.json',
-                JSON.stringify(cov('server coverage',
-                  './server/coverage-combined/coverage-summary.json',
-                  './server/coverage/coverage-summary.json')));
-              fs.writeFileSync(out + '/client-coverage.json',
-                JSON.stringify(cov('client coverage', './client/coverage/coverage-summary.json')));
+              writeCov('server-coverage.json', cov('server coverage',
+                './server/coverage-combined/coverage-summary.json',
+                './server/coverage/coverage-summary.json'), 'server coverage');
+              writeCov('client-coverage.json',
+                cov('client coverage', './client/coverage/coverage-summary.json'), 'client coverage');
             }
-            const version = process.env.BADGE_VERSION || '0.0.0';
-            fs.writeFileSync(out + '/version.json', JSON.stringify({
-              schemaVersion: 1, label: 'version', message: 'v' + version, color: 'blue'
-            }));
+            // #2572 — the shell above sets SKIP_VERSION_BADGE when
+            // app-version.mjs could not read a real version. Not writing the
+            // file at all is what leaves the last good badge in place:
+            // upload-badges.sh uploads only the files that EXIST (#2308).
+            if (!process.env.SKIP_VERSION_BADGE) {
+              const version = process.env.BADGE_VERSION || '0.0.0';
+              fs.writeFileSync(out + '/version.json', JSON.stringify({
+                schemaVersion: 1, label: 'version', message: 'v' + version, color: 'blue'
+              }));
+            }
           "
           ls -la /tmp/badges
           # #2533 — the ssh/scp/mc upload moved to a shared script: e2e-full.yml

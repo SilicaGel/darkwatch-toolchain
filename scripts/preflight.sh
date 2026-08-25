@@ -191,7 +191,19 @@ set -uo pipefail
 #  check-e2e-tiers.mjs — the WT parity half of that guard SURVIVES, because
 #  e2e-full skips visual-regression.spec.ts and the WT pixel spec still
 #  depends on visual-regression.yml's filter (#2298/#2222/#2295).)
-EXPECTED_CI_HASH="6f603939bca6c95caa562350a79c3894abb2ff72369471f4749fec1d8d9c8e16"
+#
+#  2026-08-24 (#2572): `badges` moved from `ubuntu-latest` to `runs-on: pi`.
+#  It ssh's to DEPLOY_HOST, which resolves ONLY on m4-runner, so round-robin
+#  scheduling meant 130 of 157 uploads since 2026-08-01 silently did nothing
+#  while `continue-on-error` reported green. Same change drops `setup-node`
+#  (the pi runner is a host executor with system Node 22) and sparse-checks
+#  `scripts` + `docs/CHANGELOG.md` instead of taking a full checkout on the
+#  machine that is also serving every other job's checkout. A guard now
+#  refuses to publish version.json when app-version.mjs returns 0.0.0 (#1046's
+#  shape) rather than overwriting a good badge with a known-bad one, and
+#  cov() now returns null instead of an 'n/a' badge so an unreadable
+#  coverage summary leaves the last real percentage in place too.
+EXPECTED_CI_HASH="0face8a748cdf30ad4cc1cfabedfc416ce9bf51455afcc60ae246dbc22e2f8b0"
 
 # #2336 — the `test` job MOVED from ci.yml to its own reusable workflow so the
 # nightly can call it too. The guard below hashed only ci.yml, so without this

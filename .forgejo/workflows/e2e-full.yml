@@ -790,7 +790,19 @@ jobs:
   badge:
     needs: [e2e-full]
     if: ${{ !cancelled() && github.event_name != 'pull_request' }}
-    runs-on: ubuntu-latest
+    # #2572 — PINNED TO `pi`, was `ubuntu-latest`. This job ssh's to
+    # DEPLOY_HOST, which resolves ONLY on m4-runner; `ubuntu-latest` round-robins
+    # across three runners, so every run was a coin flip. This job is the one
+    # that SURFACED the problem — it has no `continue-on-error`, unlike ci.yml's
+    # `badges`, so it went red on 3 of its first 4 runs while `badges` had been
+    # failing the same way and reporting green for months. See #2572.
+    #
+    # Deliberately kept strict (no `continue-on-error`): `badges` tolerates a
+    # failed upload because a stale badge is not worth failing CI over, and that
+    # is right — but one producer needs to be able to say so out loud, and this
+    # job does not gate the deploy (`gates-passed` needs e2e-full/smoke-walk/test,
+    # not this).
+    runs-on: pi
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
