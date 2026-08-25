@@ -1,5 +1,27 @@
 # qa-check — skill changelog
 
+## 1.5.0 — 2026-08-23 (token economy)
+
+Driven by a 30-day usage audit: **84% of Claude spend was main-loop turns on a premium
+model**, and a full-queue qa-check pass ran at ~210k mean context, so every remaining
+turn re-read the whole pass.
+
+- **Runs on Opus, and says so.** The skill now halts if the session is not Opus. Its
+  gates (2.5, 2.6, acceptance-coverage, red-diagnosis) all exist to stop a
+  plausible-but-wrong reading, and a wrong verdict *closes a broken feature* — the one
+  outcome that is expensive to reverse. Proceeding on a cheaper model is allowed but must
+  be disclosed in the report and in every close comment.
+- **Mechanical stretches delegate to a `model: "sonnet"` subagent** — preflight, the
+  queue/PR curls, CI + `gitea.db` reads, running an already-written spec, cleanup. The
+  split is "cheap where being wrong is recoverable", not "cheap where it's boring".
+  Authoring a spec and choosing its assertions stays on the session model.
+- **Batches of 3, then halt** (new Step 10). A `/clear` between batches resets context to
+  ~40k; continuing in-session costs several times more per issue. `tests/qa-check/.pass-state.json`
+  (gitignored) records each adjudication so a held issue — one that stays open and *keeps*
+  `status/qa` — is not re-verified on the next batch.
+- New inputs: `/qa-check next <K>` and `/qa-check all`. A bare number is still always an
+  issue number, never a batch size.
+
 ## 1.0.0 — 2026-07-05 (#765 hygiene baseline)
 
 - Forgejo API basics moved to `_shared/forgejo-api.md`; skill keeps only the

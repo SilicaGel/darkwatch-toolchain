@@ -1,8 +1,8 @@
 ---
 name: qa-check
-description: Use whenever the user invokes `/qa-check` (optionally `/qa-check <number>` for one issue), says "QA the qa issues", "check status/qa", "go through the qa list", "verify what's in qa", or asks "what's ready to close?" in a QA context — verifies open `status/qa` Forgejo issues.
-version: 1.4.0
-last_changed: 2026-08-08
+description: Use whenever the user invokes `/qa-check` (optionally `/qa-check <number>` for one issue, `/qa-check next <K>`, or `/qa-check all`), says "QA the qa issues", "check status/qa", "go through the qa list", "verify what's in qa", or asks "what's ready to close?" in a QA context — verifies open `status/qa` Forgejo issues in batches of 3.
+version: 1.5.0
+last_changed: 2026-08-23
 ---
 
 # QA Check
@@ -40,10 +40,79 @@ The "no user surface" exemption is for the **inherent** absence of UI — pure i
 
 Only the last row is a true exemption. **A unit test does not become sufficient just because the surface is currently hard to reach** — that is the #1265 miss: a monster-AoE-overlay feature was nearly closed on a unit test because no seeded monster had an AoE spell. The surface existed; only the seed didn't. If clearing an obstacle genuinely needs durable infra you lack, **still do the best reachable verification now, file the fixture issue, and say in the report what you couldn't reach** — never present a code-read of an *obstructed* surface as a clean pass.
 
+## Model economy — run this skill on Opus, delegate the mechanics
+
+**This skill must run on the Opus tier.** That is not a default worth drifting from:
+every gate in it (2.5, 2.6, the acceptance-coverage check, "is this red a product bug
+or my own scaffolding?") exists to stop a plausible-but-wrong reading, and the cost of
+getting one wrong is asymmetric — a bad verdict *closes* a broken feature and strips the
+label that would have caught it later. **If you are not on Opus, say so and stop**:
+
+> "qa-check makes close/no-close calls that are expensive to get wrong, and this session
+> is running on <model>. Switch with `/model opus` and re-invoke, or tell me to proceed
+> anyway."
+
+Proceed on a cheaper model only if the user explicitly says to, and **say so in the
+report and in every close comment you write** — a verdict reached on a cheaper model is
+still a verdict, but the record should show it.
+
+Given the session is Opus, don't burn its tokens on the mechanical stretches. Delegate
+these to a subagent (`Agent` tool, **pin `model: "sonnet"` explicitly** — an unpinned
+dispatch inherits the parent model and costs full price):
+
+- **Delegate:** Step 0's preflight run and its tail; Step 1/1.5's curls (fetch the queue,
+  find each closing PR, extract its `## Test plans` block); CI reads (`ci-watch.sh`,
+  `ci-log.sh`, the `gitea.db` task query); **running an already-written spec** and
+  reporting pass/fail with the failing lines; end-of-pass residue cleanup.
+- **Keep on the session model:** every classification decision (Steps 2, 2.5, 2.6); the
+  acceptance-coverage check against the issue's own bullets; **authoring a spec and
+  choosing its assertions**; diagnosing a red as product bug vs environment vs spec
+  scaffolding; close-comment wording; and the Step 7 walkthrough with the user.
+
+The split is not "cheap where it's boring" — it is **cheap where being wrong is
+recoverable**. A delegated agent returns outcome lines, never file dumps.
+
+## Batch and halt — 3 issues, then let the user clear
+
+A 15-issue queue walked in one session runs at ~210k context by the end, and every
+remaining turn re-reads all of it. The fix is not to compact; it is to **finish a small
+batch and hand back**, so the user's `/clear` resets context to ~40k before the next one.
+
+**Default: adjudicate 3 issues, then STOP.** Do not start a 4th. After Step 9, end the
+turn with exactly this handoff:
+
+> "Batch done — #A, #B, #C adjudicated; **N still in the queue**. Run `/clear`, then
+> `/qa-check` again to take the next 3."
+
+**The queue is the state, plus one file.** Closed issues drop out of the `status/qa`
+query on their own. Issues that stay open *and keep* `status/qa` (a deliberate hold like
+a pinned Renovate re-check, or a "not yet verified" partial) would otherwise be re-verified
+on every batch — so record every adjudication in a pass-state file that survives a `/clear`:
+
+```bash
+STATE=tests/qa-check/.pass-state.json      # gitignored
+# read at Step 1; skip any issue already listed for today
+jq -r --arg d "$(date +%F)" '.[$d][]? | .issue' "$STATE" 2>/dev/null
+```
+
+Append one row per adjudicated issue as you finish it (not at the end — a session that
+dies mid-batch should not re-do work):
+`{"issue": 2465, "verdict": "held", "why": "awaiting 2026-08-24 scheduled run"}`.
+Verdicts: `closed` | `held` | `kicked-back` | `needs-eyes`. Start a fresh key per day.
+
+If every remaining queue issue is already in today's state file, say
+*"Queue is fully adjudicated for today — N held, nothing left to verify"* and stop.
+
 ## Inputs
 
-- No args → verify all open `status/qa` issues.
-- `/qa-check <number>` → verify one issue. Skip Step 1, fetch only that issue, run only its applicable verification.
+- **No args → verify the next 3 unadjudicated `status/qa` issues, then halt** (above).
+- `/qa-check <number>` → verify that one issue. A bare number is **always an issue
+  number**, never a batch size. Skip Step 1, fetch only that issue, run only its
+  applicable verification, and skip the halt handoff.
+- `/qa-check next <K>` → take K issues instead of 3.
+- `/qa-check all` → walk the entire queue in one session. The pre-batching behaviour;
+  correct for a queue of 3-4, expensive past that. Say once, up front, that context will
+  grow and a `/clear`-and-resume would be cheaper.
 
 ## Forgejo API
 
@@ -69,7 +138,8 @@ It fails loudly on the two states that silently invalidate an entire pass:
   behind, so fifteen of twenty-four issues under verification had shipped in PRs
   that weren't present at all. Reading the source for #2099 showed the pre-fix
   CSS still in place: one grep away from reporting a shipped fix as "not done".
-- **a dev server that isn't running this code** — `:3000` was held by a
+- **a dev server that isn't running this code** — `:3000` (the server port
+  before #2538 moved local dev into the 10900 block) was held by a
   46-hour-old orphan `tsx watch` from a worktree that had since been deleted.
   Specs ran green against code nobody was looking at.
 
@@ -93,7 +163,18 @@ curl -s -H "Authorization: token $FORGEJO_TOKEN" \
   "https://forge.example.com/api/v1/repos/aaron/darkwatch/issues?type=issues&state=open&labels=status%2Fqa&limit=50"
 ```
 
-If the result is empty: "Nothing in QA right now." End. If non-empty, briefly tell the user the count and what you're about to do, then proceed.
+If the result is empty: "Nothing in QA right now." End.
+
+**Then select this batch.** Drop any issue already recorded in today's
+`tests/qa-check/.pass-state.json`, take the **first 3** of what remains (oldest first —
+`.[] | .number` comes back newest-first, so reverse), and tell the user exactly what you
+are taking and what is being left:
+
+> "Queue: 11 open. 2 already adjudicated today (held). Taking **#2504, #2518, #2519** this
+> batch; 6 left after."
+
+Verify only those. `/qa-check all` skips the selection and takes everything; a bare
+`/qa-check <number>` skips this step entirely.
 
 ### Step 1.5 — Fetch the closing PR's test plan (if any)
 
@@ -441,7 +522,9 @@ Write a short markdown log to `tests/qa-check/session-<YYYY-MM-DD-HHMM>.md` (NOT
 - Issues left open (with reason).
 - Successor issues filed.
 
-Useful audit trail. Brief — don't restate the report.
+Useful audit trail. Brief — don't restate the report. **Append this batch's issues to
+`tests/qa-check/.pass-state.json`** if you have not already been appending them as you went.
+
 
 ### Step 9 — Promotion + capture (don't make QA do the work twice)
 
@@ -461,6 +544,21 @@ This is the whole point of the flag: ship decided criticality, you already wrote
 > "Recommend promoting `tests/qa-check/777/spec.ts` to `tests/e2e/roll-auth.spec.ts` tagged `@regression` — follow-up filed as #N."
 
 Offer the in-pass promotion (A) and the seed PR (B); **never open a PR autonomously** without the user's go.
+
+### Step 10 — Halt and hand back (batch mode only)
+
+Unless the run was `/qa-check <number>` or `/qa-check all`, **stop here.** Do not pull
+the next issue off the queue, and do not offer to "keep going while we're warm" — staying
+warm is precisely what costs money, because every further turn re-reads the whole batch.
+
+End the turn on the handoff line from "Batch and halt":
+
+> "Batch done — #A, #B, #C adjudicated; **N still in the queue**. Run `/clear`, then
+> `/qa-check` again to take the next 3."
+
+If the user replies "keep going" without clearing, do it — but say once that continuing
+in-session costs several times more per issue than clearing first, and let them decide.
+
 
 ## Tools
 

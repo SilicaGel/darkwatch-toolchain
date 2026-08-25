@@ -1,7 +1,7 @@
 ---
 name: review-pr
 description: 'Use when asked to review, check, or look at a Darkwatch pull request — "review PR #2551", "can you look at <PR url>", "check this PR", "how does this one look?", "review the current branch''s PR". Not the line-level sweep (`/code-review`), not `status/qa` verification (`/qa-check`), not opening a PR (`/ship`).'
-version: 1.1.0
+version: 1.2.0
 last_changed: 2026-08-23
 ---
 
@@ -26,6 +26,41 @@ Two things make this worth running rather than just reading the diff:
 
 Output is **chat-only**. Do not post comments on the PR; the user decides what to do
 with the review.
+
+## Model economy — run this skill on Opus
+
+**This skill must run on the Opus tier.** Stop and say so if it is not:
+
+> "review-pr checks signed `met` claims against code, which is the one thing CI cannot
+> do, and this session is running on <model>. Switch with `/model opus` and re-invoke,
+> or tell me to proceed anyway."
+
+The reason is structural, not a preference. **`/queue-batches` dispatches its
+implementation agents on Sonnet by default**, so the code arriving in a PR was usually
+written by a cheaper model than the one reviewing it — and this skill is the compensating
+control. Reviewing Sonnet-authored code on Sonnet removes the asymmetry the review exists
+to create. Everything this skill is *for* is judgment a cheaper model is likelier to wave
+through:
+
+- deciding a `met` is **not** supported by the diff (the finding that matters most, and
+  the one nothing else in the pipeline catches),
+- noticing a category claim that is **true as written and false as meant** (#2563),
+- spotting that a skipped gate was skipped **wrongly** for this diff (#2555),
+- judging whether a test would actually fail if the code regressed.
+
+Each is a case where the plausible reading and the correct reading differ, which is
+exactly where model strength shows up. If the user says proceed anyway, do — and put the
+model in the delivered verdict so the review is read for what it is.
+
+**Delegate the mechanics, keep the judgment.** With the session on Opus, hand these to a
+subagent (`Agent` tool, **pin `model: "sonnet"`** — an unpinned dispatch inherits the
+parent model):
+
+- **Delegate:** fetching the PR, its issues and their `## Acceptance` blocks; the
+  step-6 CI reads (`ci-watch.sh`, the `gitea.db` task query, `ci-log.sh`); the step-7
+  trap greps; fanning a read-only `Explore` over a large diff for a file map.
+- **Keep on the session model:** every `met` verification, ticket-fit judgment, the
+  completeness sweep in step 5, severity ranking, and the verdict.
 
 ## When to Use / Not
 
@@ -348,6 +383,7 @@ Offer to run it; don't run it unasked.
 
 | Mistake | Fix |
 |---|---|
+| Reviewing on a cheaper model than wrote the code | `/queue-batches` implements on Sonnet; this skill is the compensating control. Run it on Opus or disclose the model in the verdict. |
 | Trusting the PR body's guarantees | Open the code and confirm the load-bearing ones. |
 | Treating a `met` as verified because CI passed | `reconcile.mjs` checks the block's *shape*, never a `met`'s truth. Check each against the diff. |
 | Accepting `deferred:#M` without checking #M | Fetch it; a **closed** tracker means the deferral is lost. |
