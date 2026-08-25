@@ -1,7 +1,9 @@
 name: Renovate
 
 # Self-hosted Renovate run (#414). Watches upstream releases and files one PR
-# per update for: actions/* SHA pins, npm deps across all four workspaces, and
+# per update for: actions/* SHA pins, npm deps across every npm workspace (root,
+# client, server, site and tests — see #2582; tests/ was silently excluded until
+# renovate.json set `ignorePaths` explicitly), and
 # the darkwatch-ci-playwright image tag (kept in lockstep with @playwright/test
 # via the custom.regex manager in renovate.json).
 #
