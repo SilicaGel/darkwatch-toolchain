@@ -71,7 +71,7 @@ jobs:
       image: forge.example.com/aaron/darkwatch-ci-playwright:1.62.1
     services:
       mariadb:
-        image: mariadb:11@sha256:24e76fcec8c003a0362d0dd53f4806e7e79458d7fdeaf47437760e19496f5a9c
+        image: mariadb:11@sha256:2439dcd7d14010ecd1ff7a4e1c5abe8e208c34fe35290744deeeaac3569043c3
         env:
           MYSQL_ROOT_PASSWORD: ${{ secrets.CI_DB_ROOT_PASSWORD }}
           MYSQL_DATABASE: ${{ secrets.CI_DB_NAME }}
