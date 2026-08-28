@@ -640,7 +640,19 @@ jobs:
           DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
         run: |
-          mkdir -p /tmp/badges
+          # #2595 — a UNIQUE per-run staging dir, not the fixed `/tmp/badges`.
+          # `/tmp` persists across runs on this host executor (`runs-on: pi`),
+          # and e2e-full.yml's `badge` job stages into the same fixed path.
+          # upload-badges.sh scp's `"$SRC_DIR"/*.json` — everything present,
+          # not just what THIS run wrote — so a fixed shared dir means each
+          # job re-uploads the other's stale file with a fresh mtime (observed
+          # live: a `badges` run re-published `e2e.json` nine minutes stale).
+          # `mktemp -d` makes that structurally unreachable rather than
+          # merely disciplined, and needs no cross-job coordination — each
+          # producer just never sees what another producer wrote.
+          BADGE_DIR="$(mktemp -d /tmp/badges-XXXXXX)"
+          export BADGE_DIR
+          echo "badge staging dir: ${BADGE_DIR}"
           # Version for the badge — via the shared CHANGELOG parser
           # (scripts/app-version.mjs), the one source the client masthead +
           # server /health also use. No inline regex copy here anymore.
@@ -663,7 +675,7 @@ jobs:
           # lint-typecheck AND test both succeeded (#2533: e2e moved out).
           node -e "
             const fs = require('fs');
-            const out = '/tmp/badges';
+            const out = process.env.BADGE_DIR;
             const lint = process.env.LINT_RESULT || 'skipped';
             const test = process.env.TEST_RESULT || 'skipped';
             // #2308 — tree-gate only sets skip=true after proving this exact
@@ -731,11 +743,12 @@ jobs:
               }));
             }
           "
-          ls -la /tmp/badges
+          ls -la "${BADGE_DIR}"
           # #2533 — the ssh/scp/mc upload moved to a shared script: e2e-full.yml
           # now produces the `e2e` badge (see below), and two copies of this
           # would drift.
-          scripts/ci/upload-badges.sh /tmp/badges
+          scripts/ci/upload-badges.sh "${BADGE_DIR}"
+          rm -rf "${BADGE_DIR}"
 
   # notify-main-red — #1270. On a push to main where a primary gate failed, open
   # (or comment on) a rolling Forgejo issue so a red main is surfaced immediately

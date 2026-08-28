@@ -203,7 +203,7 @@ set -uo pipefail
 #  shape) rather than overwriting a good badge with a known-bad one, and
 #  cov() now returns null instead of an 'n/a' badge so an unreadable
 #  coverage summary leaves the last real percentage in place too.
-EXPECTED_CI_HASH="0face8a748cdf30ad4cc1cfabedfc416ce9bf51455afcc60ae246dbc22e2f8b0"
+EXPECTED_CI_HASH="462894cfd3a6c4c9c0f04b68e0e92a1b34e55cf9a8f146124f3d06050d398903"
 
 # #2336 — the `test` job MOVED from ci.yml to its own reusable workflow so the
 # nightly can call it too. The guard below hashed only ci.yml, so without this

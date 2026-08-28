@@ -15,7 +15,7 @@ name: Audit watch
 #
 #   ambient-report (Job B) — the whole-tree gate against main, reported on a
 #     rolling Forgejo issue. Note that ci.yml's `notify-main-red` did NOT cover
-#     this: it fires only when lint-typecheck / test / smoke FAIL, and the audit
+#     this: it fires only when lint-typecheck / test FAIL, and the audit
 #     is advisory on main (exit 0), so lint-typecheck stayed green and the
 #     rolling issue never opened. This job closes that gap.
 #

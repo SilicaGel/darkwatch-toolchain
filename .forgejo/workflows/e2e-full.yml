@@ -1,12 +1,11 @@
 name: E2E Full Suite
 
 # Runs the ENTIRE Playwright e2e suite — every spec in tests/e2e, with NO
-# hard-coded allow-list (#1141). The per-PR pipeline (ci.yml's `smoke` job) runs
-# a curated, fast subset (guarded by scripts/check-e2e-tiers.mjs so no spec is
-# silently left out of every pre-merge tier). This full job is the nightly
-# backstop + deploy gate, so specs not on the smoke list — maps, spells,
-# concurrency, mobile, presence — can't silently rot in the dark. It runs nightly
-# (via nightly-deploy.yml) and on demand (workflow_dispatch).
+# hard-coded allow-list (#1141). #2533 made this the per-PR gate itself (three
+# duration-balanced shards, required in branch protection); it is also the
+# nightly backstop + deploy gate, so a regression can't silently rot in the
+# dark between merges. It runs on every PR, nightly (via nightly-deploy.yml),
+# and on demand (workflow_dispatch).
 #
 # #1270 — the old curated nightly `e2e.yml` was removed: it was a strict subset
 # of this suite and added nothing to the deploy gate, just a second drift-prone
@@ -100,9 +99,13 @@ on:
 # cancelling". Proven on a throwaway probe before relying on it: two dispatches
 # 20s apart, the first ended `cancelled` at 21s and the second ran its full 122s.
 #
-# Cancelling a PR run cannot block a merge: the required contexts are
-# `CI / lint-typecheck`, `CI / test`, `CI / smoke` and `coverage-bot` — e2e-full
-# is opt-in and is not among them.
+# Cancelling a PR run CAN leave a required context unsatisfied: branch
+# protection requires `CI / lint-typecheck`, `CI / test`, `coverage-bot`, and
+# all three `E2E Full Suite / e2e-full (1|2|3)` legs (#2533 made this suite
+# itself the per-PR gate). That does not make `cancel-in-progress: true` wrong
+# — a superseding push posts fresh contexts of its own before it can merge —
+# it just means the old "e2e-full is opt-in, so a cancelled run can't block
+# anything" reasoning no longer applies and shouldn't be re-derived from here.
 #
 # #2483 — THIS BLOCK DOES NOT GOVERN THE NIGHTLY DEPLOY GATE. When this workflow
 # is invoked through `uses:` it gets no run of its own, and concurrency is a
@@ -628,16 +631,16 @@ jobs:
           # #2116/#2149 — the seeded `Admin` account's id is fixed (ADMIN_FIXED_ID
           # in server/src/seeds/core.ts); without this the server treats it as an
           # ordinary user and every admin route renders its "no admin access"
-          # notice. ci.yml's smoke job gained this line when 2116-wave3 was
-          # written; this lane never did, and e2e-full is skipped on PRs — so the
-          # four admin specs had never run in CI at all until the 2026-08-02
-          # nightly, where they failed shard 2 and blocked the deploy gate.
-          # Keep in sync with ci.yml's smoke job.
+          # notice. This lane didn't carry the line when 2116-wave3 added it
+          # elsewhere, and back then e2e-full was skipped on PRs — so the four
+          # admin specs had never run in CI at all until the 2026-08-02 nightly,
+          # where they failed shard 2 and blocked the deploy gate. Required here:
+          # any job in this workflow that exercises an admin route needs it.
           ADMIN_USER_IDS: ad000000-0000-7000-8000-000000000001
           JWT_SECRET: e2e-test-secret
           CLIENT_URL: http://localhost:5173
-          # Same socket-cap relaxation as ci.yml's smoke job (#388): the suite runs as one
-          # DM user; closed-page sockets reap slower than they accumulate.
+          # Socket-cap relaxation (#388): the suite runs as one DM user;
+          # closed-page sockets reap slower than they accumulate.
           SOCKET_PER_USER_CAP: "1000"
           SOCKET_PER_IP_CAP: "1000"
           NODE_OPTIONS: "--max-old-space-size=256"
@@ -696,7 +699,7 @@ jobs:
         # The first specs hit cold connection pools, V8 JIT and socket handlers,
         # exceeding their waits (cold-start flake — e.g. 566-npc-combat's first
         # test). Priming with a few authed requests lands the first specs on
-        # warm code paths. Mirrors ci.yml's smoke job.
+        # warm code paths.
         run: |
           set -e
           curl -s -c /tmp/dm-cookies.txt -X POST http://localhost:3001/api/auth/login \
@@ -819,7 +822,7 @@ jobs:
         # #2533 step 1b — nothing was collected on the cheap path, so an
         # `always()` upload would run against an empty directory.
         if: ${{ always() && needs.detect.outputs.should-run != 'false' }}
-        # v4 unsupported on Forgejo's actions backend; pin v3 (see ci.yml's smoke job).
+        # v4 unsupported on Forgejo's actions backend; pin v3.
         uses: actions/upload-artifact@ff15f0306b3f739f7b6fd43fb5d26cd321bd4de5 # v3.2.1
         with:
           # #2300 — per-shard name. The three shard jobs each upload their own
@@ -910,7 +913,6 @@ jobs:
           DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
         run: |
-          mkdir -p /tmp/badges
           # `success` only. A skipped suite (the phase-4 runtime-irrelevant path)
           # or a cancelled one has measured NOTHING, and #1954 is the standing
           # reminder that a skip reports as success elsewhere — so anything that
@@ -920,16 +922,24 @@ jobs:
             echo "suite result '$SUITE_RESULT' measured nothing — leaving the badge untouched."
             exit 0
           fi
+          # #2595 — a UNIQUE per-run staging dir, not the fixed `/tmp/badges`
+          # ci.yml's `badges` job also stages into. See that job's comment:
+          # upload-badges.sh scp's everything present in the dir it's given,
+          # so two producers sharing one fixed dir each re-upload the other's
+          # stale file with a fresh mtime.
+          BADGE_DIR="$(mktemp -d /tmp/badges-XXXXXX)"
+          export BADGE_DIR
           node -e "
             const fs = require('fs');
             const ok = process.env.SUITE_RESULT === 'success';
-            fs.writeFileSync('/tmp/badges/e2e.json', JSON.stringify({
+            fs.writeFileSync(process.env.BADGE_DIR + '/e2e.json', JSON.stringify({
               schemaVersion: 1, label: 'e2e',
               message: ok ? 'passing' : 'failing',
               color: ok ? 'brightgreen' : 'red'
             }));
           "
-          scripts/ci/upload-badges.sh /tmp/badges
+          scripts/ci/upload-badges.sh "${BADGE_DIR}"
+          rm -rf "${BADGE_DIR}"
 
   notify-failure:
     needs: e2e-full
@@ -1184,18 +1194,39 @@ jobs:
               print("last-green: unresolved (actions read failed or no prior green) — using recent commits")
 
           # 3. Suspect commits.
-          def git(*args):
-              return subprocess.run(["git", *args], capture_output=True, text=True)
-          suspects, range_desc = "", ""
-          if last_green:
-              r = git("log", f"{last_green}..HEAD", "--oneline", "-n", "40")
-              if r.returncode == 0:
-                  suspects = r.stdout.strip() or "(no commits since last green — likely flake/infra, not a code regression)"
-                  range_desc = f"`{last_green[:12]}..{sha[:12]}` (since last green e2e-full)"
-          if not suspects:
-              r = git("log", "--oneline", "-n", "15")
-              suspects = r.stdout.strip() or "(git history unavailable)"
-              range_desc = "most recent 15 commits (no last-green reference resolved)"
+          #
+          # #2435 — `last_green`, as recorded by the Forgejo actions API above,
+          # is not guaranteed to be reachable from `sha`: run 9726's marker
+          # (#2428) cited a PR-branch commit that was never merged in that
+          # form, `git log <off-branch>..HEAD` walked a graph the label didn't
+          # actually describe, and the near-empty result was read as "no spec
+          # changes landed" — a wrong hypothesis that cost real investigation
+          # time. So the range is only ever printed once `last_green` is
+          # verified as a real ancestor of `sha` (`git merge-base
+          # --is-ancestor`); every other case falls back to a bounded recent
+          # window and says explicitly that the exact range is unknown, rather
+          # than presenting one as fact. Logic is pure and unit-tested in
+          # scripts/ci/e2e-red-range-core.mjs (7 cases, including this exact
+          # #2428 shape); this just shells out to its I/O wrapper, which is why
+          # the earlier "Setup Node.js (flaky report)" step runs on this same
+          # `github.event_name != 'pull_request'` condition.
+          range_info = {}
+          try:
+              range_result = subprocess.run(
+                  ["node", "scripts/ci/e2e-red-range.mjs"],
+                  capture_output=True, text=True, timeout=30,
+                  env={**os.environ, "LAST_GREEN": last_green or "", "HEAD_SHA": sha},
+              )
+              if range_result.returncode == 0:
+                  range_info = json.loads(range_result.stdout)
+              else:
+                  print(f"e2e-red-range.mjs failed (exit {range_result.returncode}): {range_result.stderr[:300]}")
+          except Exception as e:
+              # `node` missing (setup step above is continue-on-error), a bad
+              # JSON line, a timeout — none of these may take down the marker.
+              print(f"e2e-red-range.mjs could not run: {e}")
+          suspects = range_info.get("suspects") or "(git history unavailable)"
+          range_desc = range_info.get("rangeDesc") or "range unavailable (e2e-red-range.mjs did not run)"
 
           # 4. Compose + file/update the rolling issue.
           if failing:
