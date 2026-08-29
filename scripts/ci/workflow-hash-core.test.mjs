@@ -104,6 +104,52 @@ test("normalisation replaces the digest in place, leaving the rest of the line i
   assert.doesNotMatch(normalised, /[0-9a-f]{64}/);
 });
 
+test("a same-version action re-pin (SHA moves, comment doesn't) does not change the hash", () => {
+  // The action-pin analogue of "a digest-only image bump": Renovate's own
+  // docs distinguish a "digest" update (upstream force-moved the tag; same
+  // declared version) from a "pin"/version update. #2358.
+  const renovated = CI_YAML.replace(
+    "actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1",
+    "actions/checkout@aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa # v4.3.1",
+  );
+
+  assert.notEqual(
+    renovated,
+    CI_YAML,
+    "fixture did not actually change — the test would be vacuous",
+  );
+  assert.equal(hashWorkflow(renovated), hashWorkflow(CI_YAML));
+});
+
+test("an action VERSION change still trips the guard, even though the SHA is normalised", () => {
+  // A real version bump changes the trailing comment too (a new commit means
+  // a new tag), and the comment is deliberately left un-normalised, so this
+  // must still change the hash. Editing only the comment (leaving the hex
+  // alone) isolates that this is the comment doing the work, not the SHA.
+  const edited = CI_YAML.replace(
+    "actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1",
+    "actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.2",
+  );
+
+  assert.notEqual(hashWorkflow(edited), hashWorkflow(CI_YAML));
+});
+
+test("an action NAME/version change (new SHA, no digest reuse) still trips the guard", () => {
+  const edited = CI_YAML.replace(
+    "actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1",
+    "actions/checkout@bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb # v5.0.0",
+  );
+
+  assert.notEqual(hashWorkflow(edited), hashWorkflow(CI_YAML));
+});
+
+test("normalisation replaces the action SHA in place, leaving the version comment intact", () => {
+  const normalised = normaliseWorkflow(CI_YAML);
+
+  assert.match(normalised, /^ {6}- uses: actions\/checkout@<action-sha> # v4\.3\.1$/m);
+  assert.doesNotMatch(normalised, /[0-9a-f]{40}/);
+});
+
 test("a file with no image digests hashes to a plain sha256 of its bytes", () => {
   const plain = "jobs:\n  test:\n    steps:\n      - run: npm test\n";
 

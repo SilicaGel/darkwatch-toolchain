@@ -18,8 +18,36 @@
  * carries the GHSA, and only ever report a version strictly GREATER than what is
  * installed. A downgrade can therefore never be reported, by construction.
  *
+ * DEPENDENTS, NOT JUST THE CARRIER (#2399). #2388 collapsed the extract-zip
+ * chain's four allowlist entries (the carrier plus three padding entries
+ * naming non-vulnerable packages) down to one honest entry for the carrier.
+ * That was correct for the allowlist, but this watcher used to walk those
+ * padding entries too, so their upgrades (puppeteer-core, @puppeteer/browsers,
+ * lighthouse) were incidentally visible. extract-zip has no upstream fix and
+ * likely never will — 2.0.1 (2023) is the latest release — so the one entry
+ * that remains is exactly the one guaranteed to report nothing, forever, and
+ * the chain's real remediation path (upgrade a dependent so it stops pulling
+ * in the vulnerable version) went invisible.
+ *
+ * `dependentsOf` walks the SAME `via` graph `audit-gate-core.mjs`'s
+ * `reachableCarriers` already walks, but in reverse: given a carrier's
+ * package name, it returns every package whose `via` chain reaches that
+ * carrier, directly or transitively. `audit-fix-watch.mjs` then re-runs the
+ * exact same `findFix` logic against EACH dependent, using THAT dependent's
+ * own `range` from `npm audit --json` — which is npm's own resolved
+ * "which versions of me are vulnerable because of what I depend on" range,
+ * not a guess. A dependent version outside that range has been verified (by
+ * npm's own dependency resolution, not by this watcher) to no longer pull in
+ * the vulnerable range of the carrier. That is what makes a dependent
+ * upgrade reportable as actually clearing the chain, not merely a newer
+ * version existing for its own sake — the same "no-downgrade-noise" and
+ * "highest installed version" guarantees `findFix` already gives the carrier
+ * case apply unchanged, because it is the same function.
+ *
  * No I/O here — `audit-fix-watch.mjs` is the shell.
  */
+
+import { viaNames } from "../audit-gate-core.mjs";
 
 /** Parse a semver string. Returns null for anything non-numeric-triple. */
 export function parseVersion(v) {
@@ -167,14 +195,58 @@ export function findFix({ installed, versions, range }) {
 }
 
 /**
+ * Every package name in `vulnerabilities` whose `via` chain reaches
+ * `carrierName`, directly or transitively (#2399).
+ *
+ * The reverse of `audit-gate-core.mjs`'s `reachableCarriers`: that walks DOWN
+ * from a path node to the carriers it depends on; this walks UP from a
+ * carrier to the packages that depend on it. Same graph, same `via[]` edges
+ * (`viaNames` filters a node's `via` down to the plain-string package-name
+ * entries — the advisory objects are not edges), opposite direction.
+ *
+ * Bounded by a fixed-point loop over `seen`, so a cyclic graph terminates.
+ *
+ * @param {string} carrierName
+ * @param {Object<string, object>|Map<string, object>} vulnerabilities `npm audit --json`'s `.vulnerabilities`, or an equivalent Map
+ * @returns {Set<string>} dependent package names (never includes `carrierName` itself)
+ */
+export function dependentsOf(carrierName, vulnerabilities) {
+  const byName =
+    vulnerabilities instanceof Map
+      ? vulnerabilities
+      : new Map(Object.entries(vulnerabilities ?? {}));
+  const dependents = new Set();
+  const seen = new Set([carrierName]);
+  let grew = true;
+  while (grew) {
+    grew = false;
+    for (const [name, vuln] of byName) {
+      if (seen.has(name)) continue;
+      if (viaNames(vuln).some((v) => seen.has(v))) {
+        dependents.add(name);
+        seen.add(name);
+        grew = true;
+      }
+    }
+  }
+  return dependents;
+}
+
+/**
  * The idempotency marker for one piece of news.
  *
- * Keyed by (ghsa, package, fixed version) so the watcher stays quiet run after
- * run, but a LATER fix — a newer clearing release, or the same entry after an
- * upgrade — is still news and fires once more.
+ * Keyed by (ghsa, reported package, fixed version) so the watcher stays quiet
+ * run after run, but a LATER fix — a newer clearing release, or the same
+ * entry after an upgrade — is still news and fires once more.
+ *
+ * `reportedPackage` defaults to `entry.package` (the carrier) — the shape
+ * every caller used before #2399. Pass a dependent's name explicitly when the
+ * news is "this DEPENDENT has a clearing upgrade", so a fix reported for
+ * `lighthouse` and one later reported for `puppeteer-core` on the same entry
+ * key separately and neither silences the other.
  */
-export function fixCommentMarker(entry, fixVersion) {
-  return `<!-- audit-fix-watch:${entry.ghsa}:${entry.package}:${fixVersion} -->`;
+export function fixCommentMarker(entry, fixVersion, reportedPackage = entry.package) {
+  return `<!-- audit-fix-watch:${entry.ghsa}:${reportedPackage}:${fixVersion} -->`;
 }
 
 /**
@@ -188,23 +260,40 @@ export function alreadyReported(comments, marker) {
   return (comments ?? []).some((c) => (c?.body || "").trimStart().startsWith(marker));
 }
 
-/** The comment posted on the entry's tracked issue. Always begins with the marker. */
+/**
+ * The comment posted on the entry's tracked issue. Always begins with the marker.
+ *
+ * `fix.package` names which package the reported upgrade is FOR. It defaults
+ * to `entry.package` (the carrier itself has a fix). When it differs — the
+ * carrier has no upstream fix, but a dependent in its `via` chain does
+ * (#2399) — the copy explains the chain instead of implying the carrier was
+ * upgraded.
+ */
 export function renderFixComment(entry, fix, meta = {}) {
-  const marker = fixCommentMarker(entry, fix.version);
+  const reportedPackage = fix.package ?? entry.package;
+  const isDependent = reportedPackage !== entry.package;
+  const marker = fixCommentMarker(entry, fix.version, reportedPackage);
+  const workspaceList = `workspace${entry.workspaces.length === 1 ? "" : "s"}: ${entry.workspaces.map((w) => `\`${w}\``).join(", ")}`;
   const lines = [
     marker,
     "",
-    `🟢 **A fixed version of \`${entry.package}\` has been published: \`${fix.version}\`.**`,
+    isDependent
+      ? `🟢 **\`${entry.package}\` itself has no upstream fix, but a fixed version of its dependent \`${reportedPackage}\` has been published: \`${fix.version}\`.**`
+      : `🟢 **A fixed version of \`${entry.package}\` has been published: \`${fix.version}\`.**`,
     "",
     `- Advisory: [${entry.ghsa}](https://github.com/advisories/${entry.ghsa})`,
-    `- Currently in the tree: \`${fix.installed}\` (workspace${entry.workspaces.length === 1 ? "" : "s"}: ${entry.workspaces.map((w) => `\`${w}\``).join(", ")})`,
-    `- Lowest published release outside the vulnerable range: \`${fix.version}\`${fix.isMajor ? " — **semver-major**, so the upgrade needs review, not just a bump" : ""}`,
+    isDependent
+      ? `- Currently in the tree: \`${reportedPackage}@${fix.installed}\` (${workspaceList}), which pulls in the vulnerable \`${entry.package}\``
+      : `- Currently in the tree: \`${fix.installed}\` (${workspaceList})`,
+    isDependent
+      ? `- Lowest published release of \`${reportedPackage}\` that npm's own dependency resolution confirms clears the chain: \`${fix.version}\`${fix.isMajor ? " — **semver-major**, so the upgrade needs review, not just a bump" : ""}`
+      : `- Lowest published release outside the vulnerable range: \`${fix.version}\`${fix.isMajor ? " — **semver-major**, so the upgrade needs review, not just a bump" : ""}`,
     "",
     `The \`scripts/audit-allowlist.json\` entry for this advisory is **still suppressing** (expires ${entry.expires}). Upgrading now lets the entry be deleted rather than renewed.`,
     "",
     "_Determined from the npm registry's published version list, not from `npm audit --fix-available`, which reports downgrades as fixes (the `@lhci/cli@0.1.0` trap). Only versions strictly newer than what is installed are ever reported here._",
     "",
-    `_Auto-filed by \`.forgejo/workflows/audit-watch.yml\` → \`scripts/ci/audit-fix-watch.mjs\` (#2391)${meta.runUrl ? ` — [run log](${meta.runUrl})` : ""}._`,
+    `_Auto-filed by \`.forgejo/workflows/audit-watch.yml\` → \`scripts/ci/audit-fix-watch.mjs\` (#2391${isDependent ? ", dependent walk added in #2399" : ""})${meta.runUrl ? ` — [run log](${meta.runUrl})` : ""}._`,
   ];
   return lines.join("\n");
 }

@@ -53,10 +53,13 @@
 #   not a note someone has to remember.
 #
 #   The hash comes from scripts/ci/workflow-hash.mjs, which normalises pinned
-#   image digests (`image: mariadb:11@sha256:…`) out before hashing (#2333).
-#   A Renovate digest bump therefore does NOT trip the guard: same image, same
-#   tag, same job semantics, only the layer's content address moves. Everything
-#   else — including the image's name and tag — still counts.
+#   image digests (`image: mariadb:11@sha256:…`) out before hashing (#2333),
+#   and also normalises SHA-pinned action refs (`uses: actions/foo@<sha>`),
+#   leaving their trailing `# vX.Y.Z` comment untouched (#2358). A Renovate
+#   digest bump, or a same-version action re-pin, therefore does NOT trip the
+#   guard — same image/action, same declared version, same job semantics, only
+#   a content address moved. Everything else — including the image's name/tag
+#   and an action's pinned VERSION — still counts.
 #
 # USAGE
 #   scripts/preflight.sh              run the full gate
@@ -203,7 +206,16 @@ set -uo pipefail
 #  shape) rather than overwriting a good badge with a known-bad one, and
 #  cov() now returns null instead of an 'n/a' badge so an unreadable
 #  coverage summary leaves the last real percentage in place too.
-EXPECTED_CI_HASH="462894cfd3a6c4c9c0f04b68e0e92a1b34e55cf9a8f146124f3d06050d398903"
+#  2026-08-28 (#2358): BOTH hashes below changed value because the guard now
+#  ALSO normalises SHA-pinned `uses: actions/foo@<sha> # vX.Y.Z` action refs
+#  before hashing — normalising the hex but deliberately leaving the trailing
+#  version comment alone (see scripts/ci/workflow-hash-core.mjs). No workflow
+#  content changed under this reconciliation, and no check below moved — a
+#  mechanical re-hash of the same bytes under the new normalisation. From here
+#  on, a same-version Renovate action re-pin (SHA moves, comment doesn't)
+#  leaves the guards green on its own; a real action version bump still trips
+#  them, because the comment still moves.
+EXPECTED_CI_HASH="6c03968d50f34369ab14145c9664f92ededdfa7e3a3fbbfe04679fc5babe5462"
 
 # #2336 — the `test` job MOVED from ci.yml to its own reusable workflow so the
 # nightly can call it too. The guard below hashed only ci.yml, so without this
@@ -222,7 +234,9 @@ EXPECTED_CI_HASH="462894cfd3a6c4c9c0f04b68e0e92a1b34e55cf9a8f146124f3d06050d3989
 #  skipped (#2351: that miss blocks every merge). Amended same day: the decision
 #  step now takes PR_NUMBER, because a workflow_call callee's event_name is
 #  literally 'workflow_call' and the first version was silently dead here.)
-EXPECTED_TEST_HASH="c513dc4b83aacddec8bece240a56da4188ad3a406ec5a1fed1744e62f229144f"
+# (Reconciled 2026-08-28, #2358: same action-SHA normalisation as the ci.yml
+#  note above, applied to test.yml. Hash bump only — see there for the reasoning.)
+EXPECTED_TEST_HASH="1aa19998231e7b7040e971ae3362aaa19b06a8f0b6ecee96cbebdf5ede2386f6"
 
 # --- setup ------------------------------------------------------------------
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || {
@@ -357,6 +371,18 @@ check_workflow_node_versions() {
   echo "all workflows use Node.js $versions"
 }
 run_check "workflow node-version" check_workflow_node_versions
+
+# #2586 — check_workflow_node_versions above only asserts every workflow
+# SPELLS the same node-version string ("22"); it never checks the resolved
+# patch, never checks a developer's own Node, and has no concept of a floor a
+# dependency requires. node-floor.mjs closes that: (floor) is the Node this
+# process is running on new enough for .nvmrc's declared minimum, and
+# (derived) does that minimum still satisfy every workspace lockfile's own
+# engines.node (so a dependency raising its floor — the #2585/jsdom shape —
+# is reported here instead of discovered as a mystery failure on someone's
+# laptop). See scripts/ci/node-floor-core.mjs for exactly what's covered.
+check_node_floor() { node scripts/ci/node-floor.mjs; }
+run_check "Node version floor" check_node_floor
 
 check_no_bare_npx() {
   local hits

@@ -18,6 +18,7 @@ import { fileURLToPath } from "node:url";
 import {
   alreadyReported,
   compareVersions,
+  dependentsOf,
   findFix,
   fixCommentMarker,
   renderFixComment,
@@ -177,8 +178,82 @@ function issueComments(number) {
   return ok ? all : null;
 }
 
+/**
+ * Look up whether `packageName` has a published version, strictly greater
+ * than what's installed in `workspace`, that clears `range`. Shared between
+ * the carrier check and the #2399 dependent-walk — same registry cache, same
+ * no-downgrade / highest-installed-version guarantees, because it is the same
+ * `findFix` either way.
+ *
+ * @returns {{fix: object|null, installed: string|null, why: string|null}}
+ *   `why` explains a null fix; null when `fix` is non-null.
+ */
+function lookupFix(workspace, packageName, range, registry) {
+  const installed = installedVersion(workspace, packageName);
+  if (!installed) return { fix: null, installed: null, why: "not resolvable in the lockfile" };
+
+  if (!registry.has(packageName)) registry.set(packageName, registryVersions(packageName));
+  const versions = registry.get(packageName);
+  if (!versions) return { fix: null, installed, why: "registry lookup failed" };
+
+  const fix = findFix({ installed, versions, range });
+  if (fix) return { fix, installed, why: null };
+
+  // Distinguish the silent outcomes. "We could not read the range" is not
+  // "upstream has shipped nothing", and only one of those is a reason to
+  // teach satisfiesRange a new comparator form.
+  const inRange = satisfiesRange(installed, range);
+  const why =
+    inRange === null
+      ? `range not understood (${range}) — reporting nothing rather than guessing`
+      : inRange === false
+        ? "installed version is already outside the range (entry is stale)"
+        : "no published version clears it";
+  return { fix: null, installed, why };
+}
+
+/**
+ * Post (or dry-run print) one fix comment on `entry.issue`, honouring
+ * idempotency. Caller has already logged the installed/range line; this logs
+ * only the FIX AVAILABLE verdict and the posting outcome.
+ */
+function reportFix(entry, fix, label) {
+  console.log(
+    `    → FIX AVAILABLE ${fix.package ?? entry.package}@${fix.version}${fix.isMajor ? " (semver-major)" : ""}`,
+  );
+
+  const marker = fixCommentMarker(entry, fix.version, fix.package ?? entry.package);
+  const body = renderFixComment(entry, fix, { runUrl: RUN_URL });
+
+  if (DRY_RUN) {
+    console.log(`    DRY RUN — would comment on #${entry.issue}:\n${body}\n`);
+    return;
+  }
+  if (TOKENS.length === 0) {
+    console.log("    no API token available — cannot comment");
+    return;
+  }
+
+  const comments = issueComments(entry.issue);
+  if (comments === null) {
+    console.log(`    could not read comments on #${entry.issue} — not commenting this run`);
+    return;
+  }
+  if (alreadyReported(comments, marker)) {
+    console.log(`    already reported on #${entry.issue} — staying quiet`);
+    return;
+  }
+
+  const res = api("POST", `/issues/${entry.issue}/comments`, { body });
+  console.log(
+    res !== null
+      ? `    commented on #${entry.issue}`
+      : `    ERROR: could not comment on #${entry.issue}`,
+  );
+}
+
 function main() {
-  console.log("── audit fix watch (#2391 Job C) ─────────────────────────────");
+  console.log("── audit fix watch (#2391 Job C, dependent walk #2399) ────────");
 
   const allowlist = JSON.parse(
     readFileSync(join(REPO_ROOT, "scripts/audit-allowlist.json"), "utf8"),
@@ -210,68 +285,43 @@ function main() {
         continue;
       }
 
-      const installed = installedVersion(workspace, entry.package);
-      if (!installed) {
-        console.log(`  ${label}: not resolvable in the lockfile — skipped`);
+      const carrier = lookupFix(workspace, entry.package, vuln.range, registry);
+      if (carrier.fix) {
+        console.log(`  ${label}: installed ${carrier.installed}, vulnerable ${vuln.range}`);
+        reportFix(entry, carrier.fix, label);
         continue;
       }
-
-      if (!registry.has(entry.package))
-        registry.set(entry.package, registryVersions(entry.package));
-      const versions = registry.get(entry.package);
-      if (!versions) {
-        console.log(`  ${label}: registry lookup failed — skipped`);
-        continue;
-      }
-
-      const fix = findFix({ installed, versions, range: vuln.range });
-      if (!fix) {
-        // Distinguish the two silent outcomes. "We could not read the range" is
-        // not "upstream has shipped nothing", and only one of those is a reason
-        // to teach satisfiesRange a new comparator form.
-        const inRange = satisfiesRange(installed, vuln.range);
-        const why =
-          inRange === null
-            ? `range not understood (${vuln.range}) — reporting nothing rather than guessing`
-            : inRange === false
-              ? "installed version is already outside the range (entry is stale)"
-              : "no published version clears it";
-        console.log(`  ${label}: installed ${installed}, vulnerable ${vuln.range} — ${why}`);
-        continue;
-      }
-
       console.log(
-        `  ${label}: installed ${installed}, vulnerable ${vuln.range} → FIX AVAILABLE ${fix.version}${fix.isMajor ? " (semver-major)" : ""}`,
+        `  ${label}: installed ${carrier.installed ?? "?"}, vulnerable ${vuln.range} — ${carrier.why}`,
       );
 
-      const marker = fixCommentMarker(entry, fix.version);
-      const body = renderFixComment(entry, fix, { runUrl: RUN_URL });
+      // #2399: the carrier itself has nothing (or an unreadable range, or is
+      // already stale) — quiet in every case EXCEPT "no published version
+      // clears it", which is the only one where a real chain still needs a
+      // remediation path and dependents are worth checking. A stale or
+      // unreadable carrier stays quiet on the dependent walk too — that is
+      // not this run's problem to report.
+      if (carrier.why !== "no published version clears it") continue;
 
-      if (DRY_RUN) {
-        console.log(`    DRY RUN — would comment on #${entry.issue}:\n${body}\n`);
-        continue;
-      }
-      if (TOKENS.length === 0) {
-        console.log("    no API token available — cannot comment");
-        continue;
-      }
+      const dependents = [...dependentsOf(entry.package, report.vulnerabilities)].sort();
+      for (const depName of dependents) {
+        const depVuln = report.vulnerabilities?.[depName];
+        const depLabel = `${entry.ghsa} / ${depName} (dependent of ${entry.package}) @ ${workspace}/`;
+        if (!depVuln?.range) {
+          console.log(`  ${depLabel}: no resolved range — skipped`);
+          continue;
+        }
 
-      const comments = issueComments(entry.issue);
-      if (comments === null) {
-        console.log(`    could not read comments on #${entry.issue} — not commenting this run`);
-        continue;
+        const dep = lookupFix(workspace, depName, depVuln.range, registry);
+        if (!dep.fix) {
+          console.log(
+            `  ${depLabel}: installed ${dep.installed ?? "?"}, vulnerable ${depVuln.range} — ${dep.why}`,
+          );
+          continue;
+        }
+        console.log(`  ${depLabel}: installed ${dep.installed}, vulnerable ${depVuln.range}`);
+        reportFix(entry, { ...dep.fix, package: depName }, depLabel);
       }
-      if (alreadyReported(comments, marker)) {
-        console.log(`    already reported on #${entry.issue} — staying quiet`);
-        continue;
-      }
-
-      const res = api("POST", `/issues/${entry.issue}/comments`, { body });
-      console.log(
-        res !== null
-          ? `    commented on #${entry.issue}`
-          : `    ERROR: could not comment on #${entry.issue}`,
-      );
     }
   }
   console.log("──────────────────────────────────────────────────────────────");

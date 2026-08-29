@@ -1,8 +1,8 @@
 ---
 name: ship
 description: Use when a development branch is ready to merge — the user invokes `/ship`, says "ship it", "ship this branch", or "open the PR". Handles the full docs + PR housekeeping for this repo; read the body before acting, the PR-body protocol has hard rules.
-version: 1.7.0
-last_changed: 2026-08-14
+version: 1.8.0
+last_changed: 2026-08-28
 ---
 
 # ship
@@ -116,15 +116,50 @@ Run these in order. **Tell each sub-skill to skip its commit step** — ship han
    ```
 
    The `/update-brochure` skill will spin up its own isolated server/client on dedicated ports (see its SKILL.md), so this step is safe to run alongside other dev servers. Skip its commit — ship handles the coordinated commit.
-6. **Update the help page** — use the `update-help` skill if the diff touches any client path. Same check as the brochure minus `site/`:
+6. **Update the help page** — use the `update-help` skill if the diff touches any client path, OR the identity/account/security/notification surface on the server. Path-based, not judgment (#2334):
 
    ```bash
-   if git diff main...HEAD --name-only | grep -qE '^(client/src/|client/public/)'; then
+   if git diff main...HEAD --name-only | grep -qE '^(client/src/|client/public/|server/src/routes/(auth|account)\.ts$|server/src/email\.ts$)'; then
      # Invoke /update-help — skip its commit
    fi
    ```
 
    Text-only edits to `client/src/pages/help/` — no servers or captures needed, so it's cheap to run. Skip its commit — ship handles the coordinated commit.
+
+   **Why the server half exists (#2334).** The client-only check is a proxy for
+   "did user-facing behaviour change", and it was wrong in one direction: a
+   server-only diff CAN change user-facing behaviour. It happened — PR #2328
+   shipped #2270 (2FA lifecycle emails) and #2296 (password change invalidates
+   every other session), touching only `server/src/routes/account.ts`,
+   `server/src/routes/auth.ts` and `server/src/email.ts`. The client-only path
+   check skipped, the help page shipped describing the old behaviour, and it
+   was only backfilled because a *different* batch happened to touch
+   `client/src/` next.
+
+   Deliberately narrow, not `server/src/routes/` wholesale: that would catch
+   the same case but also drag every unrelated route change (maps, creatures,
+   campaigns, npcs — the other ~24 files in `server/src/routes/`) through a
+   help review for no reason, which is exactly the noise a path check exists
+   to avoid (the ordinary-case cost the client-only check was originally
+   built to dodge). `auth.ts` and `account.ts` are where login, 2FA,
+   password/email change and session lifecycle live — the whole surface the
+   Settings & Themes help section describes — and `email.ts` is the one file
+   that decides what a notification email says. A user-facing behaviour
+   change that lands somewhere else on the server (e.g. a socket handler
+   changing what a DM sees) is still a gap this check doesn't cover; if you
+   know of one, widen the regex rather than reaching for a judgment call —
+   see the option-3 rejection below.
+
+   **Why not a ship-time question instead (rejected option).** #2334 also
+   considered "ask once per PR: does this change something the help page
+   describes?" — no false negatives by construction, since a human answers
+   every time. Rejected because the handbook step already tried the opposite
+   shape here (judgment-based, `## Step 2` item 2) and it happened to catch
+   #2328 correctly — but a gate that always needs a human decision is a gate
+   people skip under time pressure, and the failure mode of skipping is
+   silent (nothing marks that the question was never really asked). A
+   mechanical check that's occasionally too narrow is more honest than a
+   judgment step that's occasionally not really performed.
 
 7. **Roadmap** — do NOT update by default. `ROADMAP.md` is now thematic, not a ticket tracker — it tracks strategic direction only. Only invoke `update-roadmap` if a theme has meaningfully shifted (new milestone starting / closing, longer-term idea promoted to active, strategic pivot). Per-ticket progress lives in Forgejo and the changelog.
 

@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   alreadyReported,
   compareVersions,
+  dependentsOf,
   findFix,
   fixCommentMarker,
   parseVersion,
@@ -140,6 +141,57 @@ describe("findFix", () => {
   });
 });
 
+describe("dependentsOf (#2399)", () => {
+  // The real extract-zip chain (#2159, #2388): @lhci/cli -> lighthouse ->
+  // puppeteer-core -> @puppeteer/browsers -> extract-zip. Only extract-zip
+  // carries a GHSA; the rest are path nodes whose `via` names their child.
+  const vulnerabilities = {
+    "extract-zip": {
+      name: "extract-zip",
+      severity: "high",
+      via: [{ url: "https://x", source: 1 }],
+    },
+    "@puppeteer/browsers": { name: "@puppeteer/browsers", severity: "high", via: ["extract-zip"] },
+    "puppeteer-core": { name: "puppeteer-core", severity: "high", via: ["@puppeteer/browsers"] },
+    lighthouse: { name: "lighthouse", severity: "high", via: ["puppeteer-core"] },
+    "@lhci/cli": { name: "@lhci/cli", severity: "high", via: ["lighthouse"] },
+    unrelated: { name: "unrelated", severity: "high", via: ["some-other-package"] },
+  };
+
+  test("finds every dependent, direct and transitive, but not the carrier itself", () => {
+    const deps = dependentsOf("extract-zip", vulnerabilities);
+    assert.deepEqual(
+      [...deps].sort(),
+      ["@lhci/cli", "@puppeteer/browsers", "lighthouse", "puppeteer-core"].sort(),
+    );
+    assert.equal(deps.has("extract-zip"), false);
+  });
+
+  test("a package with no path to the carrier is not a dependent", () => {
+    const deps = dependentsOf("extract-zip", vulnerabilities);
+    assert.equal(deps.has("unrelated"), false);
+  });
+
+  test("accepts a Map (report.vulnerabilities is a plain object, but a Map works too)", () => {
+    const deps = dependentsOf("extract-zip", new Map(Object.entries(vulnerabilities)));
+    assert.ok(deps.has("lighthouse"));
+  });
+
+  test("a cyclic via graph terminates instead of hanging", () => {
+    const cyclic = {
+      a: { name: "a", via: ["b"] },
+      b: { name: "b", via: ["c"] },
+      c: { name: "c", via: ["a"] }, // cycle back to a
+    };
+    const deps = dependentsOf("a", cyclic);
+    assert.deepEqual([...deps].sort(), ["b", "c"]);
+  });
+
+  test("a carrier with no dependents returns an empty set", () => {
+    assert.equal(dependentsOf("extract-zip", {}).size, 0);
+  });
+});
+
 describe("idempotency", () => {
   const entry = {
     ghsa: "GHSA-w3rx-r6r6-pgpr",
@@ -181,5 +233,52 @@ describe("idempotency", () => {
     assert.match(body, /image-size/);
     assert.match(body, /still suppressing/);
     assert.match(body, /1\.0\.0/);
+  });
+});
+
+describe("dependent fix reporting (#2399)", () => {
+  // extract-zip: the real carrier with no upstream fix.
+  const carrierEntry = {
+    ghsa: "GHSA-jmr9-qjv8-65gv",
+    package: "extract-zip",
+    workspaces: ["."],
+    issue: 2159,
+    expires: "2026-11-30",
+  };
+
+  test("marker defaults to the carrier's package, matching pre-#2399 callers", () => {
+    assert.equal(
+      fixCommentMarker(carrierEntry, "3.0.0"),
+      "<!-- audit-fix-watch:GHSA-jmr9-qjv8-65gv:extract-zip:3.0.0 -->",
+    );
+  });
+
+  test("a dependent's marker is keyed by the DEPENDENT's name, not the carrier's", () => {
+    const carrierMarker = fixCommentMarker(carrierEntry, "13.5.0");
+    const dependentMarker = fixCommentMarker(carrierEntry, "13.5.0", "lighthouse");
+    assert.equal(dependentMarker, "<!-- audit-fix-watch:GHSA-jmr9-qjv8-65gv:lighthouse:13.5.0 -->");
+    assert.notEqual(
+      dependentMarker,
+      carrierMarker,
+      "a dependent fix and a (hypothetical) carrier fix at the same version must not collide",
+    );
+  });
+
+  test("a dependent fix is named in the rendered comment, distinct from a carrier fix", () => {
+    const fix = { package: "lighthouse", version: "13.5.0", installed: "13.0.0", isMajor: false };
+    const body = renderFixComment(carrierEntry, fix);
+
+    assert.ok(body.startsWith(fixCommentMarker(carrierEntry, "13.5.0", "lighthouse")));
+    // (reports-path) names both the dependent and the version.
+    assert.match(body, /lighthouse/);
+    assert.match(body, /13\.5\.0/);
+    // Names the carrier too, so the reader knows WHICH chain this clears.
+    assert.match(body, /extract-zip/);
+  });
+
+  test("omitting fix.package still renders the carrier-fix wording (backward compatible)", () => {
+    const fix = { version: "3.0.0", installed: "2.0.1", isMajor: true };
+    const body = renderFixComment(carrierEntry, fix);
+    assert.doesNotMatch(body, /dependent/i);
   });
 });

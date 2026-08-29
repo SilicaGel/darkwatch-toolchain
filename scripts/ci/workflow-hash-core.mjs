@@ -21,12 +21,30 @@
 //     database the test job runs against — that must trip the guard.
 //   - A `sha256:` anywhere other than an `image:` line. A checksum inside a
 //     `run:` step is semantic, so normalisation is anchored to `image:` lines.
-//   - `uses: actions/foo@<sha>` action pins. Renovate moves those too, and they
-//     are the same nuisance — but it rewrites the trailing `# vX.Y.Z` comment in
-//     the same edit, so stripping the hex alone would not help, and stripping
-//     the whole line would let a real action-version change through unseen.
-//     Deliberately left open, with the options written up, on #2358 — including
-//     the option of deciding it isn't worth exempting at all.
+//
+// `uses: actions/foo@<sha> # vX.Y.Z` ACTION PINS — #2358 decision
+//   renovate.json groups these into one "github actions" PR with
+//   `pinDigests: true`, `automerge: false`. Two distinct things can move an
+//   action pin, and they read identically in a diff unless you know which is
+//   which:
+//     1. A genuine version bump (checkout v4.3.1 -> v4.3.2): a NEW commit, so
+//        both the SHA and the trailing `# vX.Y.Z` comment change together.
+//        This is a real change to how the job runs and MUST trip the guard —
+//        same reasoning as the image tag/name case above.
+//     2. A same-version re-pin: the SHA changes but the comment does not.
+//        This happens when upstream force-moves what a version tag points at
+//        (tags are conventionally immutable but not enforced by git or
+//        GitHub) — Renovate's own docs describe "digest" updates as a
+//        distinct update type from "pin"/version updates for exactly this
+//        case. It is the action-pin analogue of the image-digest case this
+//        file already exempts: same declared version, same job semantics,
+//        only the content address moved.
+//   So: normalise the SHA on a `uses:` line but leave the trailing comment
+//   untouched. A same-version re-pin (case 2) normalises to the same text and
+//   is exempt. A real version bump (case 1) still changes the comment, so the
+//   normalised text still differs and the guard still fires — proven by the
+//   "an action VERSION change still trips the guard" test below, which edits
+//   the comment without touching the hex.
 
 import { createHash } from "node:crypto";
 
@@ -36,9 +54,18 @@ import { createHash } from "node:crypto";
  */
 const IMAGE_DIGEST = /^(\s*image:\s*\S+@sha256:)[0-9a-f]{64}$/gm;
 
-/** A workflow file with pinned image digests replaced by a placeholder. Everything else is untouched. */
+/**
+ * A pinned action SHA on a `uses:` line: `  - uses: actions/foo@<40 hex>`,
+ * optionally followed by a ` # vX.Y.Z` comment which is intentionally left
+ * untouched — see the #2358 note above. Anchored to the start of a line and
+ * to the `uses:` keyword so this cannot match an `image:` digest line (those
+ * use `sha256:` + 64 hex, not a bare 40-hex git SHA).
+ */
+const ACTION_SHA = /^(\s*(?:-\s*)?uses:\s*\S+@)[0-9a-f]{40}\b/gm;
+
+/** A workflow file with pinned image digests and action SHAs replaced by placeholders. Everything else, including any `# vX.Y.Z` comment, is untouched. */
 export function normaliseWorkflow(text) {
-  return text.replace(IMAGE_DIGEST, "$1<digest>");
+  return text.replace(IMAGE_DIGEST, "$1<digest>").replace(ACTION_SHA, "$1<action-sha>");
 }
 
 /** The drift-guard hash: SHA-256 of the normalised file. */
