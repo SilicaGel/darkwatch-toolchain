@@ -573,6 +573,7 @@ All commands run as `cd tests && npx tsx qa-check/tools/qa.ts <cmd>`.
 | qa db --driver api | `cd tests && npx tsx qa-check/tools/qa.ts db check --tables characters --driver api --as DungeonMaster --call "PATCH /api/characters/<id>" --data '{"name":"x"}'` |
 | qa api | `cd tests && npx tsx qa-check/tools/qa.ts api DungeonMaster GET /api/campaigns` |
 | qa specs | `cd tests && npx tsx qa-check/tools/qa.ts specs roll --run` |
+| **QA Fixture reset (#2544)** | `cd server && npm run seed:shadowdark:qa:reset` — restores the seeded `QA Fixture (Shadowdark)` campaign (character names, gear, map, tokens, handout) to its known-good state. Plain re-seeding (`seed:shadowdark:qa`) is create-if-absent and can't repair drift — use this instead whenever the fixture looks wrong. Idempotent; touches only that one campaign. |
 
 ## Templates
 
@@ -593,6 +594,7 @@ Copy the relevant template to `tests/qa-check/<N>/spec.ts`, rename the test, upd
 - **Forgejo unreachable.** Fail loudly with the curl error. Don't fall back to local guesses; the user needs to know the API isn't responding.
 - **Dev server is down (or on the wrong version).** `npm run qa:preflight` (Step 0) detects this mechanically now — it compares the server's reported `commit`/`root` against the working tree. Down is a *fixable obstacle*, not a code-read license (see "Obstructed surface ≠ no surface"): **`restart-local-dev` first, then drive.** Only if it genuinely won't start after that do you drop to code-only mode for the would-have-been-Playwright issues — and flag them as unverified-pending (visual), not closed.
 - **Issue body is one line of "see slack thread."** No useful hints. Classify visual-only and ask the user for the relevant artifact in the clarifying-question section.
+- **The `QA Fixture (Shadowdark)` campaign itself looks wrong** — a renamed character, stray custom gear, an extra token (#2544). This is drift from a prior manual verification or a spec whose cleanup step didn't run, not a product bug. Run `cd server && npm run seed:shadowdark:qa:reset` (see Tools) and re-check; don't file a bug against fixture-only symptoms.
 
 ## Why this design
 
