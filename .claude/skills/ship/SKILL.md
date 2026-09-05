@@ -115,7 +115,7 @@ Run these in order. **Tell each sub-skill to skip its commit step** — ship han
    fi
    ```
 
-   The `/update-brochure` skill will spin up its own isolated server/client on dedicated ports (see its SKILL.md), so this step is safe to run alongside other dev servers. Skip its commit — ship handles the coordinated commit.
+   The `/update-brochure` skill captures inside its own database lane (`npm --prefix tests run brochure:capture`, see its `references/lane.md`), so this step is safe to run alongside other dev servers. It regenerates `site/index.html` from `site/manifest.mjs`; preflight's "brochure page current" check fails if the two drift. Skip its commit — ship handles the coordinated commit.
 6. **Update the help page** — use the `update-help` skill if the diff touches any client path, OR the identity/account/security/notification surface on the server. Path-based, not judgment (#2334):
 
    ```bash

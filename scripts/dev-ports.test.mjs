@@ -35,6 +35,8 @@ describe("resolveDevPorts", () => {
       minioConsole: 10911,
       www: 10920,
       brochure: 10921,
+      brochureServer: 10922,
+      brochureClient: 10923,
     });
   });
 
@@ -91,6 +93,14 @@ describe("resolveDevPorts", () => {
 
   test("devUrl spells the origin once, with no trailing slash", () => {
     assert.equal(devUrl(10900), "http://localhost:10900");
+  });
+
+  test("brochure lane ports sit beside the static brochure port and clear every other service", () => {
+    const p = resolveDevPorts();
+    assert.equal(p.brochureServer, p.brochure + 1);
+    assert.equal(p.brochureClient, p.brochure + 2);
+    const all = Object.values(p);
+    assert.equal(new Set(all).size, all.length);
   });
 });
 

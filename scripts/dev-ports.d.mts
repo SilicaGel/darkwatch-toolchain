@@ -7,7 +7,16 @@
 // instead of tripping noImplicitAny.
 
 export type DevPortService =
-  "client" | "server" | "qaClient" | "qaServer" | "minioApi" | "minioConsole" | "www" | "brochure";
+  | "client"
+  | "server"
+  | "qaClient"
+  | "qaServer"
+  | "minioApi"
+  | "minioConsole"
+  | "www"
+  | "brochure"
+  | "brochureServer"
+  | "brochureClient";
 
 export type DevPorts = Record<DevPortService, number>;
 

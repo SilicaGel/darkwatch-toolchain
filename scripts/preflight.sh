@@ -469,6 +469,10 @@ run_check "test-assertion loosening" node scripts/check-test-assertion-loosening
 # high-confidence surfaces missing a row (gate) / new components (advisory).
 run_check "feature-inventory drift" node scripts/check-feature-inventory.mjs
 
+# #2128 — site/index.html is generated from site/manifest.mjs and committed;
+# a manifest edit without a regen would ship a stale page.
+run_check "brochure page current" node site/build.mjs --check
+
 # #1396 — RIGHTS-MATRIX drift: verify requireCharacterAccess() levels in
 # route files match the access-level column in docs/RIGHTS-MATRIX.md.
 run_check "rights-matrix drift" node scripts/check-rights-matrix.mjs

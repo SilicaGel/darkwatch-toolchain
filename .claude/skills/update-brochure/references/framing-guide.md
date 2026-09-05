@@ -1,117 +1,54 @@
-# Brochure screenshot framing guide
+# Framing guide
 
-Loaded by `update-brochure` when capturing. Reference only — not needed during the skip-or-not decision.
+Loaded before writing a capture test. Every rule here is a decision the test makes on purpose.
 
 ## Capture the destination, not the trigger
 
-Screenshots should show what the user **sees after** an interaction, not the button or state that starts it. A level-up screenshot should show the level-up modal with the HP result visible, not the "Level Up!" button on the card. A character access screenshot should show the open sheet, not the card grid that opens it.
+A level-up still shows the modal with the result, not the chip. A character-sheet still shows
+the open sheet, not the roster row that opens it. Start the session before capturing the
+War Table so the masthead shows the timer, not the Start button.
 
-## Desktop and mobile should show their respective behaviors
+## Desktop and mobile show their own behaviour
 
-If a feature behaves differently on desktop vs mobile, use each screenshot to show the behavior for that form factor. A DM character access feature should show the full sheet overlay on desktop and the quick-inspect bottom sheet on mobile — not the same card grid view in two sizes.
+Phones render the tab layout (DM: Party / Combat / Scene / Map / Log; player: Sheet / Party /
+Combat / Map / Log) under War Table tokens. Tap the tab that holds the feature and capture
+that, rather than a shrunken desktop. Mobile is always the full viewport, never a clip.
 
-## Locating modals: use text content, not hashed class names
+## Three desktop framings
 
-CSS Modules generate hashed class names like `_modal_XXXXX`. `[class*="modal"]` will match any component that has a `.modal` CSS class — often the wrong one. Prefer text-based locators that are unique to the specific component:
+- **Full viewport**: the layout is the feature (war-table, map, atmosphere). No clip.
+- **Modal close-up**: `clipAround(await dialog.boundingBox())` so the dialog fills most of the
+  frame with a margin of dimmed page around it.
+- **Panel crop**: `clipAround(await panel.boundingBox(), 24)` on `wt-panel-<id>` for a docked
+  panel or `wt-flyout-<id>` for one opened from a band pill.
 
-```javascript
-// Bad: matches any component with a .modal class
-const modal = page.locator('[class*="modal"]').first();
+## Theme per row
 
-// Good: find LevelUpModal by its unique "reaches Level N" text
-const modal = page.locator('div')
-  .filter({ hasText: /reaches Level \d/ })
-  .filter({ hasText: 'Level Up!' })
-  .last(); // deepest matching div = the modal container, not the backdrop
-```
+`themeFor(slug)` in `site/manifest.mjs` decides: even index within a section is Storm Glass,
+odd is Torchlit. Apply it with `useTheme(context, ...)` before the first navigation. Never
+insert a row mid-section; append, so existing rows keep their theme.
 
-Every capture function should make a deliberate choice about framing based on what the feature *is*:
+## Locators
 
-## Full viewport
+Prefer `data-testid`. Segmented toggles put the testid on the radiogroup: use
+`getByTestId("wt-dice-private-toggle").getByRole("radio", { name: "Private" })`. Repeating
+testids need a companion: `[data-testid="wt-roster-row"][data-character-id="..."]`,
+`[data-testid="token-root"][data-token-id="..."]`, `getByTestId("campaign-row").filter({ hasText })`.
+Where no testid exists use the accessible name from the source (the selector reference in
+the #2128 research: `LevelUpModal` is `getByRole("dialog", { name: "Level Up" })`; the
+Stabilize button's aria-label starts with `Stabilize`).
 
-Use for features that are the whole screen — the campaign view, atmosphere effects, initiative tracker, conditions grid. Don't pass a clip; let the full 1280×800 (desktop) or 390×844 (mobile) speak for itself.
+## Two traps
 
-## Modal close-up
+- **Panel placement is drag-only.** There is no Float, Dock, or Pin button. Docked to floating
+  to band pill is `mouse.down()` on `wt-grip-<id>`, `mouse.move()` past the 4 px threshold, and
+  `mouse.up()` over the target column, stage, or band.
+- **Native confirm dialogs.** Reveal-all with staged monsters, remove monster, end combat with
+  a dying PC, and clear the fallen all call `window.confirm`. Register `page.on("dialog", (d) => void d.accept())`
+  once on the page before clicking (add a shared helper to `tests/brochure/helpers.ts` when the first capture needs it).
 
-Use for features that appear as a modal/dialog floating over a dimmed background — character sheet, level-up, character creation. The modal should fill roughly 90% of the frame, with enough dimmed background visible to read it as a modal.
+## Waits
 
-Get the bounding box and add a comfortable margin (use text-based locators to find the right element — see "Locating modals" above):
-
-```javascript
-const modal = page.locator('div').filter({ hasText: 'unique modal text' }).last();
-const box = await modal.boundingBox().catch(() => null);
-const margin = 40;
-return {
-  x: Math.max(0, box.x - margin),
-  y: Math.max(0, box.y - margin),
-  width:  Math.min(viewportWidth,  box.width  + margin * 2),
-  height: Math.min(viewportHeight, box.height + margin * 2),
-};
-```
-
-On mobile the modal may be full-width — in that case the clip is optional; a full viewport shot is fine.
-
-## Panel crop
-
-Use for features that live in a side panel or a section of the screen — the GM Tools panel, creature gallery, a card grid. Return a clip that excludes unrelated UI (e.g., strip the top nav bar off the card grid).
-
-## Mobile is always full viewport
-
-**Never return a clip when `viewport === 'mobile'`.** The portrait orientation makes it immediately obvious it's mobile — no cropping needed or wanted. All framing decisions (clip vs full viewport) apply to desktop only. The pattern in every capture function:
-
-```javascript
-if (viewport === 'desktop') {
-  return { x: ..., y: ..., width: ..., height: ... }; // desktop crop
-}
-// mobile: fall through with no return → full viewport
-```
-
----
-
-# Theme assignment
-
-**Never hardcode theme names in capture functions.** The available themes are discovered at runtime from the source:
-
-```javascript
-// Already in screenshots.js — THEMES is populated by getThemeIds()
-// which reads client/src/components/ThemeToggle.tsx
-```
-
-When writing or refreshing captures, assign themes by index so they distribute evenly across all captures and automatically pick up new themes as they're added:
-
-```javascript
-// In run(), pass the theme index to each capture or apply before calling
-await applyTheme(page, THEMES[0 % THEMES.length]); // first capture
-await applyTheme(page, THEMES[1 % THEMES.length]); // second capture
-// etc.
-```
-
-When doing a full refresh of all captures, redistribute so each theme appears roughly the same number of times.
-
----
-
-# Dual-viewport captures
-
-Every feature gets **both** a desktop (1280×800) and mobile (390×844) screenshot. Use `shotBoth()` instead of `shot()`:
-
-```javascript
-// In screenshots.js run():
-await shotBoth(page, 'feature-name', captureFeatureName);
-// Produces: feature-name-desktop.png, feature-name-mobile.png
-```
-
-The capture function receives the viewport suffix as a second argument, so it can adjust framing if needed (modals on mobile are often full-width and don't need a clip):
-
-```javascript
-async function captureFeatureName(page, viewport) {
-  // set up state...
-  if (viewport === 'desktop') {
-    // return clip for modal close-up
-    const box = await page.locator('[role="dialog"]').first().boundingBox();
-    return { x: box.x - 40, y: box.y - 40, width: box.width + 80, height: box.height + 80 };
-  }
-  // mobile: full viewport is fine
-}
-```
-
-**Existing captures** use `shot()` with the old single-viewport pattern. Migrate them to `shotBoth()` during the next full audit run.
+Wait for the thing you are about to photograph: `expect(locator).toBeVisible()`, then a short
+`waitForTimeout` (300 to 800 ms) for portraits, card art, and WebGL to paint. A still that
+shows a loading state, an empty panel, or a half-drawn map is not done.

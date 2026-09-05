@@ -71,6 +71,10 @@ export const DEV_PORT_OFFSETS = Object.freeze({
   www: 20,
   /** `npx serve site/` — the brochure/screenshot stack. */
   brochure: 21,
+  /** `scripts/qa-stack.sh` server for the brochure capture lane (#2128). */
+  brochureServer: 22,
+  /** `scripts/qa-stack.sh` Vite for the brochure capture lane (#2128). */
+  brochureClient: 23,
 });
 
 export const DEV_PORT_SERVICES = Object.freeze(Object.keys(DEV_PORT_OFFSETS));
@@ -212,6 +216,8 @@ if (
     minioConsole: "MINIO_CONSOLE_PORT",
     www: "WWW_PORT",
     brochure: "BROCHURE_PORT",
+    brochureServer: "BROCHURE_SERVER_PORT",
+    brochureClient: "BROCHURE_CLIENT_PORT",
   };
   try {
     const overrides = {};
