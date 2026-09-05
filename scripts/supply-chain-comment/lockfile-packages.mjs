@@ -22,7 +22,6 @@ export const LOCKFILES = [
   "client/package-lock.json",
   "server/package-lock.json",
   "tests/package-lock.json",
-  "site/package-lock.json",
 ];
 
 // Parse one npm lockfile's JSON text → array of `name@version` strings.

@@ -17,9 +17,9 @@ git checkout -- site/ 2>/dev/null || true
 git pull origin main
 ```
 
-If there are untracked files blocking the pull (e.g. new screenshot PNGs), remove them first:
+If there are untracked files blocking the pull (e.g. new capture stills), remove them first:
 ```bash
-git clean -f site/assets/screenshots/
+git clean -f site/assets/
 ```
 
 ## Step 1.5: Sync local deps + DB to main

@@ -45,14 +45,13 @@ const SOCKET_CMD = process.env.SOCKET_BIN
   ? [process.env.SOCKET_BIN]
   : ["npx", "--yes", `@socketsecurity/cli@${SOCKET_CLI_VERSION}`];
 
-// Top-level manifests across the four+ workspaces. Scanned explicitly (not the
+// Top-level manifests across the four workspaces. Scanned explicitly (not the
 // directory) so an installed node_modules tree can't pollute the scan.
 const MANIFESTS = [
   "package.json",
   "client/package.json",
   "server/package.json",
   "tests/package.json",
-  "site/package.json",
 ];
 
 function parseEnv() {

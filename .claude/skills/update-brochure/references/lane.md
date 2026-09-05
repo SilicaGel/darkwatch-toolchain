@@ -57,3 +57,6 @@ would desync and the still would show a bug that does not exist.
 - The lane serves Vite dev, not a preview build (same as the e2e suite). If a dev-only
   overlay ever appears in a still, add a `--preview` mode to `scripts/qa-stack.sh` rather
   than reintroducing a separate brochure server.
+- Stills are not byte-stable across runs (the masthead timer and animation frames
+  differ), so a verification run rewrites committed WebPs. `node site/build.mjs --check`
+  covers the HTML only. After a run you did not mean to keep, `git checkout -- site/assets`.

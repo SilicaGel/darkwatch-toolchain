@@ -48,7 +48,7 @@ jobs:
           # IS the scan surface — a wrong list here would narrow a SECURITY gate.
           # Two things make that visible rather than silent: `createScan` errors
           # when it finds zero manifests, and the on-disk manifest count is
-          # printed into the PR comment. Expect 5 for head and 5 for base.
+          # printed into the PR comment. Expect 4 for head and 4 for base.
           #
           # `filter` alone is a no-op with a full working tree (#2338), and cone
           # mode would reject these patterns, so both settings are required.
@@ -63,8 +63,6 @@ jobs:
             /server/package-lock.json
             /tests/package.json
             /tests/package-lock.json
-            /site/package.json
-            /site/package-lock.json
             /scripts/supply-chain-comment
 
       - name: Checkout base (main)
@@ -86,8 +84,6 @@ jobs:
             /server/package-lock.json
             /tests/package.json
             /tests/package-lock.json
-            /site/package.json
-            /site/package-lock.json
 
       - name: Use Node 22
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0

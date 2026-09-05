@@ -30,8 +30,8 @@ only if a stretch needs real judgment):
   layout shot). The session model writes the capture function and reviews
   every PNG; only the mechanical server/re-run steps are delegable.
 
-The bash scripts themselves (`preflight.sh`, `ci-watch.sh`, `screenshots.js`)
-cost no model tokens while running — the savings come from not narrating
+The bash scripts themselves (`preflight.sh`, `ci-watch.sh`, the brochure
+capture run) cost no model tokens while running — the savings come from not narrating
 their orchestration on the expensive model. A delegated stretch returns only
 its outcome line(s) to the coordinator.
 
