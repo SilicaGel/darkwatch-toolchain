@@ -56,7 +56,9 @@ skip, report that and stop here.**
 1. Append the row to its section's block in `site/manifest.mjs` (never insert in the middle:
    theme parity of the rows after it would flip and their stills would be wrong). Fill `slug`,
    `section`, `label`, `headline`, `copy` (HTML, thorough, player/DM voice), `altDesktop`,
-   `altMobile`, `clip: false`. `node --test site/manifest.test.mjs` must pass.
+   `altMobile`, `clip: false`, `mobile: false` if the surface has no phone equivalent (a row
+   with no phone equivalent renders one wide desktop still and a Desktop only note; see
+   `references/framing-guide.md`). `node --test site/manifest.test.mjs` must pass.
 2. If the row is a new surface, add the inventory heading to the section's `covers` and run
    `node site/audit.mjs`.
 3. Add `test("<slug>", ...)` to `tests/brochure/NN-<section>.spec.ts`, following the pattern in

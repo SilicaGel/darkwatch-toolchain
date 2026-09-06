@@ -14,6 +14,11 @@ Phones render the tab layout (DM: Party / Combat / Scene / Map / Log; player: Sh
 Combat / Map / Log) under War Table tokens. Tap the tab that holds the feature and capture
 that, rather than a shrunken desktop. Mobile is always the full viewport, never a clip.
 
+A surface with no phone equivalent (the combat tracker's row menu, the map build tools, the
+Panels drag, Quests) is `mobile: false` in the manifest: the row renders one wide desktop
+still and a Desktop only note. Do not fall back to an unrelated phone screen; the 1b rows that
+did (`dm-notes`, `past-sessions`) predate this rule and stay as they are.
+
 ## Three desktop framings
 
 - **Full viewport**: the layout is the feature (war-table, map, atmosphere). No clip.

@@ -4,13 +4,13 @@ Captures run against their own server, client, and database so nothing from a de
 server or another worktree leaks into a still. This replaced the hand-rolled
 port-3099/5199 recipe in #2128.
 
-| Piece | Value | Source |
-|---|---|---|
-| Database | `darkwatch_brochure` | `QA_DB_NAME` in `tests/package.json` `brochure:lane` |
-| Server port | `node scripts/dev-ports.mjs brochureServer` (10922 on lane 0) | `scripts/dev-ports.mjs` |
-| Client port | `node scripts/dev-ports.mjs brochureClient` (10923 on lane 0) | same |
-| Seed | `SEED_MODE=shadowdark-brochure` | `server/src/rulesets/shadowdark/seeds/brochure-fixture.ts` |
-| Config | `tests/playwright.brochure.config.ts` | `testDir: ./brochure` |
+| Piece       | Value                                                         | Source                                                     |
+| ----------- | ------------------------------------------------------------- | ---------------------------------------------------------- |
+| Database    | `darkwatch_brochure`                                          | `QA_DB_NAME` in `tests/package.json` `brochure:lane`       |
+| Server port | `node scripts/dev-ports.mjs brochureServer` (10922 on lane 0) | `scripts/dev-ports.mjs`                                    |
+| Client port | `node scripts/dev-ports.mjs brochureClient` (10923 on lane 0) | same                                                       |
+| Seed        | `SEED_MODE=shadowdark-brochure`                               | `server/src/rulesets/shadowdark/seeds/brochure-fixture.ts` |
+| Config      | `tests/playwright.brochure.config.ts`                         | `testDir: ./brochure`                                      |
 
 ## Commands
 
@@ -36,10 +36,15 @@ our own; documented in `site/fixtures/README.md` — regenerate with
 lights, and party tokens (Ysolde at the corridor corner). Two quests (one hidden), three loot
 rows, two handouts (one unshown), one pinned note, three past sessions with recaps.
 
-Not in the seed, by design: combat, monster tokens, hidden monsters. Stage those in the
-test through `POST /api/test/start-combat` (`tests/helpers/campaign.ts` `startCombatWith`)
-and the UI. Never write to the database while the lane is up: the visibility engine caches
-would desync and the still would show a bug that does not exist.
+The lane also runs `seedCore` before the fixture, so `Admin` (fixed id, put in
+`ADMIN_USER_IDS` by `qa-stack.sh`) and `TwoFactorTester` (2FA already enabled) exist
+alongside the campaign's five users, with no seed change needed for either.
+
+Not in the seed, by design: combat, monster tokens, hidden monsters. Stage combat through
+the real Start Combat UI: `tests/brochure/combat-staging.ts`'s `openStartCombatWithMonsters` /
+`stageCombatViaUi`. Do not use `POST /api/test/start-combat`: it cannot reach the rolling
+phase and gives monsters no art. Never write to the database while the lane is up: the
+visibility engine caches would desync and the still would show a bug that does not exist.
 
 ## Debugging
 

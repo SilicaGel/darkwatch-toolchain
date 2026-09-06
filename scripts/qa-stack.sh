@@ -153,10 +153,13 @@ echo "[qa-stack] starting app server on :$QA_SERVER_PORT against '$QA_DB'..."
   # Direct binary, not `npx tsx` — `npx <bin>` silently fetches from the public
   # registry when the local install is missing (#722). `tsx` rather than
   # `npm run dev` so the process doesn't watch-restart mid-suite.
+  # #2128 — the brochure's admin row needs the seeded Admin account
+  # (seedCore's fixed id) to pass requireAdmin; server/.env does not carry it.
   PORT="$QA_SERVER_PORT" \
   DB_NAME="$QA_DB" \
   NODE_ENV=test \
   ALLOW_TEST_HOOKS=true \
+  ADMIN_USER_IDS="ad000000-0000-7000-8000-000000000001" \
   CLIENT_URL="http://localhost:$QA_CLIENT_PORT" \
   EXTRA_ALLOWED_ORIGINS="http://localhost:$QA_CLIENT_PORT" \
   SOCKET_PER_USER_CAP=1000 \
