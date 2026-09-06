@@ -57,3 +57,17 @@ Stabilize button's aria-label starts with `Stabilize`).
 Wait for the thing you are about to photograph: `expect(locator).toBeVisible()`, then a short
 `waitForTimeout` (300 to 800 ms) for portraits, card art, and WebGL to paint. A still that
 shows a loading state, an empty panel, or a half-drawn map is not done.
+
+## Clips
+
+A clip is 4 to 10 seconds: start on the action itself (no menu lead-in — open the panel or
+dialog before `marks.start()`, not on camera), end on the resolved state, held long enough to
+read before `marks.end()`. Crop to the row's frame with `marks.crop(box)`, the same box a still
+of that row would use; the desktop still stays the poster the video plays over, so the two must
+line up. Pacing waits inside the recording (letting a roll settle, a log row appear, an
+animation finish) are the one place a long `waitForTimeout` is fine — comment them
+`// pacing:` so a reader knows it is deliberate, not a forgotten wait. Tear down whatever the
+action changed in a fresh context opened after `recordClip` returns, not visibly inside the
+recorded one: the 0.6 s tail records anything done on the recording page, so a teardown call
+placed there can land on camera and revert the resolved state before the trimmed mp4's last
+frame. Forced dice must be queued in the order the action consumes them.

@@ -15,14 +15,19 @@ port-3099/5199 recipe in #2128.
 ## Commands
 
 ```bash
-npm --prefix tests run brochure:capture                    # reseed + every capture
-npm --prefix tests run brochure:capture -- --grep dashboard # one row
+npm --prefix tests run brochure:capture                    # stills: reseed + every capture (excludes @clip)
+npm --prefix tests run brochure:capture -- --grep dashboard # one still row
+npm --prefix tests run brochure:clips                       # clips: reseed + record every @clip test + encode all eight
 npm --prefix tests run brochure:lane                       # hold the lane up for a look (Ctrl-C to stop)
 ```
 
 `brochure:lane` is `scripts/qa-stack.sh --reset` with the brochure ports and seed mode; the
 reset drops and rebuilds the database on every run (roughly a minute), so the fixture is
-always exactly what the seed says.
+always exactly what the seed says. `brochure:capture` runs the stills project
+(`--grep-invert @clip`) end to end; `brochure:clips` reseeds the lane, runs every `@clip` test
+(`brochure:clips:run`), then encodes every recording (`brochure:encode`) in one shot. To
+re-record or re-encode a single clip, see `.claude/skills/update-brochure/SKILL.md`'s Clip rows
+section for the two-step form.
 
 ## What the fixture contains
 
@@ -65,3 +70,9 @@ visibility engine caches would desync and the still would show a bug that does n
 - Stills are not byte-stable across runs (the masthead timer and animation frames
   differ), so a verification run rewrites committed WebPs. `node site/build.mjs --check`
   covers the HTML only. After a run you did not mean to keep, `git checkout -- site/assets`.
+- `tests/brochure/.video/` holds each clip's raw recording: `<slug>.webm` plus a `<slug>.json`
+  sidecar (`start`, `end`, `crop`) that `encode.mjs` reads; pass `--frames` to `brochure:encode`
+  and it also drops one PNG per second under `<slug>-frames/` for a look without opening the mp4.
+- A bare `--grep <slug>` passed through `brochure:clips:run` **replaces** the script's own
+  `--grep @clip`, so it matches that slug across every spec file in the lane, stills included —
+  anchor with `"<slug> @clip"` to select only the one clip test.
