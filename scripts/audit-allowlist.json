@@ -1,7 +1,7 @@
 {
   "$comment": [
     "Advisories that do NOT gate CI, with a written justification and a hard expiry.",
-    "Adding an entry here is a deliberate, reviewable act — never a silent suppression.",
+    "Adding an entry here is a deliberate, reviewable act \u2014 never a silent suppression.",
     "",
     "Rules enforced by scripts/audit-gate.mjs:",
     "  - An entry suppresses ONLY the named advisory in the named workspace.",
@@ -42,12 +42,20 @@
       "reason": "Dev-only, and NO upstream fix exists. extract-zip@2.0.1 is the LATEST published release (2023) and the advisory range is <=2.0.1, so there is nothing to upgrade or override to. Single path into this repo: @lhci/cli@0.15.1 -> lighthouse -> puppeteer-core -> @puppeteer/browsers -> extract-zip, where it unpacks browser archives fetched over HTTPS from Google's CDN -- not attacker-supplied zips, which is what the symlink-traversal advisory needs. npm's fixAvailable is @lhci/cli@0.1.0 flagged isSemVerMajor: a DOWNGRADE to a 2019-era Lighthouse CI that would break the lighthouse jobs to silence this -- the same trap as the tmp and js-yaml entries above. The root workspace has zero runtime dependencies (\"dependencies\": {}), so nothing here reaches the production image or a user; this code runs only when Lighthouse CI does. Clearing it properly means dropping @lhci/cli -- tracked in the issue above. This ONE entry now covers the whole chain: since #2388 audit-gate.mjs walks the `via` chain transitively, so lighthouse, puppeteer-core and @puppeteer/browsers -- none of which carry an advisory of their own -- are cleared by this entry instead of by three padding entries naming non-vulnerable packages."
     },
     {
+      "ghsa": "GHSA-7pqw-9j4j-h8q3",
+      "package": "extract-zip",
+      "workspaces": ["."],
+      "issue": 2159,
+      "expires": "2026-11-30",
+      "reason": "The SECOND advisory on the same extract-zip node as GHSA-jmr9-qjv8-65gv above, and un-suppressed only because #2397 requires one entry per advisory id rather than per package -- deliberately, since a package can carry several and covering one must not silently cover the rest. Same class (unvalidated symlink path traversal), same single path into this repo (@lhci/cli -> lighthouse -> puppeteer-core -> @puppeteer/browsers -> extract-zip), and the same reason it is unreachable here: extract-zip only unpacks browser archives fetched over HTTPS from Google's CDN during a Lighthouse CI run, never an attacker-supplied zip, which is what a symlink-traversal advisory needs. NO upstream fix exists -- extract-zip@2.0.1 (2023) is the latest published release and the advisory range is <=2.0.1, so there is nothing to upgrade or override to; npm's only offered fix is a semver-major DOWNGRADE of @lhci/cli that would break the lighthouse jobs. The root workspace has zero runtime dependencies, so this never reaches the production image or a user. Clearing it properly means dropping @lhci/cli, tracked in the issue above. Expiry matches its sibling so both come up for re-review together."
+    },
+    {
       "ghsa": "GHSA-w3rx-r6r6-pgpr",
       "package": "image-size",
       "workspaces": ["server"],
       "issue": 2225,
       "expires": "2026-11-30",
-      "reason": "Crafted-input infinite loop in image-size's ICNS/JXL/HEIF parsers; no fixed release exists upstream (fixAvailable: none). Made unreachable in this app by magic-byte gating BEFORE imageSize at both call sites: imageProcessing.ts already restricted uploads to png/jpeg/webp via fileTypeFromBuffer, and imageProbe.ts (the DM-supplied-URL path, the one reachable with attacker bytes) now applies the same buffer-sniffing gate (png/jpeg/webp/gif) — the content-type header is attacker-controlled and is deliberately not trusted. Unit test pins the ICNS case. Upstream fix tracked in the issue above; on expiry, re-review or replace the dependency."
+      "reason": "Crafted-input infinite loop in image-size's ICNS/JXL/HEIF parsers; no fixed release exists upstream (fixAvailable: none). Made unreachable in this app by magic-byte gating BEFORE imageSize at both call sites: imageProcessing.ts already restricted uploads to png/jpeg/webp via fileTypeFromBuffer, and imageProbe.ts (the DM-supplied-URL path, the one reachable with attacker bytes) now applies the same buffer-sniffing gate (png/jpeg/webp/gif) \u2014 the content-type header is attacker-controlled and is deliberately not trusted. Unit test pins the ICNS case. Upstream fix tracked in the issue above; on expiry, re-review or replace the dependency."
     },
     {
       "ghsa": "GHSA-5p2g-fcmc-qvqq",
@@ -55,7 +63,7 @@
       "workspaces": ["server"],
       "issue": 2225,
       "expires": "2026-11-30",
-      "reason": "Crafted-input infinite loop in image-size's ICNS/JXL/HEIF parsers; no fixed release exists upstream (fixAvailable: none). Made unreachable in this app by magic-byte gating BEFORE imageSize at both call sites: imageProcessing.ts already restricted uploads to png/jpeg/webp via fileTypeFromBuffer, and imageProbe.ts (the DM-supplied-URL path, the one reachable with attacker bytes) now applies the same buffer-sniffing gate (png/jpeg/webp/gif) — the content-type header is attacker-controlled and is deliberately not trusted. Unit test pins the ICNS case. Upstream fix tracked in the issue above; on expiry, re-review or replace the dependency."
+      "reason": "Crafted-input infinite loop in image-size's ICNS/JXL/HEIF parsers; no fixed release exists upstream (fixAvailable: none). Made unreachable in this app by magic-byte gating BEFORE imageSize at both call sites: imageProcessing.ts already restricted uploads to png/jpeg/webp via fileTypeFromBuffer, and imageProbe.ts (the DM-supplied-URL path, the one reachable with attacker bytes) now applies the same buffer-sniffing gate (png/jpeg/webp/gif) \u2014 the content-type header is attacker-controlled and is deliberately not trusted. Unit test pins the ICNS case. Upstream fix tracked in the issue above; on expiry, re-review or replace the dependency."
     }
   ]
 }
