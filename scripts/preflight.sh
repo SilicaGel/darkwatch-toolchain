@@ -236,7 +236,13 @@ EXPECTED_CI_HASH="6c03968d50f34369ab14145c9664f92ededdfa7e3a3fbbfe04679fc5babe54
 #  literally 'workflow_call' and the first version was silently dead here.)
 # (Reconciled 2026-08-28, #2358: same action-SHA normalisation as the ci.yml
 #  note above, applied to test.yml. Hash bump only — see there for the reasoning.)
-EXPECTED_TEST_HASH="1aa19998231e7b7040e971ae3362aaa19b06a8f0b6ecee96cbebdf5ede2386f6"
+# (Reconciled 2026-09-15, #2684: the `minio` SERVICE image moved off Docker Hub,
+#  which withdrew minio/minio when MinIO archived its OSS projects, onto our own
+#  multi-arch build at forge.example.com/aaron/darkwatch-minio. Reviewed the
+#  full test.yml diff before bumping: the ONLY non-comment change is that one
+#  `image:` line. No unit/integration step this script mirrors was touched, so
+#  there is nothing to reconcile here beyond the hash itself.)
+EXPECTED_TEST_HASH="d872d8f21c5eeeb39f8c31087590a73f623b7fffd767ff72904648ea7fa3ebe9"
 
 # --- setup ------------------------------------------------------------------
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || {

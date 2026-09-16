@@ -296,8 +296,27 @@ jobs:
             *) MINIO_ARCH=linux-amd64 ;;
           esac
           # #2010 — retrying helper, not a bare curl (see e2e-full.yml).
-          bash scripts/ci/fetch-binary.sh "https://dl.min.io/server/minio/release/${MINIO_ARCH}/minio" /tmp/minio
-          bash scripts/ci/fetch-binary.sh "https://dl.min.io/client/mc/release/${MINIO_ARCH}/mc" /tmp/mc
+          # #2684 — dl.min.io answers 410 Gone for every community release
+          # since MinIO archived its OSS projects; these are the same binaries
+          # from the still-served GitHub release assets, pinned to the exact
+          # versions dev and prod run. Full rationale in e2e-full.yml.
+          MINIO_VERSION=RELEASE.2025-04-08T15-41-24Z
+          MC_VERSION=RELEASE.2025-04-08T15-39-49Z
+          bash scripts/ci/fetch-binary.sh "https://github.com/minio/minio/releases/download/${MINIO_VERSION}/minio.${MINIO_ARCH}.${MINIO_VERSION}" /tmp/minio
+          bash scripts/ci/fetch-binary.sh "https://github.com/minio/mc/releases/download/${MC_VERSION}/mc.${MINIO_ARCH}.${MC_VERSION}" /tmp/mc
+          # Pinned digests, verified before chmod +x — see e2e-full.yml for why
+          # they are pinned here rather than read from the release's .sha256sum.
+          case "$MINIO_ARCH" in
+            linux-amd64)
+              MINIO_SHA=aa479bd2456d0722a6737f82a1cf193aa60f934269573a6a7e024aebe1069243
+              MC_SHA=43d44d801a936e48390c8d2dc02c1c1cc1e973becbe71897f28ca06a9f456489 ;;
+            linux-arm64)
+              MINIO_SHA=efce312e379102256112e5ec0c310348239725f20baa245631c9a110ec6d974c
+              MC_SHA=ac7448b6d3188fb94cea48c762d700584e7a0e467e21e1be4cfc823755c026eb ;;
+            *) echo "unsupported MINIO_ARCH: $MINIO_ARCH" >&2; exit 1 ;;
+          esac
+          echo "${MINIO_SHA}  /tmp/minio" | sha256sum -c -
+          echo "${MC_SHA}  /tmp/mc" | sha256sum -c -
           chmod +x /tmp/minio /tmp/mc
           mkdir -p /tmp/minio-data
           /tmp/minio server /tmp/minio-data >/tmp/minio.log 2>&1 &
