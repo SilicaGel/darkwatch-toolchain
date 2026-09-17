@@ -150,6 +150,35 @@ describe("pins — the copies that cannot import the resolver", () => {
     assert.match(compose, /--console-address ":9001"/);
   });
 
+  test("darkwatch-maria's healthcheck actually verifies it can serve queries (#2689)", () => {
+    // #2679 gave darkwatch-maria a healthcheck so `docker compose up --wait`
+    // blocks until the DB can actually serve queries. This is a silent
+    // mechanism: deleting the healthcheck block, or weakening the probe to a
+    // bare `--connect`, doesn't fail loudly — `docker compose up --wait`
+    // still exits 0 (Docker treats "no healthcheck" as healthy), and the
+    // next failure surfaces as `connect ECONNREFUSED 127.0.0.1:3397` out of
+    // runMigrations, which reads as a code fault rather than a not-ready DB.
+    //
+    // `--connect` alone only proves the port is open; `--innodb_initialized`
+    // is what proves it can serve queries — that's the exact distinction a
+    // weakening would erase, so both must be present, not just a
+    // `healthcheck:` key.
+    const compose = repoFile("docker-compose.yml");
+    const serviceMatch = compose.match(/ {2}darkwatch-maria:\n([\s\S]*?)\n {2}\S/);
+    assert.ok(serviceMatch, "darkwatch-maria service block not found in docker-compose.yml");
+    const service = serviceMatch[1];
+    assert.match(
+      service,
+      /healthcheck:/,
+      "darkwatch-maria has no healthcheck: block — docker compose up --wait will return before the DB can serve queries",
+    );
+    assert.match(
+      service,
+      /test:\s*\[.*"healthcheck\.sh".*"--connect".*"--innodb_initialized".*\]/,
+      "darkwatch-maria's healthcheck probe dropped --innodb_initialized — it now only proves the port is open, not that the DB can serve queries",
+    );
+  });
+
   test(".env.example carries the block's values", () => {
     const env = repoFile(".env.example");
     assert.match(env, new RegExp(`^CLIENT_URL=${devUrl(PORTS.client)}$`, "m"));
