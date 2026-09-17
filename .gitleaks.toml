@@ -1,0 +1,17 @@
+# gitleaks configuration.
+#
+# The only findings in this repo are Socket.dev alert identifiers inside the
+# supply-chain scanner's test fixtures. They are content-addressed IDs for alert
+# TYPES (envVars, gptDidYouMean, and so on), not credentials, but they are
+# high-entropy base64 so the generic-api-key rule fires on all 52 of them.
+#
+# Allowlisted by path, and ONLY under __fixtures__. The default rule set is left
+# exactly as shipped: redefining a rule to make it quieter would weaken the
+# scanner everywhere else, which is the failure this repo keeps writing about.
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Socket.dev sample scan output used as test fixtures"
+paths = ['''scripts/supply-chain-comment/__fixtures__/.*\.json''']
