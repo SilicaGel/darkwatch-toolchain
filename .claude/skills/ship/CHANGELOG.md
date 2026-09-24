@@ -28,9 +28,9 @@
   unconditionally.
 
   **A `merge=union` driver was built for this and rejected** (#2165). It would
-  have removed the conflict entirely, but `docs/CHANGELOG.md` is a *record* —
-  an ordered history plus the version `app-version.mjs` reports as
-  `APP_VERSION` on `/health` — and a driver that makes the merge succeed
+  have removed the conflict entirely, but `docs/CHANGELOG.md` is a *record*
+  (an ordered history plus the version `app-version.mjs` reports as
+  `APP_VERSION` on `/health`), and a driver that makes the merge succeed
   whether or not the result is right removes the only signal that something
   went wrong. It also silently garbles an edit-vs-edit collision on the same
   existing entry (the same-day "extend in place" flow from two branches).
