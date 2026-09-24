@@ -244,6 +244,11 @@ It has a blind spot. This project's convention is that a follow-up on a closed
 issue gets **filed as a new issue** rather than reopening the old one, so the
 failure class the tool exists to catch never reaches the reopen counter.
 
+A deep audit in September made the blind spot concrete: fourteen of its
+findings were fixes that had stopped one instance short of their siblings,
+and because each was filed as a fresh issue under the convention above, the
+reopen check had flagged none of them.
+
 Measuring the gap across all 1,684 issues: seven tight loops are visible to the
 tool as reopens, and roughly seven more are invisible, filed as fresh issues
 within a week of their parent closing. The tool sees about half of what it was
